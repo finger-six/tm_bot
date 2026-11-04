@@ -1,0 +1,14 @@
+# Large local corpora: never commit the raw Terraforming Mars game logs.
+# The archive is 3.9 GB zipped and ~156 GB / 112k JSON files extracted.
+# Process it locally in batches; commit only small, deliberate fixtures.
+game-logs-archive-*/
+game-logs-archive-*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.conda-env
+
+# Node
+node_modules/
