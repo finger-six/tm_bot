@@ -20,6 +20,10 @@ A game used to measure an agent's playing strength against fixed opponents or an
 **Training format**:
 Two-player Terraforming Mars with drafting and Prelude as the only expansion, played on Tharsis, Elysium, Hellas, Vastitas Borealis, or Amazonis Planitia.
 
+**Supported map**:
+A map whose rules are verified against the project's accepted fidelity bar, and so is eligible for training and evaluation games. Currently Tharsis, Elysium, Hellas, and Vastitas Borealis (Nova variant).
+_Avoid_: Available map, playable map.
+
 **Jev-inspired agent**:
 An independently trained local Terraforming Mars agent inspired by structured decisions and probability outputs; it is a comparison agent, not a reproduction of TypeSafe AI's proprietary Jev model.
 
