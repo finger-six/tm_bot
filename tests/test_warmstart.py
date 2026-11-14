@@ -585,7 +585,7 @@ def _play_until_gen(client: WorkerClient, gid: str, max_gen: int, on_decision) -
 
 
 def test_builder_values_match_live_adapter():
-    """Setup (seat 0) observations are tensor-identical to the adapter; draft observations in gens
+    """Setup observations (both seats) are tensor-identical to the adapter; draft observations in gens
     2-3 match on every reconstructable slot, the turn-order scalars and the opponent's public setup."""
     cards = load_card_data()
     vocab = CardVocab.from_card_data(cards)
@@ -600,13 +600,13 @@ def test_builder_values_match_live_adapter():
         if ptype == "initial_corp":
             st.update(c=list(pr["dealtCorporationCards"]), p=list(pr["dealtPreludeCards"]), j=list(pr["dealtProjectCards"]))
         live_enc = encode_observation(obs, vocab)
-        if s == 0 and ptype in ("initial_corp", "initial_prelude", "initial_project_buy"):
+        if ptype in ("initial_corp", "initial_prelude", "initial_project_buy"):
             if ptype == "initial_corp":
-                so, sch = build_corp_choice("tharsis", 0, st["c"], st["p"], st["j"])
+                so, sch = build_corp_choice("tharsis", s, st["c"], st["p"], st["j"])
             elif ptype == "initial_prelude":
-                so, sch = build_prelude_choice("tharsis", 0, st["c"], st["p"], st["j"], picked_preludes=st["prel"])
+                so, sch = build_prelude_choice("tharsis", s, st["c"], st["p"], st["j"], picked_preludes=st["prel"])
             else:
-                so, sch = build_project_buy_choice("tharsis", 0, st["c"], st["p"], st["j"], picked_projects=st["proj"])
+                so, sch = build_project_buy_choice("tharsis", s, st["c"], st["p"], st["j"], picked_projects=st["proj"])
             syn_enc = encode_observation(so, vocab)
             np.testing.assert_allclose(syn_enc.obs_scalars, live_enc.obs_scalars, err_msg=ptype)
             assert _tokens(syn_enc, vocab) == _tokens(live_enc, vocab), ptype
@@ -672,7 +672,7 @@ def test_builder_values_match_live_adapter():
         finally:
             client.close_game(gid)
 
-    assert checked["setup"] >= 5
+    assert checked["setup"] >= 10
     assert checked["draft"] >= 6
     assert checked["draft_with_history"] >= 4
 
