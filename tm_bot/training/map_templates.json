@@ -1,0 +1,3874 @@
+{
+  "tharsis": {
+    "spaces": [
+      {
+        "id": "01",
+        "x": -1,
+        "y": -1,
+        "spaceType": "colony",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "02",
+        "x": -1,
+        "y": -1,
+        "spaceType": "colony",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "03",
+        "x": 4,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "04",
+        "x": 5,
+        "y": 0,
+        "spaceType": "ocean",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "05",
+        "x": 6,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "06",
+        "x": 7,
+        "y": 0,
+        "spaceType": "ocean",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "07",
+        "x": 8,
+        "y": 0,
+        "spaceType": "ocean",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "08",
+        "x": 3,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "09",
+        "x": 4,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "10",
+        "x": 5,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "11",
+        "x": 6,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "12",
+        "x": 7,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "13",
+        "x": 8,
+        "y": 1,
+        "spaceType": "ocean",
+        "bonus": [
+          3,
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "14",
+        "x": 2,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "15",
+        "x": 3,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "16",
+        "x": 4,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "17",
+        "x": 5,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "18",
+        "x": 6,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "19",
+        "x": 7,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "20",
+        "x": 8,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "21",
+        "x": 1,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "22",
+        "x": 2,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "23",
+        "x": 3,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "24",
+        "x": 4,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "25",
+        "x": 5,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "26",
+        "x": 6,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "27",
+        "x": 7,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "28",
+        "x": 8,
+        "y": 3,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "29",
+        "x": 0,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "30",
+        "x": 1,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "31",
+        "x": 2,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "noctis",
+        "rotated": false
+      },
+      {
+        "id": "32",
+        "x": 3,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "33",
+        "x": 4,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "34",
+        "x": 5,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "35",
+        "x": 6,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "36",
+        "x": 7,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "37",
+        "x": 8,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "38",
+        "x": 1,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "39",
+        "x": 2,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "40",
+        "x": 3,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "41",
+        "x": 4,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "42",
+        "x": 5,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "43",
+        "x": 6,
+        "y": 5,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "44",
+        "x": 7,
+        "y": 5,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "45",
+        "x": 8,
+        "y": 5,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "46",
+        "x": 2,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "47",
+        "x": 3,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "48",
+        "x": 4,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "49",
+        "x": 5,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "50",
+        "x": 6,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "51",
+        "x": 7,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "52",
+        "x": 8,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "53",
+        "x": 3,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "54",
+        "x": 4,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "55",
+        "x": 5,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "56",
+        "x": 6,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "57",
+        "x": 7,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "58",
+        "x": 8,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "59",
+        "x": 4,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "60",
+        "x": 5,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "61",
+        "x": 6,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "62",
+        "x": 7,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "63",
+        "x": 8,
+        "y": 8,
+        "spaceType": "ocean",
+        "bonus": [
+          0,
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      }
+    ],
+    "milestones": [
+      {
+        "name": "Terraformer",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 20,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 20,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Mayor",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Gardener",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Builder",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Planner",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      }
+    ],
+    "awards": [
+      {
+        "name": "Landlord",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Scientist",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Banker",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Thermalist",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Miner",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      }
+    ],
+    "deckSize": 195,
+    "otherDeckSizes": {
+      "corporations": {
+        "drawPile": 13,
+        "discardPile": 0
+      },
+      "preludes": {
+        "drawPile": 27,
+        "discardPile": 0
+      }
+    }
+  },
+  "elysium": {
+    "spaces": [
+      {
+        "id": "01",
+        "x": -1,
+        "y": -1,
+        "spaceType": "colony",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "02",
+        "x": -1,
+        "y": -1,
+        "spaceType": "colony",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "03",
+        "x": 4,
+        "y": 0,
+        "spaceType": "ocean",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "04",
+        "x": 5,
+        "y": 0,
+        "spaceType": "ocean",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "05",
+        "x": 6,
+        "y": 0,
+        "spaceType": "ocean",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "06",
+        "x": 7,
+        "y": 0,
+        "spaceType": "ocean",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "07",
+        "x": 8,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "08",
+        "x": 3,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "09",
+        "x": 4,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "10",
+        "x": 5,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "11",
+        "x": 6,
+        "y": 1,
+        "spaceType": "ocean",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "12",
+        "x": 7,
+        "y": 1,
+        "spaceType": "ocean",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "13",
+        "x": 8,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "14",
+        "x": 2,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          0,
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "15",
+        "x": 3,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "16",
+        "x": 4,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "17",
+        "x": 5,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "18",
+        "x": 6,
+        "y": 2,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "19",
+        "x": 7,
+        "y": 2,
+        "spaceType": "ocean",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "20",
+        "x": 8,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          3,
+          3,
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "21",
+        "x": 1,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "22",
+        "x": 2,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "23",
+        "x": 3,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "24",
+        "x": 4,
+        "y": 3,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "25",
+        "x": 5,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "26",
+        "x": 6,
+        "y": 3,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "27",
+        "x": 7,
+        "y": 3,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "28",
+        "x": 8,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "29",
+        "x": 0,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "30",
+        "x": 1,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "31",
+        "x": 2,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "32",
+        "x": 3,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "33",
+        "x": 4,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "34",
+        "x": 5,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "35",
+        "x": 6,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "36",
+        "x": 7,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "37",
+        "x": 8,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "38",
+        "x": 1,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "39",
+        "x": 2,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "40",
+        "x": 3,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "41",
+        "x": 4,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "42",
+        "x": 5,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "43",
+        "x": 6,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "44",
+        "x": 7,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "45",
+        "x": 8,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "46",
+        "x": 2,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "47",
+        "x": 3,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "48",
+        "x": 4,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "49",
+        "x": 5,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "50",
+        "x": 6,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "51",
+        "x": 7,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "52",
+        "x": 8,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "53",
+        "x": 3,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "54",
+        "x": 4,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "55",
+        "x": 5,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "56",
+        "x": 6,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "57",
+        "x": 7,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "58",
+        "x": 8,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "59",
+        "x": 4,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "60",
+        "x": 5,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "61",
+        "x": 6,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "62",
+        "x": 7,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "63",
+        "x": 8,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      }
+    ],
+    "milestones": [
+      {
+        "name": "Generalist",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Specialist",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Ecologist",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Tycoon",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Legend",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      }
+    ],
+    "awards": [
+      {
+        "name": "Celebrity",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Industrialist",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Desert Settler",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Estate Dealer",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Benefactor",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 20
+          },
+          {
+            "seat": 1,
+            "score": 20
+          }
+        ]
+      }
+    ],
+    "deckSize": 195,
+    "otherDeckSizes": {
+      "corporations": {
+        "drawPile": 13,
+        "discardPile": 0
+      },
+      "preludes": {
+        "drawPile": 27,
+        "discardPile": 0
+      }
+    }
+  },
+  "hellas": {
+    "spaces": [
+      {
+        "id": "01",
+        "x": -1,
+        "y": -1,
+        "spaceType": "colony",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "02",
+        "x": -1,
+        "y": -1,
+        "spaceType": "colony",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "03",
+        "x": 4,
+        "y": 0,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "04",
+        "x": 5,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "05",
+        "x": 6,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "06",
+        "x": 7,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "07",
+        "x": 8,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "08",
+        "x": 3,
+        "y": 1,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "09",
+        "x": 4,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "10",
+        "x": 5,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "11",
+        "x": 6,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "12",
+        "x": 7,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "13",
+        "x": 8,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "14",
+        "x": 2,
+        "y": 2,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "15",
+        "x": 3,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "16",
+        "x": 4,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "17",
+        "x": 5,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "18",
+        "x": 6,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "19",
+        "x": 7,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "20",
+        "x": 8,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "21",
+        "x": 1,
+        "y": 3,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "22",
+        "x": 2,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "23",
+        "x": 3,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "24",
+        "x": 4,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "25",
+        "x": 5,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "26",
+        "x": 6,
+        "y": 3,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "27",
+        "x": 7,
+        "y": 3,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "28",
+        "x": 8,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "29",
+        "x": 0,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "30",
+        "x": 1,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "31",
+        "x": 2,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "32",
+        "x": 3,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "33",
+        "x": 4,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "34",
+        "x": 5,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "35",
+        "x": 6,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [
+          4,
+          4,
+          4
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "36",
+        "x": 7,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "37",
+        "x": 8,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "38",
+        "x": 1,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "39",
+        "x": 2,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "40",
+        "x": 3,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "41",
+        "x": 4,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "42",
+        "x": 5,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "43",
+        "x": 6,
+        "y": 5,
+        "spaceType": "ocean",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "44",
+        "x": 7,
+        "y": 5,
+        "spaceType": "ocean",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "45",
+        "x": 8,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "46",
+        "x": 2,
+        "y": 6,
+        "spaceType": "ocean",
+        "bonus": [
+          0,
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "47",
+        "x": 3,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "48",
+        "x": 4,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "49",
+        "x": 5,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "50",
+        "x": 6,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "51",
+        "x": 7,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "52",
+        "x": 8,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "53",
+        "x": 3,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "54",
+        "x": 4,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "55",
+        "x": 5,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          4,
+          4
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "56",
+        "x": 6,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          4,
+          4
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "57",
+        "x": 7,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "58",
+        "x": 8,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "59",
+        "x": 4,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "60",
+        "x": 5,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          4,
+          4
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "61",
+        "x": 6,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          5
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "62",
+        "x": 7,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          4,
+          4
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "63",
+        "x": 8,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      }
+    ],
+    "milestones": [
+      {
+        "name": "Diversifier",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Tactician",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Polar Explorer",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Energizer",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Rim Settler",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      }
+    ],
+    "awards": [
+      {
+        "name": "Cultivator",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Magnate",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Space Baron",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Excentric",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Contractor",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      }
+    ],
+    "deckSize": 195,
+    "otherDeckSizes": {
+      "corporations": {
+        "drawPile": 13,
+        "discardPile": 0
+      },
+      "preludes": {
+        "drawPile": 27,
+        "discardPile": 0
+      }
+    }
+  },
+  "vastitas borealis nova": {
+    "spaces": [
+      {
+        "id": "01",
+        "x": -1,
+        "y": -1,
+        "spaceType": "colony",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "02",
+        "x": -1,
+        "y": -1,
+        "spaceType": "colony",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "03",
+        "x": 4,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "04",
+        "x": 5,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "05",
+        "x": 6,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "06",
+        "x": 7,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "07",
+        "x": 8,
+        "y": 0,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "08",
+        "x": 3,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "09",
+        "x": 4,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "10",
+        "x": 5,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "11",
+        "x": 6,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "12",
+        "x": 7,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "13",
+        "x": 8,
+        "y": 1,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "14",
+        "x": 2,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "15",
+        "x": 3,
+        "y": 2,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "16",
+        "x": 4,
+        "y": 2,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "17",
+        "x": 5,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "18",
+        "x": 6,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "19",
+        "x": 7,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "20",
+        "x": 8,
+        "y": 2,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "21",
+        "x": 1,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          1,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "22",
+        "x": 2,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "23",
+        "x": 3,
+        "y": 3,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "24",
+        "x": 4,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "25",
+        "x": 5,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "26",
+        "x": 6,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "27",
+        "x": 7,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "28",
+        "x": 8,
+        "y": 3,
+        "spaceType": "land",
+        "bonus": [
+          16
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "29",
+        "x": 0,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "30",
+        "x": 1,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "31",
+        "x": 2,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "32",
+        "x": 3,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "33",
+        "x": 4,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          18
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "34",
+        "x": 5,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "35",
+        "x": 6,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "36",
+        "x": 7,
+        "y": 4,
+        "spaceType": "ocean",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "37",
+        "x": 8,
+        "y": 4,
+        "spaceType": "land",
+        "bonus": [
+          3,
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "38",
+        "x": 1,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          3,
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "39",
+        "x": 2,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "40",
+        "x": 3,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "41",
+        "x": 4,
+        "y": 5,
+        "spaceType": "ocean",
+        "bonus": [
+          4,
+          4
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "42",
+        "x": 5,
+        "y": 5,
+        "spaceType": "ocean",
+        "bonus": [
+          4,
+          4,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "43",
+        "x": 6,
+        "y": 5,
+        "spaceType": "ocean",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "44",
+        "x": 7,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "45",
+        "x": 8,
+        "y": 5,
+        "spaceType": "land",
+        "bonus": [
+          0,
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "46",
+        "x": 2,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": "volcanic",
+        "rotated": false
+      },
+      {
+        "id": "47",
+        "x": 3,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "48",
+        "x": 4,
+        "y": 6,
+        "spaceType": "ocean",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "49",
+        "x": 5,
+        "y": 6,
+        "spaceType": "ocean",
+        "bonus": [
+          4,
+          4
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "50",
+        "x": 6,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "51",
+        "x": 7,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "52",
+        "x": 8,
+        "y": 6,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "53",
+        "x": 3,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "54",
+        "x": 4,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "55",
+        "x": 5,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "56",
+        "x": 6,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          2,
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "57",
+        "x": 7,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "58",
+        "x": 8,
+        "y": 7,
+        "spaceType": "land",
+        "bonus": [
+          2
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "59",
+        "x": 4,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          16
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "60",
+        "x": 5,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "61",
+        "x": 6,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          3
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "62",
+        "x": 7,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          1
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      },
+      {
+        "id": "63",
+        "x": 8,
+        "y": 8,
+        "spaceType": "land",
+        "bonus": [
+          0
+        ],
+        "tileType": null,
+        "owner": null,
+        "highlight": null,
+        "rotated": false
+      }
+    ],
+    "milestones": [
+      {
+        "name": "Agronomist",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "V. Spacefarer",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Geologist",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Engineer",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      },
+      {
+        "name": "Farmer",
+        "claimedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0,
+            "claimable": false
+          },
+          {
+            "seat": 1,
+            "score": 0,
+            "claimable": false
+          }
+        ]
+      }
+    ],
+    "awards": [
+      {
+        "name": "Traveller",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Landscaper",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Highlander",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Promoter",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      },
+      {
+        "name": "Blacksmith",
+        "fundedBy": null,
+        "scores": [
+          {
+            "seat": 0,
+            "score": 0
+          },
+          {
+            "seat": 1,
+            "score": 0
+          }
+        ]
+      }
+    ],
+    "deckSize": 195,
+    "otherDeckSizes": {
+      "corporations": {
+        "drawPile": 13,
+        "discardPile": 0
+      },
+      "preludes": {
+        "drawPile": 27,
+        "discardPile": 0
+      }
+    }
+  }
+}
