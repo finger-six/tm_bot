@@ -248,6 +248,7 @@ class PrivateObservation(TypedDict):
     preludeCardsInHand: list[str]
     draftedCards: list[str]
     currentDraftPacket: list[str]
+    pendingCardSelection: list[str]
 
 
 class InitialBuyHistory(TypedDict):

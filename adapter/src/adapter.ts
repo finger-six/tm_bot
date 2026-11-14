@@ -579,6 +579,17 @@ export class GameAdapter implements AdapterGame {
     }
 
     const clonedEngine = Game.deserialize(JSON.parse(this.checkpointJson) as SerializedGame);
+    for (const p of clonedEngine.players) {
+      const mp = p as unknown as {
+        pendingInitialActions?: Array<{name: CardName}>;
+        tableau: {get(name: CardName): {name: CardName} | undefined};
+      };
+      if (mp.pendingInitialActions !== undefined && mp.pendingInitialActions.length > 0) {
+        mp.pendingInitialActions = mp.pendingInitialActions.map(
+          (c) => mp.tableau.get(c.name) ?? c,
+        );
+      }
+    }
     let detCursor = 0;
     while (
       detCursor < this.determinizations.length &&

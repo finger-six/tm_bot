@@ -218,6 +218,7 @@ export interface ActorObservation {
     readonly preludeCardsInHand: ReadonlyArray<string>;
     readonly draftedCards: ReadonlyArray<string>;
     readonly currentDraftPacket: ReadonlyArray<string>;
+    readonly pendingCardSelection: ReadonlyArray<string>;
   };
   readonly history: ActorHistory;
 }
@@ -258,6 +259,7 @@ export interface SampledWorld {
   readonly opponentDraftHand?: ReadonlyArray<string>;
   readonly opponentDrafted?: ReadonlyArray<string>;
   readonly opponentResearchOffer?: ReadonlyArray<string>;
+  readonly seed?: number;
 }
 
 export interface CreateGameOptions {

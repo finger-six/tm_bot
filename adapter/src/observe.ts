@@ -1,10 +1,12 @@
 import {
+  CardName,
   Color,
   IGame,
   Phase,
   SelectCard,
   Server,
 } from './engine';
+import {formatEngineTitle} from './factor';
 import {
   ActorHistory,
   ActorObservation,
@@ -293,6 +295,36 @@ export function buildActorObservation(
     }
   }
 
+  let pendingCardSelection: Array<string> = [];
+  if (
+    engineGame.phase !== Phase.DRAFTING &&
+    engineGame.phase !== Phase.INITIALDRAFTING &&
+    !(engineGame.phase === Phase.RESEARCH && model.game.generation >= 2)
+  ) {
+    const waiting = actorPlayer.getWaitingFor();
+    if (waiting !== undefined && waiting.type === 'card') {
+      const offered = (waiting as SelectCard).cards.map((c) => c.name).sort(compareStrings);
+      const inHand = new Set<string>([
+        ...actorPlayer.cardsInHand,
+        ...actorPlayer.preludeCardsInHand,
+      ].map((c) => c.name));
+      const isKnown = (name: string): boolean =>
+        inHand.has(name) || engineGame.players.some((p) => p.tableau.has(name as CardName));
+      if (offered.some((name) => !isKnown(name))) {
+        pendingCardSelection = offered;
+      }
+    } else if (
+      waiting !== undefined &&
+      waiting.type === 'payment' &&
+      /^Select how to spend \d+ M\u20ac for \d+ cards$/.test(formatEngineTitle(waiting.title)) &&
+      history.cardSelections.length > 0
+    ) {
+      pendingCardSelection = history.cardSelections[history.cardSelections.length - 1].offered
+        .slice()
+        .sort(compareStrings);
+    }
+  }
+
   return {
     actor: seat,
     public: {
@@ -337,6 +369,7 @@ export function buildActorObservation(
       preludeCardsInHand: model.preludeCardsInHand.map((c) => c.name).sort(compareStrings),
       draftedCards,
       currentDraftPacket,
+      pendingCardSelection,
     },
     history: cloneHistory(history),
   };

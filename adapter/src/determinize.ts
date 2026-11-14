@@ -1,5 +1,6 @@
 import {buildTrainingGameOptions} from './config';
 import {
+  CardNames,
   GameCards,
   ICorporationCard,
   IGame,
@@ -265,13 +266,20 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
       oppFizzledPreludes += 1;
     }
   }
+  const actorHeldProjects = new Set<string>();
+  for (const c of obs.private.pendingCardSelection) {
+    if (pools.projectSet.has(c)) {
+      actorHeldProjects.add(c);
+    } else if (pools.preludeSet.has(c)) {
+      knownPreludes.add(c);
+    }
+  }
   const unseenPreludes = pools.preludeNames.filter((p) => !knownPreludes.has(p));
   const opponentPreludeHandSize = oppInitialBuyComplete
     ? Math.max(0, 2 - (oppTableauPreludesCount + oppFizzledPreludes))
     : 0;
 
   // ---- Actor-held project cards ----
-  const actorHeldProjects = new Set<string>();
   for (const h of obs.private.cardsInHand) actorHeldProjects.add(h.name);
   if (actorInitialBuy === null) {
     for (const c of obs.private.dealtProjectCards) actorHeldProjects.add(c);
@@ -311,6 +319,8 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
     }
   }
 
+  const oppHasMarsMaths = obs.public.players[opp].tableau.some((tc) => tc.name === CardNames.MARS_MATHS);
+
   // ---- Active draft / research constraints on opponent ----
   let opponentDraftHandSize = 0;
   let opponentDraftedSize = 0;
@@ -324,11 +334,9 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
 
   if (obs.public.phase === Phase.DRAFTING) {
     const genDrafts = draftsByGen.get(obs.public.generation) ?? [];
-    let curRound: number;
-    if (obs.private.currentDraftPacket.length > 0) {
-      curRound = 5 - obs.private.currentDraftPacket.length;
-    } else {
-      curRound = genDrafts.length;
+    const hasCurrentPacket = obs.private.currentDraftPacket.length > 0;
+    const curRound = hasCurrentPacket ? genDrafts.length + 1 : Math.max(1, genDrafts.length);
+    if (!hasCurrentPacket) {
       const latest = genDrafts[genDrafts.length - 1];
       if (latest !== undefined) {
         for (const c of latest.passed) {
@@ -336,18 +344,32 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
         }
       }
     }
-    opponentDraftHandSize = Math.max(0, 5 - curRound);
-    opponentDraftedSize = Math.max(0, curRound - 1);
 
-    if (curRound === 2 && genDrafts[0] !== undefined) {
+    const totalOppDraftCards = Math.max(
+      0,
+      pools.projectNames.length -
+        tableauProjects.size -
+        actorHeldProjects.size -
+        actorWaitingToPass.size -
+        obs.public.players[opp].cardsInHandCount -
+        obs.public.deckSize -
+        obs.public.discardPileSize,
+    );
+
+    if (curRound === 1) {
+      opponentDraftHandSize = totalOppDraftCards;
+      opponentDraftedSize = 0;
+    } else if (curRound === 2 && genDrafts[0] !== undefined) {
       for (const c of genDrafts[0].passed) {
         knownOpponentDraftHandSet.add(c);
       }
+      opponentDraftHandSize = genDrafts[0].passed.length;
+      opponentDraftedSize = Math.max(0, totalOppDraftCards - opponentDraftHandSize);
     } else if (curRound === 3 && genDrafts[0] !== undefined && genDrafts[1] !== undefined) {
       for (const c of genDrafts[1].passed) {
         knownOpponentDraftHandSet.add(c);
       }
-      const r3Packet = obs.private.currentDraftPacket.length > 0
+      const r3Packet = hasCurrentPacket
         ? obs.private.currentDraftPacket
         : (genDrafts[2]?.packet ?? []);
       if (r3Packet.length > 0) {
@@ -355,16 +377,29 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
           knownOpponentDraftedSet.add(c);
         }
       }
+      opponentDraftHandSize = genDrafts[1].passed.length;
+      opponentDraftedSize = Math.max(0, totalOppDraftCards - opponentDraftHandSize);
+    } else {
+      opponentDraftHandSize = Math.max(0, 5 - curRound);
+      opponentDraftedSize = Math.max(0, totalOppDraftCards - opponentDraftHandSize);
     }
   } else if (obs.public.phase === Phase.RESEARCH && obs.public.generation >= 2) {
     const oppBuy = oppResearchBuyByGen.get(obs.public.generation);
     if (oppBuy === undefined) {
+      opponentResearchOfferSize = Math.max(
+        0,
+        pools.projectNames.length -
+          tableauProjects.size -
+          actorHeldProjects.size -
+          obs.public.players[opp].cardsInHandCount -
+          obs.public.deckSize -
+          obs.public.discardPileSize,
+      );
       const genDrafts = draftsByGen.get(obs.public.generation) ?? [];
       const d1 = genDrafts[0];
       const d2 = genDrafts[1];
       const d3 = genDrafts[2];
       const actorOffer = researchOfferByGen.get(obs.public.generation) ?? [];
-      opponentResearchOfferSize = actorOffer.length > 0 ? actorOffer.length : 4;
       if (d1 !== undefined && d2 !== undefined && d3 !== undefined) {
         for (const c of subtractCards(d1.passed, d3.packet)) {
           knownOpponentResearchSet.add(c);
@@ -376,6 +411,20 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
           }
         }
         for (const c of d3.passed) {
+          knownOpponentResearchSet.add(c);
+        }
+      } else if (d1 !== undefined && d2 !== undefined) {
+        if (actorOffer.length > 0) {
+          const aR3 = subtractCards(actorOffer, [...d1.taken, ...d2.taken]);
+          for (const c of subtractCards(d1.passed, aR3)) {
+            knownOpponentResearchSet.add(c);
+          }
+        }
+        for (const c of d2.passed) {
+          knownOpponentResearchSet.add(c);
+        }
+      } else if (d1 !== undefined) {
+        for (const c of d1.passed) {
           knownOpponentResearchSet.add(c);
         }
       }
@@ -392,13 +441,6 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
   const knownOppHandSet = new Set<string>();
   const possibleOppHandSet = new Set<string>();
   const knownDiscardSet = new Set<string>();
-
-  // Helper: is an event in `generation` definitely after the last reshuffle?
-  const isReshuffleBeforeGenResearch = (gen: number, buyLogIdx?: number): boolean => {
-    if (lastReshuffleIdx === -1) return true;
-    if (buyLogIdx !== undefined) return buyLogIdx > lastReshuffleIdx;
-    return gen > lastReshuffleGen;
-  };
 
   // Initial buy discards by actor (Gen 1, occurs before Gen 2).
   if (actorInitialBuy !== null) {
@@ -443,7 +485,7 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
     return discardedAfterEvent ? 'possibleOppHand' : 'knownOppHand';
   };
 
-  // Completed draft generations: classify the 3 cards opp held in Gen g Research
+  // Completed draft generations: classify the known cards opp held in Gen g Research
   for (const [gen, genDrafts] of draftsByGen.entries()) {
     const oppBuy = oppResearchBuyByGen.get(gen);
     if (oppBuy === undefined) {
@@ -452,32 +494,43 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
     const d1 = genDrafts[0];
     const d2 = genDrafts[1];
     const d3 = genDrafts[2];
-    if (d1 === undefined || d2 === undefined || d3 === undefined) {
+    if (d1 === undefined) {
       continue;
     }
-    const known3: Array<string> = [...subtractCards(d1.passed, d3.packet), ...d3.passed];
+    const knownOppResearchCards: Array<string> = [];
     const actorOffer = researchOfferByGen.get(gen);
-    if (actorOffer !== undefined && actorOffer.length > 0) {
-      const aR4 = subtractCards(actorOffer, [...d1.taken, ...d2.taken, ...d3.taken]);
-      known3.push(...subtractCards(d2.passed, aR4));
+    if (d2 !== undefined && d3 !== undefined) {
+      knownOppResearchCards.push(...subtractCards(d1.passed, d3.packet), ...d3.passed);
+      if (actorOffer !== undefined && actorOffer.length > 0) {
+        const aR4 = subtractCards(actorOffer, [...d1.taken, ...d2.taken, ...d3.taken]);
+        knownOppResearchCards.push(...subtractCards(d2.passed, aR4));
+      } else {
+        knownOppResearchCards.push(...d2.passed);
+      }
+    } else if (d2 !== undefined) {
+      knownOppResearchCards.push(...d2.passed);
+      if (actorOffer !== undefined && actorOffer.length > 0) {
+        const aR3 = subtractCards(actorOffer, [...d1.taken, ...d2.taken]);
+        knownOppResearchCards.push(...subtractCards(d1.passed, aR3));
+      }
     } else {
-      // Edge fallback: both cards of d2.passed if actor offer wasn't found
-      known3.push(...d2.passed);
+      knownOppResearchCards.push(...d1.passed);
     }
 
     const noReshuffleSince = oppBuy.logIdx > lastReshuffleIdx;
+    const oppBoughtFullOffer = oppHasMarsMaths ? oppBuy.count >= 5 : oppBuy.count >= 4;
 
     if (oppBuy.count === 0) {
       if (noReshuffleSince) {
-        for (const c of known3) {
+        for (const c of knownOppResearchCards) {
           if (!isLocatedElsewhere(c) && !isInOppActiveZone(c)) {
             knownDiscardSet.add(c);
           }
         }
       }
-    } else if (oppBuy.count >= 4) {
+    } else if (oppBoughtFullOffer) {
       const status = classifyOppHandSince(oppBuy.logIdx);
-      for (const c of known3) {
+      for (const c of knownOppResearchCards) {
         if (isLocatedElsewhere(c) || isInOppActiveZone(c)) continue;
         if (status === 'knownOppHand') {
           knownOppHandSet.add(c);
@@ -486,10 +539,10 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
         }
       }
     } else {
-      // 1 <= oppBuy.count <= 3: if no reshuffle since, any unplayed card is either in oppHand or discardPile;
+      // Partial buy: if no reshuffle since, any unplayed card is either in oppHand or discardPile;
       // if a reshuffle happened since, discardPile was shuffled into drawPile -> return to unseen pool.
       if (noReshuffleSince) {
-        for (const c of known3) {
+        for (const c of knownOppResearchCards) {
           if (!isLocatedElsewhere(c) && !isInOppActiveZone(c)) {
             possibleOppHandSet.add(c);
           }
@@ -583,9 +636,6 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
     possibleOppHandSet.has(c) ||
     knownDiscardSet.has(c);
 
-  // Sanity guard for initialGen when reshuffle check didn't trigger yet
-  void isReshuffleBeforeGenResearch;
-
   const unseenProjects = pools.projectNames.filter((c) => !isExcludedFromUnseenProjects(c));
 
   return {
@@ -648,6 +698,78 @@ function instantiateCorp(name: string): ICorporationCard {
     throw new Error(`Unknown corporation card "${name}" in sampled world`);
   }
   return card;
+}
+
+function deriveWorldShuffleSeed(obs: ActorObservation, world: SampledWorld): number {
+  let h = 0x811c9dc5;
+  const mixInt = (v: number): void => {
+    h ^= v >>> 0;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  };
+  const mixStr = (s: string): void => {
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    mixInt(0xff);
+  };
+  const mixArr = (arr: ReadonlyArray<string> | undefined): void => {
+    if (arr === undefined) {
+      mixInt(0);
+      return;
+    }
+    mixInt(arr.length + 1);
+    for (let i = 0; i < arr.length; i++) {
+      mixStr(arr[i]);
+    }
+  };
+
+  if (world.seed !== undefined) {
+    const seedU32 = Number.isInteger(world.seed)
+      ? (world.seed >>> 0)
+      : Math.floor(world.seed * 4294967296) >>> 0;
+    mixInt(1);
+    mixInt(seedU32);
+  } else {
+    mixInt(0);
+  }
+
+  mixInt(obs.actor);
+  mixInt(obs.public.generation);
+  mixStr(obs.public.phase);
+  mixArr(world.opponentHand);
+  mixArr(world.projectDeck);
+  mixArr(world.projectDiscardPile);
+  mixArr(world.opponentDealtCorporations);
+  mixArr(world.opponentDealtPreludes);
+  mixArr(world.opponentDealtProjects);
+  if (world.opponentPickedCorporation !== undefined) {
+    mixStr(world.opponentPickedCorporation);
+  }
+  mixArr(world.opponentPreludes);
+  mixArr(world.opponentDraftHand);
+  mixArr(world.opponentDrafted);
+  mixArr(world.opponentResearchOffer);
+
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+function shuffleWithSeed<T>(items: ReadonlyArray<T>, seedU32: number): Array<T> {
+  const arr = items.slice();
+  let s = seedU32 >>> 0;
+  for (let i = arr.length - 1; i > 0; i--) {
+    let t = (s = (s + 0x6d2b79f5) | 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    const r = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    const j = Math.floor(r * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+  return arr;
 }
 
 export function applyDeterminization(
@@ -836,7 +958,7 @@ export function applyDeterminization(
     }
   }
 
-  // 7. Compute/validate projectDiscardPile
+  // 7. Compute/validate projectDiscardPile & enforce project card conservation
   const mustBeDiscardedPoss = pool.possibleOpponentHandProjects.filter((c) => !oppHandSet.has(c));
   const minDiscardNeeded = pool.knownProjectDiscardPile.length + mustBeDiscardedPoss.length;
   if (minDiscardNeeded > pool.discardPileSize) {
@@ -845,6 +967,7 @@ export function applyDeterminization(
     );
   }
 
+  const shuffleSeed = deriveWorldShuffleSeed(obs, world);
   let discardPileNames: Array<string>;
   if (world.projectDiscardPile !== undefined) {
     if (world.projectDiscardPile.length !== pool.discardPileSize) {
@@ -871,20 +994,93 @@ export function applyDeterminization(
         throw new Error(`Invalid sampled world: projectDiscardPile card "${c}" is outside unseen pool / known discards`);
       }
     }
+    const remainingUnseen = pool.projects.filter((c) => !usedProjects.has(c));
+    if (remainingUnseen.length !== 0) {
+      throw new Error(
+        `Invalid sampled world: project card conservation failed (${remainingUnseen.length} unseen cards unassigned)`,
+      );
+    }
     discardPileNames = world.projectDiscardPile.slice();
   } else {
     const remainingUnseen = pool.projects.filter((c) => !usedProjects.has(c));
     const fillNeeded = pool.discardPileSize - minDiscardNeeded;
-    if (remainingUnseen.length < fillNeeded) {
+    if (remainingUnseen.length !== fillNeeded) {
       throw new Error(
-        `Invalid sampled world: remaining unseen pool (${remainingUnseen.length}) cannot fill discardPile (${fillNeeded})`,
+        `Invalid sampled world: remaining unseen pool (${remainingUnseen.length}) must equal discardPile fillNeeded (${fillNeeded})`,
       );
     }
-    discardPileNames = [
-      ...pool.knownProjectDiscardPile,
-      ...mustBeDiscardedPoss,
-      ...remainingUnseen.slice(0, fillNeeded),
-    ];
+    discardPileNames = shuffleWithSeed(
+      [
+        ...pool.knownProjectDiscardPile,
+        ...mustBeDiscardedPoss,
+        ...remainingUnseen,
+      ],
+      shuffleSeed ^ 0x1a2b3c4d,
+    );
+  }
+
+  // ---- Corporations & preludes setup/decks conservation check before mutating engine state ----
+  const actorDiscardedCorps: Array<string> =
+    obs.history.initialBuy !== null ? obs.history.initialBuy.corporationsDiscarded.slice() : [];
+  const staticPools = getStaticCardPools(obs.public.map);
+  const knownPreludeDiscardSet = new Set<string>(
+    obs.history.initialBuy !== null ? obs.history.initialBuy.preludesDiscarded : [],
+  );
+  for (const sel of obs.history.cardSelections) {
+    for (const p of sel.unselected) {
+      if (staticPools.preludeSet.has(p)) {
+        knownPreludeDiscardSet.add(p);
+      }
+    }
+  }
+  for (const entry of obs.public.publicLog) {
+    if (entry.message === '${0} fizzled. ${1} gains 15 M€.') {
+      const card = String(entry.data[0]?.value ?? '');
+      if (staticPools.preludeSet.has(card)) {
+        knownPreludeDiscardSet.add(card);
+      }
+    }
+  }
+  const knownPreludeDiscards = Array.from(knownPreludeDiscardSet);
+
+  const remCorps = shuffleWithSeed(
+    pool.corporations.filter((c) => !usedCorps.has(c)),
+    shuffleSeed ^ 0x2b3c4d5e,
+  );
+  const corpDrawCount = obs.public.otherDeckSizes.corporations.drawPile;
+  const corpDiscardCount = obs.public.otherDeckSizes.corporations.discardPile;
+  const corpDiscardFill = corpDiscardCount - actorDiscardedCorps.length;
+  if (corpDiscardFill < 0 || remCorps.length !== corpDrawCount + corpDiscardFill) {
+    throw new Error(
+      `Invalid sampled world: corporation deck conservation failed (rem=${remCorps.length}, draw=${corpDrawCount}, discard=${corpDiscardCount}, actorDiscards=${actorDiscardedCorps.length})`,
+    );
+  }
+  const corpDrawPile = remCorps.slice(0, corpDrawCount);
+  const corpDiscardPile = shuffleWithSeed(
+    [...actorDiscardedCorps, ...remCorps.slice(corpDrawCount)],
+    shuffleSeed ^ 0x3c4d5e6f,
+  );
+
+  let prelDrawPile: Array<string> | undefined;
+  let prelDiscardPile: Array<string> | undefined;
+  if (obs.public.otherDeckSizes.preludes !== null) {
+    const remPrels = shuffleWithSeed(
+      pool.preludes.filter((c) => !usedPreludes.has(c)),
+      shuffleSeed ^ 0x4d5e6f70,
+    );
+    const prelDrawCount = obs.public.otherDeckSizes.preludes.drawPile;
+    const prelDiscardCount = obs.public.otherDeckSizes.preludes.discardPile;
+    const prelDiscardFill = prelDiscardCount - knownPreludeDiscards.length;
+    if (prelDiscardFill < 0 || remPrels.length !== prelDrawCount + prelDiscardFill) {
+      throw new Error(
+        `Invalid sampled world: prelude deck conservation failed (rem=${remPrels.length}, draw=${prelDrawCount}, discard=${prelDiscardCount}, knownDiscards=${knownPreludeDiscards.length})`,
+      );
+    }
+    prelDrawPile = remPrels.slice(0, prelDrawCount);
+    prelDiscardPile = shuffleWithSeed(
+      [...knownPreludeDiscards, ...remPrels.slice(prelDrawCount)],
+      shuffleSeed ^ 0x5e6f7081,
+    );
   }
 
   // ---- Write validated world strictly in-place into clone's engine state ----
@@ -893,54 +1089,6 @@ export function applyDeterminization(
   oppPlayer.cardsInHand.splice(0, oppPlayer.cardsInHand.length, ...world.opponentHand.map(instantiateProject));
   engineGame.projectDeck.drawPile.splice(0, engineGame.projectDeck.drawPile.length, ...world.projectDeck.map(instantiateProject));
   engineGame.projectDeck.discardPile.splice(0, engineGame.projectDeck.discardPile.length, ...discardPileNames.map(instantiateProject));
-
-  // Corporations & preludes setup/decks
-  const actorDiscardedCorps: Array<string> =
-    obs.history.initialBuy !== null ? obs.history.initialBuy.corporationsDiscarded.slice() : [];
-  const actorDiscardedPreludes: Array<string> =
-    obs.history.initialBuy !== null ? obs.history.initialBuy.preludesDiscarded.slice() : [];
-  const staticPools = getStaticCardPools(obs.public.map);
-  for (const sel of obs.history.cardSelections) {
-    for (const p of sel.unselected) {
-      if (staticPools.preludeSet.has(p)) {
-        actorDiscardedPreludes.push(p);
-      }
-    }
-  }
-
-  const writeCorporationAndPreludeDecks = (updatePreludes: boolean): void => {
-    const remCorps = pool.corporations.filter((c) => !usedCorps.has(c));
-    const corpDrawCount = obs.public.otherDeckSizes.corporations.drawPile;
-    const corpDiscardCount = obs.public.otherDeckSizes.corporations.discardPile;
-    const corpDiscardPool = [...actorDiscardedCorps, ...remCorps.slice(corpDrawCount)];
-    engineGame.corporationDeck.drawPile.splice(
-      0,
-      engineGame.corporationDeck.drawPile.length,
-      ...remCorps.slice(0, corpDrawCount).map(instantiateCorp),
-    );
-    engineGame.corporationDeck.discardPile.splice(
-      0,
-      engineGame.corporationDeck.discardPile.length,
-      ...corpDiscardPool.slice(0, corpDiscardCount).map(instantiateCorp),
-    );
-
-    if (updatePreludes && obs.public.otherDeckSizes.preludes !== null) {
-      const remPrels = pool.preludes.filter((c) => !usedPreludes.has(c));
-      const prelDrawCount = obs.public.otherDeckSizes.preludes.drawPile;
-      const prelDiscardCount = obs.public.otherDeckSizes.preludes.discardPile;
-      const prelDiscardPool = [...actorDiscardedPreludes, ...remPrels.slice(prelDrawCount)];
-      engineGame.preludeDeck.drawPile.splice(
-        0,
-        engineGame.preludeDeck.drawPile.length,
-        ...remPrels.slice(0, prelDrawCount).map(instantiatePrelude),
-      );
-      engineGame.preludeDeck.discardPile.splice(
-        0,
-        engineGame.preludeDeck.discardPile.length,
-        ...prelDiscardPool.slice(0, prelDiscardCount).map(instantiatePrelude),
-      );
-    }
-  };
 
   if (!pool.opponentInitialBuyComplete) {
     oppPlayer.dealtCorporationCards.splice(
@@ -958,11 +1106,13 @@ export function applyDeterminization(
       oppPlayer.dealtProjectCards.length,
       ...world.opponentDealtProjects!.map(instantiateProject),
     );
-    writeCorporationAndPreludeDecks(true);
   } else {
+    oppPlayer.dealtCorporationCards.splice(0, oppPlayer.dealtCorporationCards.length);
+    oppPlayer.dealtPreludeCards.splice(0, oppPlayer.dealtPreludeCards.length);
+    oppPlayer.dealtProjectCards.splice(0, oppPlayer.dealtProjectCards.length);
+
     if (pool.opponentHasHiddenPickedCorp && world.opponentPickedCorporation !== undefined) {
       oppPlayer.pickedCorporationCard = instantiateCorp(world.opponentPickedCorporation);
-      writeCorporationAndPreludeDecks(false);
     }
 
     if (pool.opponentPreludeHandSize > 0 && world.opponentPreludes !== undefined) {
@@ -972,25 +1122,29 @@ export function applyDeterminization(
         ...world.opponentPreludes.map(instantiatePrelude),
       );
     }
+  }
 
-    if (obs.public.otherDeckSizes.preludes !== null && pool.opponentPreludeHandSize > 0) {
-      const remPrels = pool.preludes.filter((c) => !usedPreludes.has(c));
-      const prelDrawCount = obs.public.otherDeckSizes.preludes.drawPile;
-      const prelDiscardCount = obs.public.otherDeckSizes.preludes.discardPile;
-      const discardPool = [...actorDiscardedPreludes, ...remPrels.slice(prelDrawCount)];
-      if (remPrels.length >= prelDrawCount && discardPool.length >= prelDiscardCount) {
-        engineGame.preludeDeck.drawPile.splice(
-          0,
-          engineGame.preludeDeck.drawPile.length,
-          ...remPrels.slice(0, prelDrawCount).map(instantiatePrelude),
-        );
-        engineGame.preludeDeck.discardPile.splice(
-          0,
-          engineGame.preludeDeck.discardPile.length,
-          ...discardPool.slice(0, prelDiscardCount).map(instantiatePrelude),
-        );
-      }
-    }
+  engineGame.corporationDeck.drawPile.splice(
+    0,
+    engineGame.corporationDeck.drawPile.length,
+    ...corpDrawPile.map(instantiateCorp),
+  );
+  engineGame.corporationDeck.discardPile.splice(
+    0,
+    engineGame.corporationDeck.discardPile.length,
+    ...corpDiscardPile.map(instantiateCorp),
+  );
+  if (prelDrawPile !== undefined && prelDiscardPile !== undefined) {
+    engineGame.preludeDeck.drawPile.splice(
+      0,
+      engineGame.preludeDeck.drawPile.length,
+      ...prelDrawPile.map(instantiatePrelude),
+    );
+    engineGame.preludeDeck.discardPile.splice(
+      0,
+      engineGame.preludeDeck.discardPile.length,
+      ...prelDiscardPile.map(instantiatePrelude),
+    );
   }
 
   // Drafting: handle both opp still needing to draft AND opp (seat 0) having already picked on engine while actor === 1 is pending
@@ -1001,6 +1155,9 @@ export function applyDeterminization(
       oppPlayer.needsToDraft = true;
       oppPlayer.draftHand.splice(0, oppPlayer.draftHand.length, ...newDraftHand);
       oppPlayer.draftedCards.splice(0, oppPlayer.draftedCards.length, ...newDrafted);
+      for (const p of engineGame.players) {
+        p.clearWaitingFor();
+      }
       newStandardDraft(engineGame).restoreDraft();
     } else {
       oppPlayer.draftHand.splice(0, oppPlayer.draftHand.length, ...newDraftHand);
@@ -1008,7 +1165,7 @@ export function applyDeterminization(
     }
   }
 
-  // Gen >= 2 Research: update opponent's 4-card SelectCard offer in-place
+  // Gen >= 2 Research: update opponent's SelectCard offer in-place
   if (engineGame.phase === Phase.RESEARCH && engineGame.generation >= 2 && pool.opponentResearchOfferSize > 0) {
     const waiting = oppPlayer.getWaitingFor();
     if (waiting !== undefined && waiting.type === 'card') {
@@ -1021,19 +1178,20 @@ export function applyDeterminization(
       if (waiting === undefined || waiting.type !== 'payment') {
         throw new Error(`determinize: unexpected opponent research prompt ${waiting?.type ?? 'none'}`);
       }
-      const mutableOpp = oppPlayer as unknown as {
-        waitingFor?: unknown;
-        waitingForCb?: unknown;
-        runResearchPhase(): void;
-      };
-      mutableOpp.waitingFor = undefined;
-      mutableOpp.waitingForCb = undefined;
+      oppPlayer.clearWaitingFor();
       oppPlayer.draftedCards.splice(
         0,
         oppPlayer.draftedCards.length,
         ...world.opponentResearchOffer!.map(instantiateProject),
       );
-      mutableOpp.runResearchPhase();
+      (oppPlayer as unknown as {runResearchPhase(): void}).runResearchPhase();
     }
+  }
+
+  // Reseed engine RNG in-place so Game.rng and all Decks share the determinized seed and do not leak true RNG state.
+  const mutableRng = (engineGame as unknown as {rng?: {seed: number; currentSeed: number}}).rng;
+  if (mutableRng !== undefined) {
+    mutableRng.seed = shuffleSeed / 4294967296;
+    mutableRng.currentSeed = shuffleSeed;
   }
 }

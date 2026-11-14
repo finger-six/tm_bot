@@ -817,7 +817,22 @@ function projectCensusDuplicates(game: AdapterGame): Array<string> {
     add(p.draftedCards);
     add(p.draftHand);
     const wf = p.getWaitingFor();
-    if (wf !== undefined && wf.type === 'card' && e.phase === 'research') add(wf.cards);
+    if (wf !== undefined && wf.type === 'card') {
+      if (e.phase === 'research' && e.generation >= 2) {
+        add(wf.cards);
+      } else if (e.phase === 'action' || e.phase === 'preludes') {
+        const knownHere = new Set<string>(cardNames(p.cardsInHand));
+        for (const pl of e.players) {
+          for (const pc of Array.from<any>(pl.playedCards ?? [])) knownHere.add(pc.name);
+        }
+        const wfProj = ((wf as any).cards as Array<any> | undefined)?.filter(
+          (c) => c.type !== 'corporation' && c.type !== 'prelude',
+        );
+        if (wfProj !== undefined && wfProj.some((c) => !knownHere.has(c.name))) {
+          add(wfProj.filter((c) => !knownHere.has(c.name)));
+        }
+      }
+    }
   }
   return [...seen].filter(([, n]) => n > 1).map(([name]) => name);
 }
@@ -888,3 +903,714 @@ describe('Ticket 16 regression: research payment window', () => {
     assert.ok(hits > 0, 'expected to hit an actor research payment window');
   });
 });
+
+function canonicalEngineStateForDeterminizeTest(
+  game: AdapterGame,
+  ignoreRng = false,
+): Record<string, unknown> {
+  const s = _unsafeGetEngineGame(game).serialize() as Record<string, unknown>;
+  delete s.createdTimeMs;
+  if (ignoreRng) {
+    delete s.seed;
+    delete s.currentSeed;
+  }
+  const players = s.players as Array<Record<string, unknown>>;
+  for (const p of players) {
+    delete p.timer;
+  }
+  const gameLog = s.gameLog as Array<Record<string, unknown>>;
+  for (const entry of gameLog) {
+    delete entry.timestamp;
+  }
+  return s;
+}
+
+function perturbHiddenEngineState(game: AdapterGame, actor: Seat): void {
+  const e = _unsafeGetEngineGame(game);
+  const opp: Seat = actor === 0 ? 1 : 0;
+  const oppPlayer = e.players[opp];
+  const pool = game.unseenPool(actor);
+  const unseenProjSet = new Set(pool.projects);
+
+  e.projectDeck.drawPile.reverse();
+  e.projectDeck.discardPile.reverse();
+  e.corporationDeck.drawPile.reverse();
+  e.corporationDeck.discardPile.reverse();
+  e.preludeDeck.drawPile.reverse();
+  e.preludeDeck.discardPile.reverse();
+
+  oppPlayer.dealtCorporationCards.reverse();
+  oppPlayer.dealtPreludeCards.reverse();
+  oppPlayer.dealtProjectCards.reverse();
+  oppPlayer.cardsInHand.reverse();
+  oppPlayer.preludeCardsInHand.reverse();
+  oppPlayer.draftHand.reverse();
+  oppPlayer.draftedCards.reverse();
+
+  // Swap an unseen card between opp hand and projectDeck.drawPile when possible
+  const handSwapIdx = oppPlayer.cardsInHand.findIndex((c) => unseenProjSet.has(c.name));
+  const deckSwapIdx = e.projectDeck.drawPile.findIndex((c) => unseenProjSet.has(c.name));
+  if (handSwapIdx !== -1 && deckSwapIdx !== -1) {
+    const tmp = oppPlayer.cardsInHand[handSwapIdx];
+    oppPlayer.cardsInHand[handSwapIdx] = e.projectDeck.drawPile[deckSwapIdx];
+    e.projectDeck.drawPile[deckSwapIdx] = tmp;
+  }
+
+  // Swap an unseen prelude between opp preludeCardsInHand and preludeDeck.drawPile
+  if (oppPlayer.preludeCardsInHand.length > 0 && e.preludeDeck.drawPile.length > 0) {
+    const tmp = oppPlayer.preludeCardsInHand[0];
+    oppPlayer.preludeCardsInHand[0] = e.preludeDeck.drawPile[0];
+    e.preludeDeck.drawPile[0] = tmp;
+  }
+
+  // Swap hidden picked corporation with corporationDeck.discardPile
+  if (pool.opponentHasHiddenPickedCorp && oppPlayer.pickedCorporationCard !== undefined && e.corporationDeck.discardPile.length > 0) {
+    const tmp = oppPlayer.pickedCorporationCard;
+    oppPlayer.pickedCorporationCard = e.corporationDeck.discardPile[0];
+    e.corporationDeck.discardPile[0] = tmp;
+  }
+
+  if (e.phase === 'research' && e.generation >= 2) {
+    const wf = oppPlayer.getWaitingFor();
+    if (wf !== undefined && wf.type === 'card') {
+      (wf as unknown as {cards: Array<unknown>}).cards.reverse();
+    }
+  }
+
+  const rngObj = (e as unknown as {rng: {seed: number; currentSeed: number}}).rng;
+  rngObj.seed = 0.987654321;
+  rngObj.currentSeed = 0xdeadbeef;
+}
+
+describe('Ticket 28: determinize hardening (L1-L4)', () => {
+  it('L1: identical observe(actor) with perturbed hidden state serializes identically after determinize across checkpoints and both seats', () => {
+    const cases: Array<{label: string; game: AdapterGame; actor: Seat}> = [];
+
+    // Setup (both seats)
+    const gSetup0 = createGame({seedKey: 't28-l1-setup-0', map: 'tharsis'});
+    cases.push({label: 'setup seat 0', game: gSetup0, actor: 0});
+
+    const gSetup1 = createGame({seedKey: 't28-l1-setup-1', map: 'elysium'});
+    cases.push({label: 'setup seat 1', game: gSetup1, actor: 1});
+
+    const gSetup1After0 = createGame({seedKey: 't28-l1-setup-1-after-0', map: 'hellas'});
+    while (gSetup1After0.pending().includes(0)) {
+      gSetup1After0.choose(0, pickDoneOrZero(gSetup1After0, 0));
+    }
+    cases.push({label: 'setup seat 1 after seat 0 initial buy', game: gSetup1After0, actor: 1});
+
+    // Preludes (both seats)
+    for (const seat of [0, 1] as const) {
+      const gPrel = findGameAt(
+        (g) => _unsafeGetEngineGame(g).phase === 'preludes' && g.pending().includes(seat),
+        `t28-l1-prel-${seat}`,
+        'tharsis',
+      );
+      cases.push({label: `preludes seat ${seat}`, game: gPrel, actor: seat});
+    }
+
+    // Drafting (both seats)
+    for (const seat of [0, 1] as const) {
+      const gDraft = findGameAt(
+        (g) => _unsafeGetEngineGame(g).phase === 'drafting' && _unsafeGetEngineGame(g).draftRound === 2 && g.pending().includes(seat),
+        `t28-l1-draft-${seat}`,
+        'elysium',
+      );
+      cases.push({label: `drafting R2 seat ${seat}`, game: gDraft, actor: seat});
+    }
+
+    // Research (Gen >= 2, both seats)
+    for (const seat of [0, 1] as const) {
+      const gRes = findGameAt(
+        (g) => _unsafeGetEngineGame(g).phase === 'research' && _unsafeGetEngineGame(g).generation >= 2 && g.pending().includes(seat),
+        `t28-l1-res-${seat}`,
+        'hellas',
+      );
+      cases.push({label: `research gen>=2 seat ${seat}`, game: gRes, actor: seat});
+    }
+
+    // Action (Gen >= 2, both seats)
+    for (const seat of [0, 1] as const) {
+      const gAct = findGameAt(
+        (g) => _unsafeGetEngineGame(g).phase === 'action' && _unsafeGetEngineGame(g).generation >= 2 && g.pending().includes(seat),
+        `t28-l1-act-${seat}`,
+        'vastitas borealis nova',
+      );
+      cases.push({label: `action gen>=2 seat ${seat}`, game: gAct, actor: seat});
+    }
+
+    for (let i = 0; i < cases.length; i++) {
+      const {label, game, actor} = cases[i];
+      const c1 = game.clone();
+      const c2 = game.clone();
+      perturbHiddenEngineState(c2, actor);
+
+      const obs1 = c1.observe(actor);
+      assert.equal(
+        serializeObservation(c2.observe(actor)),
+        serializeObservation(obs1),
+        `${label}: perturbation leaked into observe(${actor})`,
+      );
+
+      const pool = c1.unseenPool(actor);
+      const world = sampleWorldFromObservation(obs1, pool, makePrng(3000 + i));
+
+      c1.determinize(actor, world);
+      c2.determinize(actor, world);
+
+      assert.deepEqual(
+        canonicalEngineStateForDeterminizeTest(c1, false),
+        canonicalEngineStateForDeterminizeTest(c2, false),
+        `${label}: determinized engine states must serialize identically`,
+      );
+    }
+  });
+
+  it('L2: conserves every project, corporation, and prelude card across all engine zones (including fizzled preludes)', () => {
+    const fullCensus = (game: AdapterGame): {
+      projects: Map<string, number>;
+      corps: Map<string, number>;
+      preludes: Map<string, number>;
+    } => {
+      const e = _unsafeGetEngineGame(game) as any;
+      const projects = new Map<string, number>();
+      const corps = new Map<string, number>();
+      const preludes = new Map<string, number>();
+      const bump = (map: Map<string, number>, cards: ReadonlyArray<EngineCard> | undefined) => {
+        for (const c of cards ?? []) {
+          map.set(c.name, (map.get(c.name) ?? 0) + 1);
+        }
+      };
+
+      bump(projects, e.projectDeck.drawPile);
+      bump(projects, e.projectDeck.discardPile);
+      bump(corps, e.corporationDeck.drawPile);
+      bump(corps, e.corporationDeck.discardPile);
+      bump(preludes, e.preludeDeck.drawPile);
+      bump(preludes, e.preludeDeck.discardPile);
+
+      for (const p of e.players) {
+        bump(projects, p.cardsInHand);
+        bump(projects, p.draftedCards);
+        bump(projects, p.draftHand);
+        bump(preludes, p.preludeCardsInHand);
+
+        const played: Array<any> = Array.from(p.playedCards ?? []);
+        const playedCorps = played.filter((c) => c.type === 'corporation');
+        const playedPreludes = played.filter((c) => c.type === 'prelude');
+        const playedProjects = played.filter((c) => c.type !== 'corporation' && c.type !== 'prelude');
+        bump(projects, playedProjects);
+        bump(corps, playedCorps);
+        bump(preludes, playedPreludes);
+
+        const initialBuyComplete = p.pickedCorporationCard !== undefined || playedCorps.length > 0;
+        if (!initialBuyComplete) {
+          bump(projects, p.dealtProjectCards);
+          bump(corps, p.dealtCorporationCards);
+          bump(preludes, p.dealtPreludeCards);
+        }
+
+        // Before corps are revealed, pickedCorporationCard is set without being in playedCards yet
+        if (p.pickedCorporationCard !== undefined && !playedCorps.some((c) => c.name === p.pickedCorporationCard.name)) {
+          bump(corps, [p.pickedCorporationCard]);
+        }
+
+        const wf = p.getWaitingFor();
+        if (wf !== undefined && wf.type === 'card' && e.phase === 'research' && e.generation >= 2) {
+          bump(projects, wf.cards);
+        }
+      }
+
+      return {projects, corps, preludes};
+    };
+
+    const assertExactPool = (counts: Map<string, number>, expectedTotal: number, label: string) => {
+      const duplicates = [...counts].filter(([, n]) => n > 1).map(([name]) => name);
+      assert.deepEqual(duplicates, [], `${label}: duplicate cards found`);
+      const total = [...counts.values()].reduce((a, b) => a + b, 0);
+      assert.equal(total, expectedTotal, `${label}: expected ${expectedTotal} unique cards, got ${total}`);
+    };
+
+    // Check across setup, preludes, drafting, research, and action
+    const gSetup = createGame({seedKey: 't28-l2-setup', map: 'tharsis'});
+    const gPrel = findGameAt((g) => _unsafeGetEngineGame(g).phase === 'preludes', 't28-l2-prel', 'elysium');
+    const gDraft = findGameAt((g) => _unsafeGetEngineGame(g).phase === 'drafting' && _unsafeGetEngineGame(g).draftRound === 2, 't28-l2-draft', 'hellas');
+    const gRes = findGameAt((g) => _unsafeGetEngineGame(g).phase === 'research' && _unsafeGetEngineGame(g).generation >= 2, 't28-l2-res', 'tharsis');
+    const gAct = findGameAt((g) => _unsafeGetEngineGame(g).phase === 'action' && _unsafeGetEngineGame(g).generation >= 2, 't28-l2-act', 'vastitas borealis nova');
+
+    for (const [label, g] of [
+      ['setup', gSetup],
+      ['preludes', gPrel],
+      ['drafting', gDraft],
+      ['research', gRes],
+      ['action', gAct],
+    ] as const) {
+      const actor = g.pending()[0];
+      const c = g.clone();
+      const obs = c.observe(actor);
+      const pool = c.unseenPool(actor);
+      c.determinize(actor, sampleWorldFromObservation(obs, pool, makePrng(4001)));
+      const census = fullCensus(c);
+      assertExactPool(census.projects, 215, `${label} projects`);
+      assertExactPool(census.corps, 17, `${label} corps`);
+      assertExactPool(census.preludes, 35, `${label} preludes`);
+    }
+
+    // Also verify a game where a prelude fizzles conserves all 35 preludes in action phase
+    const gFizzle = findGameAt(
+      (g) =>
+        _unsafeGetEngineGame(g).phase === 'action' &&
+        g.observe(0).public.publicLog.some((e) => e.message.includes('fizzled.')),
+      't28-l2-fizzle',
+      'tharsis',
+      150,
+    );
+    for (const actor of [0, 1] as const) {
+      const c = gFizzle.clone();
+      c.determinize(actor, sampleWorldFromObservation(c.observe(actor), c.unseenPool(actor), makePrng(4002 + actor)));
+      const census = fullCensus(c);
+      assertExactPool(census.projects, 215, `fizzle seat ${actor} projects`);
+      assertExactPool(census.corps, 17, `fizzle seat ${actor} corps`);
+      assertExactPool(census.preludes, 35, `fizzle seat ${actor} preludes`);
+    }
+  });
+
+  it('L2: fills omitted projectDiscardPile, corporationDeck, and preludeDeck in sampled order, not alphabetically', () => {
+    const gAct = findGameAt(
+      (g) => _unsafeGetEngineGame(g).phase === 'action' && g.observe(0).public.discardPileSize >= 10,
+      't28-l2-order',
+      'tharsis',
+    );
+    const actor = gAct.pending()[0];
+    const obs = gAct.observe(actor);
+    const pool = gAct.unseenPool(actor);
+
+    const w1 = sampleWorldFromObservation(obs, pool, makePrng(5001));
+    const w2 = sampleWorldFromObservation(obs, pool, makePrng(5002));
+    assert.equal(w1.projectDiscardPile, undefined);
+    assert.equal(w2.projectDiscardPile, undefined);
+
+    const c1 = gAct.clone();
+    const c2 = gAct.clone();
+    c1.determinize(actor, w1);
+    c2.determinize(actor, w2);
+
+    const e1 = _unsafeGetEngineGame(c1);
+    const e2 = _unsafeGetEngineGame(c2);
+
+    const isAlphabetical = (names: ReadonlyArray<string>): boolean => {
+      const sorted = names.slice().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      return names.every((n, idx) => n === sorted[idx]);
+    };
+
+    const corpDraw1 = e1.corporationDeck.drawPile.map((c) => c.name);
+    const prelDraw1 = e1.preludeDeck.drawPile.map((c) => c.name);
+    const projDisc1 = e1.projectDeck.discardPile.map((c) => c.name);
+
+    const corpDraw2 = e2.corporationDeck.drawPile.map((c) => c.name);
+    const prelDraw2 = e2.preludeDeck.drawPile.map((c) => c.name);
+    const projDisc2 = e2.projectDeck.discardPile.map((c) => c.name);
+
+    assert.equal(isAlphabetical(corpDraw1), false, 'corporationDeck.drawPile must not be alphabetical');
+    assert.equal(isAlphabetical(prelDraw1), false, 'preludeDeck.drawPile must not be alphabetical');
+    assert.equal(isAlphabetical(projDisc1), false, 'omitted projectDeck.discardPile must not be alphabetical');
+
+    assert.notDeepEqual(corpDraw1, corpDraw2, 'different sampled worlds should shuffle corporationDeck differently');
+    assert.notDeepEqual(prelDraw1, prelDraw2, 'different sampled worlds should shuffle preludeDeck differently');
+    assert.notDeepEqual(projDisc1, projDisc2, 'different sampled worlds should shuffle projectDiscardPile differently');
+  });
+
+  it('L3: opponentResearchOfferSize and draft sizes account for public Mars Maths (and deck exhaustion) and accept true world', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {MarsMaths} = require(path.resolve(__dirname, '../../../tools/simbench/engine/build/src/server/cards/pathfinders/MarsMaths.js')) as {
+      MarsMaths: new () => unknown;
+    };
+
+    const extractTrueWorld = (game: AdapterGame, actor: Seat): SampledWorld => {
+      const e = _unsafeGetEngineGame(game);
+      const obs = game.observe(actor);
+      const pool = game.unseenPool(actor);
+      const opp: Seat = actor === 0 ? 1 : 0;
+      const oppPlayer = e.players[opp];
+
+      let opponentDealtCorporations: Array<string> | undefined;
+      let opponentDealtPreludes: Array<string> | undefined;
+      let opponentDealtProjects: Array<string> | undefined;
+      let opponentPickedCorporation: string | undefined;
+      let opponentPreludes: Array<string> | undefined;
+      let opponentDraftHand: Array<string> | undefined;
+      let opponentDrafted: Array<string> | undefined;
+      let opponentResearchOffer: Array<string> | undefined;
+
+      if (!pool.opponentInitialBuyComplete) {
+        opponentDealtCorporations = oppPlayer.dealtCorporationCards.map((c) => c.name);
+        opponentDealtPreludes = oppPlayer.dealtPreludeCards.map((c) => c.name);
+        opponentDealtProjects = oppPlayer.dealtProjectCards.map((c) => c.name);
+      } else if (pool.opponentHasHiddenPickedCorp) {
+        opponentPickedCorporation = oppPlayer.pickedCorporationCard?.name;
+      }
+
+      if (pool.opponentPreludeHandSize > 0) {
+        opponentPreludes = oppPlayer.preludeCardsInHand.map((c) => c.name);
+      }
+
+      if (e.phase === 'drafting' && (pool.opponentDraftHandSize > 0 || pool.opponentDraftedSize > 0)) {
+        if (oppPlayer.needsToDraft === false) {
+          const oppHasMarsMaths = obs.public.players[opp].tableau.some((tc) => tc.name === 'Mars Maths');
+          const keepCount = e.draftRound === 1 && oppHasMarsMaths ? 2 : 1;
+          opponentDraftHand = [
+            ...oppPlayer.draftHand.map((c) => c.name),
+            ...oppPlayer.draftedCards.slice(-keepCount).map((c) => c.name),
+          ];
+          opponentDrafted = oppPlayer.draftedCards.slice(0, oppPlayer.draftedCards.length - keepCount).map((c) => c.name);
+        } else {
+          opponentDraftHand = oppPlayer.draftHand.map((c) => c.name);
+          opponentDrafted = oppPlayer.draftedCards.map((c) => c.name);
+        }
+      }
+
+      if (e.phase === 'research' && e.generation >= 2 && pool.opponentResearchOfferSize > 0) {
+        const wf = oppPlayer.getWaitingFor();
+        if (wf !== undefined && wf.type === 'card') {
+          opponentResearchOffer = (wf as unknown as {cards: ReadonlyArray<{name: string}>}).cards.map((c) => c.name);
+        }
+      }
+
+      return {
+        opponentHand: oppPlayer.cardsInHand.map((c) => c.name),
+        projectDeck: e.projectDeck.drawPile.map((c) => c.name),
+        projectDiscardPile: e.projectDeck.discardPile.map((c) => c.name),
+        ...(opponentDealtCorporations !== undefined ? {opponentDealtCorporations} : {}),
+        ...(opponentDealtPreludes !== undefined ? {opponentDealtPreludes} : {}),
+        ...(opponentDealtProjects !== undefined ? {opponentDealtProjects} : {}),
+        ...(opponentPickedCorporation !== undefined ? {opponentPickedCorporation} : {}),
+        ...(opponentPreludes !== undefined ? {opponentPreludes} : {}),
+        ...(opponentDraftHand !== undefined ? {opponentDraftHand} : {}),
+        ...(opponentDrafted !== undefined ? {opponentDrafted} : {}),
+        ...(opponentResearchOffer !== undefined ? {opponentResearchOffer} : {}),
+      };
+    };
+
+    // 1. Opponent has Mars Maths: Gen 2 Drafting R1/R2/R3 and Gen 2 Research (offer of 5) + Gen 2 Action after buying 4
+    const gOppMM = createGame({seedKey: 't28-l3-opp-mm', map: 'tharsis'});
+    finishInitialResearch(gOppMM);
+    advanceUntil(gOppMM, (g) => _unsafeGetEngineGame(g).phase === 'action', makePrng(6100));
+    (_unsafeGetEngineGame(gOppMM).players[0] as unknown as {playedCards: Array<unknown>}).playedCards.push(new MarsMaths());
+    advanceUntil(
+      gOppMM,
+      (g) => _unsafeGetEngineGame(g).phase === 'drafting' && _unsafeGetEngineGame(g).generation === 2,
+      makePrng(6101),
+    );
+
+    const actor: Seat = 1;
+    for (const expectedRound of [1, 2, 3]) {
+      const e = _unsafeGetEngineGame(gOppMM);
+      assert.equal(e.phase, 'drafting');
+      assert.equal(e.draftRound, expectedRound);
+      const pool = gOppMM.unseenPool(actor);
+      assert.equal(pool.opponentDraftHandSize, expectedRound === 1 ? 5 : 5 - expectedRound);
+      assert.equal(pool.opponentDraftedSize, expectedRound === 1 ? 0 : expectedRound);
+      const clone = gOppMM.clone();
+      clone.determinize(actor, extractTrueWorld(gOppMM, actor));
+      // Advance this draft round
+      while (_unsafeGetEngineGame(gOppMM).phase === 'drafting' && _unsafeGetEngineGame(gOppMM).draftRound === expectedRound) {
+        const s = gOppMM.pending()[0];
+        gOppMM.choose(s, 0);
+      }
+    }
+
+    assert.equal(_unsafeGetEngineGame(gOppMM).phase, 'research');
+    const resPool = gOppMM.unseenPool(actor);
+    assert.equal(resPool.opponentResearchOfferSize, 5);
+    const resClone = gOppMM.clone();
+    resClone.determinize(actor, extractTrueWorld(gOppMM, actor));
+
+    // Also verify opponent buying 4 of 5 cards in Mars Maths research does not falsely force all 3 known draft cards into knownOppHand
+    for (let i = 0; i < 4; i++) {
+      gOppMM.choose(0, 0);
+    }
+    const buyDoneIdx = gOppMM.choice(0).candidates.findIndex((c) => c.id === 'done');
+    gOppMM.choose(0, buyDoneIdx);
+    // Pay for opponent's 4 bought cards if prompted, then let actor buy 0
+    while (_unsafeGetEngineGame(gOppMM).phase === 'research') {
+      const pending = gOppMM.pending();
+      if (pending[0] === 0) {
+        gOppMM.choose(0, pickDoneOrZero(gOppMM, 0));
+      } else {
+        gOppMM.choose(1, pickDoneOrZero(gOppMM, 1));
+      }
+    }
+    const actPool = gOppMM.unseenPool(actor);
+    const actClone = gOppMM.clone();
+    actClone.determinize(actor, extractTrueWorld(gOppMM, actor));
+    assert.ok(actPool.opponentHandSize >= 0);
+
+    // 2. Actor has Mars Maths (offer of 5), opponent does NOT (offer of 4)
+    const gActorMM = createGame({seedKey: 't28-l3-actor-mm', map: 'elysium'});
+    finishInitialResearch(gActorMM);
+    advanceUntil(gActorMM, (g) => _unsafeGetEngineGame(g).phase === 'action', makePrng(6200));
+    (_unsafeGetEngineGame(gActorMM).players[0] as unknown as {playedCards: Array<unknown>}).playedCards.push(new MarsMaths());
+    advanceUntil(
+      gActorMM,
+      (g) => _unsafeGetEngineGame(g).phase === 'drafting' && _unsafeGetEngineGame(g).generation === 2,
+      makePrng(6201),
+    );
+    // Seat 0 (actor) picks first in R1: actor sees 5 cards -> curRound must still be 1!
+    const actorDraftPool = gActorMM.unseenPool(0);
+    assert.equal(actorDraftPool.opponentDraftHandSize, 4);
+    assert.equal(actorDraftPool.opponentDraftedSize, 0);
+    gActorMM.clone().determinize(0, extractTrueWorld(gActorMM, 0));
+
+    advanceUntil(gActorMM, (g) => _unsafeGetEngineGame(g).phase === 'research' && _unsafeGetEngineGame(g).generation === 2, makePrng(6202));
+    const actorResPool = gActorMM.unseenPool(0);
+    assert.equal(actorResPool.opponentResearchOfferSize, 4);
+    gActorMM.clone().determinize(0, extractTrueWorld(gActorMM, 0));
+
+    // 3. Deck exhaustion: only 6 project cards left entering Gen 2 Drafting (Seat 0 draws 4, Seat 1 draws 2)
+    const gExhaust = createGame({seedKey: 't28-l3-exhaust', map: 'hellas'});
+    finishInitialResearch(gExhaust);
+    advanceUntil(gExhaust, (g) => _unsafeGetEngineGame(g).phase === 'action', makePrng(6300));
+    while (_unsafeGetEngineGame(gExhaust).phase === 'action' && _unsafeGetEngineGame(gExhaust).generation === 1) {
+      const s = gExhaust.pending()[0];
+      const ch = gExhaust.choice(s);
+      const passIdx = ch.candidates.findIndex((c) => /pass/i.test(c.label));
+      if (passIdx !== -1 && _unsafeGetEngineGame(gExhaust).players.filter((p) => (p as unknown as {passed?: boolean}).passed).length === 1 ||
+          passIdx !== -1 && _unsafeGetEngineGame(gExhaust).activePlayer === _unsafeGetEngineGame(gExhaust).players[s]) {
+        // Check if only one player hasn't passed yet: drain deck right before the final pass
+        const eCheck = _unsafeGetEngineGame(gExhaust);
+        const passedCount = gExhaust.observe(0).public.passedPlayers.length;
+        if (passedCount === 1) {
+          const toDrain = eCheck.projectDeck.drawPile.length + eCheck.projectDeck.discardPile.length - 6;
+          const moved = (eCheck.projectDeck as unknown as {drawN(logger: unknown, count: number): Array<unknown>}).drawN(eCheck, toDrain);
+          eCheck.players[1].cardsInHand.push(...(moved as typeof eCheck.players[1]['cardsInHand']));
+        }
+        gExhaust.choose(s, passIdx);
+      } else {
+        gExhaust.choose(s, 0);
+      }
+    }
+    assert.equal(_unsafeGetEngineGame(gExhaust).phase, 'drafting');
+    assert.equal(_unsafeGetEngineGame(gExhaust).generation, 2);
+    // Check true world accepted for both seats in exhausted draft and exhausted research
+    const exDraftPool0 = gExhaust.unseenPool(0);
+    assert.equal(exDraftPool0.opponentDraftHandSize, 2);
+    gExhaust.clone().determinize(0, extractTrueWorld(gExhaust, 0));
+    const exDraftPool1 = gExhaust.unseenPool(1);
+    assert.equal(exDraftPool1.opponentDraftHandSize, 4);
+    gExhaust.clone().determinize(1, extractTrueWorld(gExhaust, 1));
+
+    advanceUntil(gExhaust, (g) => _unsafeGetEngineGame(g).phase === 'research' && _unsafeGetEngineGame(g).generation === 2, makePrng(6302));
+    gExhaust.clone().determinize(0, extractTrueWorld(gExhaust, 0));
+    gExhaust.clone().determinize(1, extractTrueWorld(gExhaust, 1));
+  });
+
+  it('L4: restoreDraft emits no Overwriting waitingFor warnings and determinize reseeds engine RNG', () => {
+    const gDraft = findGameAt(
+      (g) => _unsafeGetEngineGame(g).phase === 'drafting' && _unsafeGetEngineGame(g).draftRound === 2 && g.pending().includes(0),
+      't28-l4-draft',
+      'tharsis',
+    );
+    // Have opponent (seat 0) pick first so needsToDraft === false and restoreDraft() runs on seat 1 determinize
+    gDraft.choose(0, 0);
+    assert.equal(_unsafeGetEngineGame(gDraft).players[0].needsToDraft, false);
+
+    const warnings: Array<string> = [];
+    const origWarn = console.warn;
+    console.warn = (...args: Array<unknown>) => {
+      warnings.push(args.map((a) => String(a)).join(' '));
+    };
+    try {
+      const obs = gDraft.observe(1);
+      const pool = gDraft.unseenPool(1);
+      const baseWorld = sampleWorldFromObservation(obs, pool, makePrng(7001));
+      const origCurrentSeed = (_unsafeGetEngineGame(gDraft) as unknown as {rng: {current: number}}).rng.current;
+
+      const c1 = gDraft.clone();
+      c1.determinize(1, {...baseWorld, seed: 101});
+      const c2 = gDraft.clone();
+      c2.determinize(1, {...baseWorld, seed: 202});
+
+      const s1 = (_unsafeGetEngineGame(c1) as unknown as {rng: {current: number}}).rng.current;
+      const s2 = (_unsafeGetEngineGame(c2) as unknown as {rng: {current: number}}).rng.current;
+
+      assert.notEqual(s1, origCurrentSeed, 'determinize must reseed engine RNG away from true RNG');
+      assert.notEqual(s2, s1, 'different world.seed values must yield different engine RNG states');
+      assert.equal(
+        warnings.filter((w) => w.includes('Overwriting waitingFor')).length,
+        0,
+        `expected 0 Overwriting waitingFor warnings, got: ${JSON.stringify(warnings)}`,
+      );
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
+  it('conserves cards during pending unseen card-selection prompts and Buy payment closures', () => {
+    const engineCardsRoot = path.resolve(__dirname, '../../../tools/simbench/engine/build/src/server/cards');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {InventorsGuild} = require(path.join(engineCardsRoot, 'base/InventorsGuild.js')) as {
+      InventorsGuild: new () => unknown;
+    };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {Helion} = require(path.join(engineCardsRoot, 'corporation/Helion.js')) as {
+      Helion: new () => unknown;
+    };
+
+    const gIG = findGameAt(
+      (g) => _unsafeGetEngineGame(g).phase === 'preludes',
+      't28-pending-sel-ig',
+      'tharsis',
+    );
+    const eIG = _unsafeGetEngineGame(gIG) as unknown as {
+      phase: string;
+      players: Array<{
+        playedCards: Array<unknown>;
+        cardsInHand: Array<{name: string}>;
+        heat: number;
+        megaCredits: number;
+        canUseHeatAsMegaCredits: boolean;
+        getWaitingFor(): {type?: string; cards?: ReadonlyArray<{name: string}>} | undefined;
+      }>;
+      projectDeck: {drawPile: Array<{name: string}>; discardPile: Array<{name: string}>};
+    };
+    // Move Inventors' Guild from projectDeck and Helion from corpDeck (or replace in-place) so card conservation holds!
+    const eRaw = eIG as unknown as {
+      corporationDeck: {drawPile: Array<{name: string}>; discardPile: Array<{name: string}>};
+    };
+    const moveCardByName = (piles: Array<Array<{name: string}>>, name: string): boolean => {
+      for (const pile of piles) {
+        const idx = pile.findIndex((c) => c.name === name);
+        if (idx !== -1) {
+          pile.splice(idx, 1);
+          return true;
+        }
+      }
+      return false;
+    };
+    assert.ok(
+      moveCardByName([eIG.projectDeck.drawPile, eIG.projectDeck.discardPile], "Inventors' Guild"),
+      "expected Inventors' Guild in projectDeck for test setup",
+    );
+    eIG.players[0].playedCards.push(new InventorsGuild());
+    if (moveCardByName([eRaw.corporationDeck.drawPile, eRaw.corporationDeck.discardPile], 'Helion')) {
+      eIG.players[0].playedCards.push(new Helion());
+    }
+    eIG.players[0].canUseHeatAsMegaCredits = true;
+    eIG.players[0].heat = 5;
+    eIG.players[0].megaCredits = 10;
+    (gIG as unknown as {refreshCheckpoint(e: unknown): void}).refreshCheckpoint(eIG);
+    advanceUntil(gIG, (g) => _unsafeGetEngineGame(g).phase === 'action' && g.pending()[0] === 0, makePrng(8100));
+
+    // Trigger Inventors' Guild action
+    const root = gIG.choice(0);
+    const actIdx = root.candidates.findIndex((c) => /action from a played card/i.test(c.label));
+    assert.ok(actIdx >= 0);
+    gIG.choose(0, actIdx);
+    const cardAct = gIG.choice(0);
+    const igIdx = cardAct.candidates.findIndex((c) => c.id === "Inventors' Guild");
+    assert.ok(igIdx >= 0);
+    gIG.choose(0, igIdx);
+
+    // 1) Open SelectCard prompt ("Select card(s) to buy")
+    const wfOpen = eIG.players[0].getWaitingFor();
+    assert.equal(wfOpen?.type, 'card');
+    const seenCard = wfOpen?.cards?.[0]?.name;
+    assert.ok(seenCard !== undefined);
+
+    const poolOpen = gIG.unseenPool(0);
+    assert.equal(poolOpen.projects.includes(seenCard), false, 'open SelectCard offer must not be unseen');
+    const cOpen = gIG.clone();
+    cOpen.determinize(0, {
+      opponentHand: eIG.players[1].cardsInHand.map((c) => c.name),
+      projectDeck: eIG.projectDeck.drawPile.map((c) => c.name),
+      projectDiscardPile: eIG.projectDeck.discardPile.map((c) => c.name),
+    });
+    assert.deepEqual(projectCensusDuplicates(cOpen), []);
+    playToCompletion(cOpen, makePrng(8101));
+    assert.deepEqual(projectCensusDuplicates(cOpen), []);
+
+    // 2) Select Buy -> enters SelectPaymentDeferred ("Select how to spend 3 M€ for 1 cards")
+    const buyIdx = gIG.choice(0).candidates.findIndex((c) => c.id === seenCard);
+    assert.ok(buyIdx >= 0);
+    gIG.choose(0, buyIdx);
+    const doneBuyIdx = gIG.choice(0).candidates.findIndex((c) => c.id === 'done');
+    if (doneBuyIdx !== -1) {
+      gIG.choose(0, doneBuyIdx);
+    }
+    const wfPay = eIG.players[0].getWaitingFor();
+    assert.equal(wfPay?.type, 'payment');
+
+    const poolPay = gIG.unseenPool(0);
+    assert.equal(poolPay.projects.includes(seenCard), false, 'Buy payment closure card must not be unseen');
+    const cPay = gIG.clone();
+    cPay.determinize(0, {
+      opponentHand: (eIG.players[1] as unknown as {cardsInHand: Array<{name: string}>}).cardsInHand.map((c) => c.name),
+      projectDeck: eIG.projectDeck.drawPile.map((c) => c.name),
+      projectDiscardPile: eIG.projectDeck.discardPile.map((c) => c.name),
+    });
+    assert.deepEqual(projectCensusDuplicates(cPay), []);
+    playToCompletion(cPay, makePrng(8102));
+    assert.deepEqual(projectCensusDuplicates(cPay), []);
+
+    // 3) Valley Trust initialAction opening 3 preludes in SelectCard
+    const gVT = findGameAt(
+      (g) => {
+        const e = _unsafeGetEngineGame(g);
+        if (e.phase !== 'action' || e.generation !== 1 || g.pending().length !== 1) return false;
+        const s = g.pending()[0];
+        return g.observe(s).public.players[s].tableau.some((tc) => tc.name === 'Valley Trust');
+      },
+      't28-pending-sel-vt',
+      'tharsis',
+      200,
+    );
+    const vtSeat = gVT.pending()[0];
+    const vtRoot = gVT.choice(vtSeat);
+    const vtInitIdx = vtRoot.candidates.findIndex((c) => /Valley Trust/i.test(c.label));
+    assert.ok(vtInitIdx >= 0, 'Expected Valley Trust initialAction option');
+    gVT.choose(vtSeat, vtInitIdx);
+
+    const eVT = _unsafeGetEngineGame(gVT);
+    const vtWf = eVT.players[vtSeat].getWaitingFor();
+    assert.equal(vtWf?.type, 'card');
+    const vtOffered = (vtWf as unknown as {cards: ReadonlyArray<{name: string}>}).cards.map((c) => c.name);
+    assert.equal(vtOffered.length, 3);
+    const vtPool = gVT.unseenPool(vtSeat);
+    for (const p of vtOffered) {
+      assert.equal(vtPool.preludes.includes(p), false, `Valley Trust offered prelude ${p} must not be unseen`);
+    }
+    const cVT = gVT.clone();
+    const vtOpp: Seat = vtSeat === 0 ? 1 : 0;
+    cVT.determinize(vtSeat, {
+      opponentHand: eVT.players[vtOpp].cardsInHand.map((c) => c.name),
+      projectDeck: eVT.projectDeck.drawPile.map((c) => c.name),
+      projectDiscardPile: eVT.projectDeck.discardPile.map((c) => c.name),
+    });
+    playToCompletion(cVT, makePrng(8103));
+  });
+
+  it('clone() preserves pendingInitialActions tableau object identity so funded awards skip Vitor cleanly', () => {
+    const g = createGame({seedKey: 't28-truth-2', map: 'hellas'});
+    const mainRng = makePrng(9000 + 2 * 17);
+    for (let d = 0; d < 48; d++) {
+      const s = g.pending()[0];
+      g.choose(s, chooseSeeded(mainRng, g.choice(s).candidates.length));
+    }
+    const c = g.clone();
+    const eng = _unsafeGetEngineGame(c) as unknown as {
+      players: Array<{
+        tableau: {get(name: string): unknown};
+        pendingInitialActions: Array<{name: string}>;
+      }>;
+    };
+    for (const p of eng.players) {
+      for (const initCorp of p.pendingInitialActions) {
+        assert.equal(initCorp, p.tableau.get(initCorp.name));
+      }
+    }
+    playToCompletion(c, makePrng(29000 + 2 * 1000 + 48 + 1));
+    assert.ok(c.result() !== null);
+  });
+});
+
+
