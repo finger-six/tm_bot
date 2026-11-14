@@ -143,9 +143,56 @@ def test_builder_adapter_parity_initial_buy_and_draft():
             assert [c.id for c in syn_ch_pj1.candidates] == [c.id for c in live_ch_pj1.candidates]
             assert [c.label for c in syn_ch_pj1.candidates] == [c.label for c in live_ch_pj1.candidates]
 
-            # Finish initial setup & advance to drafting in gen 2
+            # Finish seat 0 initial setup -> seat 0 is deferred while seat 1 decides
             done_idx = next(i for i, c in enumerate(live_ch_pj1.candidates) if c.id == "done")
             client.choose(gid, 0, done_idx)
+            assert client.pending(gid) == [1]
+
+            # Seat 1 setup parity (must match warmstart_builder with no leak from seat 0)
+            live_obs1_corp = client.observe(gid, 1)
+            live_ch1_corp = client.choice(gid, 1)
+            priv1 = live_obs1_corp["private"]
+            corps1 = list(priv1["dealtCorporationCards"])
+            prels1 = list(priv1["dealtPreludeCards"])
+            projs1 = list(priv1["dealtProjectCards"])
+
+            syn_obs1_corp, syn_ch1_corp = build_corp_choice("Tharsis", 1, corps1, prels1, projs1)
+            _assert_structure_parity(syn_obs1_corp, live_obs1_corp, "seat1_corp_obs")
+            assert [c.id for c in syn_ch1_corp.candidates] == [c.id for c in live_ch1_corp.candidates]
+            assert live_obs1_corp["public"]["players"][0]["cardsInHandCount"] == syn_obs1_corp["public"]["players"][0]["cardsInHandCount"] == 0
+            assert live_obs1_corp["public"]["players"][0]["megacredits"] == syn_obs1_corp["public"]["players"][0]["megacredits"] == 0
+            assert live_obs1_corp["public"]["players"][0]["tableau"] == syn_obs1_corp["public"]["players"][0]["tableau"] == []
+            assert live_obs1_corp["public"]["deckSize"] == syn_obs1_corp["public"]["deckSize"]
+            assert live_obs1_corp["public"]["discardPileSize"] == syn_obs1_corp["public"]["discardPileSize"] == 0
+            assert live_obs1_corp["public"]["otherDeckSizes"] == syn_obs1_corp["public"]["otherDeckSizes"]
+
+            client.choose(gid, 1, 0)
+            live_obs1_p0 = client.observe(gid, 1)
+            live_ch1_p0 = client.choice(gid, 1)
+            syn_obs1_p0, syn_ch1_p0 = build_prelude_choice("Tharsis", 1, corps1, prels1, projs1)
+            _assert_structure_parity(syn_obs1_p0, live_obs1_p0, "seat1_prelude0_obs")
+            assert [c.id for c in syn_ch1_p0.candidates] == [c.id for c in live_ch1_p0.candidates]
+
+            p1_first = live_ch1_p0.candidates[0].id
+            client.choose(gid, 1, 0)
+            live_ch1_p1 = client.choice(gid, 1)
+            _, syn_ch1_p1 = build_prelude_choice(
+                "Tharsis", 1, corps1, prels1, projs1, picked_preludes=[p1_first]
+            )
+            assert [c.id for c in syn_ch1_p1.candidates] == [c.id for c in live_ch1_p1.candidates]
+            client.choose(gid, 1, 0)
+            ch1_pdone = client.choice(gid, 1)
+            client.choose(gid, 1, next(i for i, c in enumerate(ch1_pdone.candidates) if c.id == "done"))
+
+            live_obs1_pj0 = client.observe(gid, 1)
+            live_ch1_pj0 = client.choice(gid, 1)
+            syn_obs1_pj0, syn_ch1_pj0 = build_project_buy_choice("Tharsis", 1, corps1, prels1, projs1)
+            _assert_structure_parity(syn_obs1_pj0, live_obs1_pj0, "seat1_proj0_obs")
+            assert [c.id for c in syn_ch1_pj0.candidates] == [c.id for c in live_ch1_pj0.candidates]
+            assert live_obs1_pj0["public"]["players"][0]["cardsInHandCount"] == syn_obs1_pj0["public"]["players"][0]["cardsInHandCount"] == 0
+            assert live_obs1_pj0["public"]["discardPileSize"] == syn_obs1_pj0["public"]["discardPileSize"] == 0
+            assert live_obs1_pj0["public"]["otherDeckSizes"] == syn_obs1_pj0["public"]["otherDeckSizes"]
+
             while 1 in client.pending(gid):
                 ch1 = client.choice(gid, 1)
                 idx1 = next((i for i, c in enumerate(ch1.candidates) if c.id == "done"), 0)

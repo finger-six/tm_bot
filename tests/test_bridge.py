@@ -461,6 +461,15 @@ def test_worker_clone_generic_routing() -> None:
             pool.choose(cloned_id, 0, idx)
         assert pool.pending(cloned_id) == [1]
         assert pool.pending(gid) == [0, 1]
+        # Simultaneous deferral: neither seat's observation changes until both seats answer.
+        assert pool.observe(cloned_id, 0) == pool.observe(gid, 0)
+        assert pool.observe(cloned_id, 1) == pool.observe(gid, 1)
+        # Complete seat 1 on the clone so both initial answers commit; original stays untouched.
+        while 1 in pool.pending(cloned_id):
+            ch = pool.choice(cloned_id, 1)
+            idx = next((i for i, c in enumerate(ch.candidates) if c.id == "done"), 0)
+            pool.choose(cloned_id, 1, idx)
+        assert pool.pending(gid) == [0, 1]
         assert pool.observe(cloned_id, 0) != pool.observe(gid, 0)
         pool.close_game(cloned_id)
         assert pool.pending(gid) == [0, 1]
