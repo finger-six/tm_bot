@@ -222,6 +222,44 @@ export interface ActorObservation {
   readonly history: ActorHistory;
 }
 
+export interface UnseenPool {
+  readonly actor: Seat;
+  readonly generation: number;
+  readonly phase: string;
+  readonly deckSize: number;
+  readonly discardPileSize: number;
+  readonly opponentHandSize: number;
+  readonly opponentPreludeHandSize: number;
+  readonly opponentInitialBuyComplete: boolean;
+  readonly opponentHasHiddenPickedCorp: boolean;
+  readonly opponentDraftHandSize: number;
+  readonly opponentDraftedSize: number;
+  readonly opponentResearchOfferSize: number;
+  readonly projects: ReadonlyArray<string>;
+  readonly preludes: ReadonlyArray<string>;
+  readonly corporations: ReadonlyArray<string>;
+  readonly knownOpponentHandProjects: ReadonlyArray<string>;
+  readonly possibleOpponentHandProjects: ReadonlyArray<string>;
+  readonly knownOpponentDraftHandProjects: ReadonlyArray<string>;
+  readonly knownOpponentDraftedProjects: ReadonlyArray<string>;
+  readonly knownOpponentResearchProjects: ReadonlyArray<string>;
+  readonly knownProjectDiscardPile: ReadonlyArray<string>;
+}
+
+export interface SampledWorld {
+  readonly opponentHand: ReadonlyArray<string>;
+  readonly projectDeck: ReadonlyArray<string>;
+  readonly projectDiscardPile?: ReadonlyArray<string>;
+  readonly opponentDealtCorporations?: ReadonlyArray<string>;
+  readonly opponentDealtPreludes?: ReadonlyArray<string>;
+  readonly opponentDealtProjects?: ReadonlyArray<string>;
+  readonly opponentPickedCorporation?: string;
+  readonly opponentPreludes?: ReadonlyArray<string>;
+  readonly opponentDraftHand?: ReadonlyArray<string>;
+  readonly opponentDrafted?: ReadonlyArray<string>;
+  readonly opponentResearchOffer?: ReadonlyArray<string>;
+}
+
 export interface CreateGameOptions {
   readonly seedKey: string;
   readonly map: SupportedMap;
@@ -235,6 +273,9 @@ export interface AdapterGame {
   choose(seat: Seat, candidateIndex: number): void;
   observe(seat: Seat): ActorObservation;
   result(): GameResult | null;
+  clone(): AdapterGame;
+  unseenPool(seat: Seat): UnseenPool;
+  determinize(seat: Seat, world: SampledWorld): void;
 }
 
 export class AdapterBugError extends Error {

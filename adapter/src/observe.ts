@@ -281,6 +281,18 @@ export function buildActorObservation(
     }
   }
 
+  let draftedCards = model.draftedCards.map((c) => c.name).sort(compareStrings);
+  if (
+    draftedCards.length === 0 &&
+    engineGame.phase === Phase.RESEARCH &&
+    model.game.generation >= 2
+  ) {
+    const waiting = actorPlayer.getWaitingFor();
+    if (waiting !== undefined && waiting.type === 'card') {
+      draftedCards = (waiting as SelectCard).cards.map((c) => c.name).sort(compareStrings);
+    }
+  }
+
   return {
     actor: seat,
     public: {
@@ -323,7 +335,7 @@ export function buildActorObservation(
       dealtProjectCards: model.dealtProjectCards.map((c) => c.name).sort(compareStrings),
       pickedCorporationCard: model.pickedCorporationCard[0]?.name ?? null,
       preludeCardsInHand: model.preludeCardsInHand.map((c) => c.name).sort(compareStrings),
-      draftedCards: model.draftedCards.map((c) => c.name).sort(compareStrings),
+      draftedCards,
       currentDraftPacket,
     },
     history: cloneHistory(history),

@@ -376,6 +376,13 @@ export interface EnginePlayerViewModel {
   players: ReadonlyArray<EnginePublicPlayerModel>;
 }
 
+export interface IPreludeCard extends IProjectCard {}
+
+export interface IDeck<T extends ICard> {
+  drawPile: Array<T>;
+  discardPile: Array<T>;
+}
+
 export interface IPlayer {
   id: PlayerId;
   name: string;
@@ -394,8 +401,15 @@ export interface IPlayer {
   production: {asUnits(): Units};
   cardsInHand: Array<IProjectCard>;
   preludeCardsInHand: Array<IProjectCard>;
+  dealtCorporationCards: Array<ICorporationCard>;
+  dealtPreludeCards: Array<IPreludeCard>;
+  dealtProjectCards: Array<IProjectCard>;
+  pickedCorporationCard?: ICorporationCard;
+  draftHand: Array<IProjectCard>;
+  draftedCards: Array<IProjectCard>;
   getWaitingFor(): PlayerInput | undefined;
   setWaitingFor(input: PlayerInput, cb?: () => void): void;
+  clearWaitingFor(): void;
   process(input: InputResponse): void;
   getVictoryPoints(): {total: number};
   availableHeat(): number;
@@ -425,6 +439,10 @@ export interface IGame {
   gameAge: number;
   undoCount: number;
   deferredActions: {length: number};
+  projectDeck: IDeck<IProjectCard>;
+  preludeDeck: IDeck<IPreludeCard>;
+  corporationDeck: IDeck<ICorporationCard>;
+  researchedPlayers: Set<PlayerId>;
   gameIsOver(): boolean;
   isDoneWithFinalProduction(): boolean;
   serialize(): SerializedGame;
@@ -531,11 +549,34 @@ const {Server} = engineRequire<{
     getPlayerModel(player: IPlayer): EnginePlayerViewModel;
   };
 }>('server/models/ServerModel.js');
+const {GameCards} = engineRequire<{
+  GameCards: new (gameOptions: GameOptions) => {
+    getProjectCards(): Array<IProjectCard>;
+    getCorporationCards(): Array<ICorporationCard>;
+    getPreludeCards(): Array<IPreludeCard>;
+  };
+}>('server/GameCards.js');
+const {newProjectCard, newPrelude, newCorporationCard} = engineRequire<{
+  newProjectCard(name: CardName): IProjectCard | undefined;
+  newPrelude(name: CardName): IPreludeCard | undefined;
+  newCorporationCard(name: CardName): ICorporationCard | undefined;
+}>('server/createCard.js');
+const {newStandardDraft} = engineRequire<{
+  newStandardDraft(game: IGame): {
+    startDraft(save?: boolean): void;
+    restoreDraft(): void;
+  };
+}>('server/Draft.js');
 
 export {
   Game,
   Player,
   Server,
+  GameCards,
+  newProjectCard,
+  newPrelude,
+  newCorporationCard,
+  newStandardDraft,
   BoardName,
   Phase,
   RandomMAOptionType,

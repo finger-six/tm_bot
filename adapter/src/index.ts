@@ -25,6 +25,8 @@ export type {
   CardSelectionHistoryEntry,
   ActorHistory,
   ActorObservation,
+  UnseenPool,
+  SampledWorld,
 } from './types';
 export {
   DEFAULT_MAX_STEPS,
@@ -32,6 +34,7 @@ export {
   _unsafeGetEngineGame,
 } from './adapter';
 export {serializeObservation} from './observe';
+export {computeUnseenPool} from './determinize';
 export {playRandomGame} from './randomPlayer';
 export type {
   RecordedAtomicChoice,
