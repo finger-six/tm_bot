@@ -442,72 +442,28 @@ def test_worker_pool_other_worker_survives_single_worker_crash() -> None:
         assert pool.pending(gid1) == [0, 1]
 
 
-def test_worker_clone_generic_routing(tmp_path: Path) -> None:
-    # Check whether the adapter build currently provides AdapterGame.clone().
-    with WorkerClient() as client:
-        gid = client.create("clone-probe-1", "tharsis")
-        has_native_clone = True
-        try:
-            cloned_id = client.clone(gid)
-            assert cloned_id != gid
-            assert client.pending(cloned_id) == [0, 1]
-            client.close_game(cloned_id)
-        except BridgeError as exc:
-            has_native_clone = False
-            assert "clone" in str(exc).lower()
-            # Worker remains healthy after unsupported method error.
-            assert client.pending(gid) == [0, 1]
-
-    if not has_native_clone:
-        # Also verify the generic clone route end-to-end when AdapterGame.clone() is present.
-        adapter_js = str(REPO_ROOT / "adapter" / "dist" / "src" / "adapter.js")
-        preload = tmp_path / "clone_preload.cjs"
-        preload.write_text(
-            f"""
-const adapter = require({json.dumps(adapter_js)});
-const origCreateGame = adapter.createGame;
-function attachReplayClone(game, opts, log) {{
-  const origChoose = game.choose.bind(game);
-  game.choose = function(seat, idx) {{
-    origChoose(seat, idx);
-    log.push([seat, idx]);
-  }};
-  game.clone = function() {{
-    const fresh = origCreateGame(opts);
-    const clonedLog = [];
-    for (const [s, i] of log) {{
-      fresh.choose(s, i);
-      clonedLog.push([s, i]);
-    }}
-    return attachReplayClone(fresh, opts, clonedLog);
-  }};
-  return game;
-}}
-adapter.createGame = function(opts) {{
-  return attachReplayClone(origCreateGame(opts), opts, []);
-}};
-""".lstrip(),
-            encoding="utf-8",
-        )
-        with WorkerPool(num_workers=2, node_args=["--require", str(preload)]) as pool:
-            gid = pool.create("clone-route-seed", "tharsis", worker_index=0)
-            pool.choose(gid, 0, 0)
-            cloned_id = pool.clone(gid)
-            assert cloned_id != gid
-            assert pool.game_worker_map[cloned_id] == 0
-            assert pool.pending(cloned_id) == pool.pending(gid)
-            assert pool.observe(cloned_id, 0) == pool.observe(gid, 0)
-            assert pool.choice(cloned_id, 0) == pool.choice(gid, 0)
-            pool.choose(cloned_id, 0, 0)
-            assert pool.choice(cloned_id, 0) != pool.choice(gid, 0)
-            # Complete seat 0's initial selection on the clone only; original stays untouched.
-            while 0 in pool.pending(cloned_id):
-                ch = pool.choice(cloned_id, 0)
-                idx = next((i for i, c in enumerate(ch.candidates) if c.id == "done"), 0)
-                pool.choose(cloned_id, 0, idx)
-            assert pool.pending(cloned_id) == [1]
-            assert pool.pending(gid) == [0, 1]
-            assert pool.observe(cloned_id, 0) != pool.observe(gid, 0)
+def test_worker_clone_generic_routing() -> None:
+    with WorkerPool(num_workers=2) as pool:
+        gid = pool.create("clone-route-seed", "tharsis", worker_index=0)
+        pool.choose(gid, 0, 0)
+        cloned_id = pool.clone(gid)
+        assert cloned_id != gid
+        assert pool.game_worker_map[cloned_id] == 0
+        assert pool.pending(cloned_id) == pool.pending(gid)
+        assert pool.observe(cloned_id, 0) == pool.observe(gid, 0)
+        assert pool.choice(cloned_id, 0) == pool.choice(gid, 0)
+        pool.choose(cloned_id, 0, 0)
+        assert pool.choice(cloned_id, 0) != pool.choice(gid, 0)
+        # Complete seat 0's initial selection on the clone only; original stays untouched.
+        while 0 in pool.pending(cloned_id):
+            ch = pool.choice(cloned_id, 0)
+            idx = next((i for i, c in enumerate(ch.candidates) if c.id == "done"), 0)
+            pool.choose(cloned_id, 0, idx)
+        assert pool.pending(cloned_id) == [1]
+        assert pool.pending(gid) == [0, 1]
+        assert pool.observe(cloned_id, 0) != pool.observe(gid, 0)
+        pool.close_game(cloned_id)
+        assert pool.pending(gid) == [0, 1]
 
 
 def test_latency_benchmark_reports_single_and_batched_latencies() -> None:
