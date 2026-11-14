@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from tm_bot.env.types import ActorObservation, Choice, GameResult
@@ -32,3 +32,8 @@ class GameRunResult:
     ok: bool
     error_type: str | None = None
     error: str | None = None
+    decision_latencies_ms: tuple[tuple[float, ...], tuple[float, ...]] = field(
+        default=((), ()),
+        compare=False,
+        repr=False,
+    )

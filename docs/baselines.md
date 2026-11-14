@@ -75,3 +75,8 @@ Run the 200-game seat-swapped quick gate (`100` seeds x `2` seats across all 4 s
 ```bash
 conda run -n tm_bot python -m tm_bot.agents.gate
 ```
+
+## Full 400-Game Evaluation (`tm_bot.eval`)
+
+See [Evaluation Harness](evaluation.md) for the full `eval-*` protocol and reports. On `400` `eval-*` games (`50` seeds x `4` supported maps x `2` seats), `b1-v1` beats `b0-v1` at **96.00%** (`[94.00%, 97.75%]` 95% paired bootstrap CI), `0` failures, `+78.42` mean VP margin, with byte-identical deterministic reports across repeated runs.
+

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import copy
+import time
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from tm_bot.agents.protocol import Agent, GameRunResult
@@ -35,6 +36,8 @@ class _ActiveSlot:
     agent1: Agent
     versions: tuple[str | None, str | None]
     decisions: int = 0
+    latencies_0: list[float] = field(default_factory=list)
+    latencies_1: list[float] = field(default_factory=list)
 
 
 def _agent_version(agent: Agent) -> str | None:
@@ -85,6 +88,8 @@ def play_game(
         agent1.reset(None)
 
     decisions = 0
+    latencies_0: list[float] = []
+    latencies_1: list[float] = []
     ctx: Any = nullcontext(client) if client is not None else WorkerClient()
 
     try:
@@ -102,13 +107,21 @@ def play_game(
                             ok=False,
                             error_type="StepCapError",
                             error=f"Exceeded max_decisions={max_decisions} for seed_key={seed_key!r}",
+                            decision_latencies_ms=(tuple(latencies_0), tuple(latencies_1)),
                         )
                     seat = seats[0]
                     obs = game.observe(seat)
                     choice = game.choice(seat)
                     agent = agent0 if seat == 0 else agent1
+                    t_act = time.perf_counter()
+                    raw_idx = agent.act(obs, choice)
+                    elapsed_ms = (time.perf_counter() - t_act) * 1000.0
+                    if seat == 0:
+                        latencies_0.append(elapsed_ms)
+                    else:
+                        latencies_1.append(elapsed_ms)
                     candidate_idx = _validate_candidate_index(
-                        agent.act(obs, choice),
+                        raw_idx,
                         len(choice.candidates),
                         seat,
                     )
@@ -127,6 +140,7 @@ def play_game(
                         ok=False,
                         error_type="MissingResultError",
                         error=f"Game finished with empty pending() but result() is None for {seed_key!r}",
+                        decision_latencies_ms=(tuple(latencies_0), tuple(latencies_1)),
                     )
                 return GameRunResult(
                     seed_key=seed_key,
@@ -136,6 +150,7 @@ def play_game(
                     decisions=decisions,
                     agent_versions=versions,
                     ok=True,
+                    decision_latencies_ms=(tuple(latencies_0), tuple(latencies_1)),
                 )
     except (BridgeError, Exception) as exc:
         return GameRunResult(
@@ -148,6 +163,7 @@ def play_game(
             ok=False,
             error_type=type(exc).__name__,
             error=str(exc),
+            decision_latencies_ms=(tuple(latencies_0), tuple(latencies_1)),
         )
 
 
@@ -162,6 +178,7 @@ def _failure_from_exc(slot: _ActiveSlot, exc: BaseException) -> GameRunResult:
         ok=False,
         error_type=type(exc).__name__,
         error=str(exc),
+        decision_latencies_ms=(tuple(slot.latencies_0), tuple(slot.latencies_1)),
     )
 
 
@@ -283,6 +300,7 @@ def play_games(
                             ok=False,
                             error_type="StepCapError",
                             error=f"Exceeded max_decisions={max_decisions} for seed_key={slot.spec.seed_key!r}",
+                            decision_latencies_ms=(tuple(slot.latencies_0), tuple(slot.latencies_1)),
                         )
                         to_close_failed.append(slot)
                     else:
@@ -309,6 +327,7 @@ def play_games(
                                 ok=False,
                                 error_type="MissingResultError",
                                 error=f"result() is None for finished game {slot.spec.seed_key!r}",
+                                decision_latencies_ms=(tuple(slot.latencies_0), tuple(slot.latencies_1)),
                             )
                         else:
                             outcomes[slot.index] = GameRunResult(
@@ -319,6 +338,7 @@ def play_games(
                                 decisions=slot.decisions,
                                 agent_versions=slot.versions,
                                 ok=True,
+                                decision_latencies_ms=(tuple(slot.latencies_0), tuple(slot.latencies_1)),
                             )
 
                 if to_close_failed:
@@ -355,8 +375,15 @@ def play_games(
 
                         agent = slot.agent0 if seat == 0 else slot.agent1
                         try:
+                            t_act = time.perf_counter()
+                            raw_idx = agent.act(obs_r.value, ch_r.value)
+                            elapsed_ms = (time.perf_counter() - t_act) * 1000.0
+                            if seat == 0:
+                                slot.latencies_0.append(elapsed_ms)
+                            else:
+                                slot.latencies_1.append(elapsed_ms)
                             idx = _validate_candidate_index(
-                                agent.act(obs_r.value, ch_r.value),
+                                raw_idx,
                                 len(ch_r.value.candidates),
                                 seat,
                             )
