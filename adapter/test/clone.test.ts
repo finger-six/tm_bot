@@ -796,3 +796,95 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
     });
   });
 });
+
+// ---- Regression: research payment window (review findings H1/H2) ----
+
+type EngineCard = {name: string};
+const cardNames = (a: ReadonlyArray<EngineCard> | undefined): Array<string> => (a ?? []).map((c) => c.name);
+
+/** Project-card census over every engine zone visible outside closures; duplicates mean a card was conjured. */
+function projectCensusDuplicates(game: AdapterGame): Array<string> {
+  const e = _unsafeGetEngineGame(game) as any;
+  const seen = new Map<string, number>();
+  const add = (cards: ReadonlyArray<EngineCard> | undefined) => {
+    for (const n of cardNames(cards)) seen.set(n, (seen.get(n) ?? 0) + 1);
+  };
+  add(e.projectDeck.drawPile);
+  add(e.projectDeck.discardPile);
+  for (const p of e.players) {
+    add(p.cardsInHand);
+    add(Array.from<any>(p.playedCards ?? []).filter((c: any) => c.type !== 'corporation' && c.type !== 'prelude'));
+    add(p.draftedCards);
+    add(p.draftHand);
+    const wf = p.getWaitingFor();
+    if (wf !== undefined && wf.type === 'card' && e.phase === 'research') add(wf.cards);
+  }
+  return [...seen].filter(([, n]) => n > 1).map(([name]) => name);
+}
+
+function isResearchPaymentWindow(game: AdapterGame, seat: Seat): boolean {
+  const e = _unsafeGetEngineGame(game);
+  return e.phase === 'research' && e.generation >= 2 && e.players[seat].getWaitingFor()?.type === 'payment';
+}
+
+describe('Ticket 16 regression: research payment window', () => {
+  it('opponent mid-payment: determinized world never keeps the true research buy (no conjured cards)', () => {
+    let hits = 0;
+    for (let gi = 0; gi < 12 && hits < 3; gi++) {
+      const g = createGame({seedKey: `T-${gi}`, map: SUPPORTED_MAPS[gi % SUPPORTED_MAPS.length]});
+      const rng = makePrng(500 + gi);
+      let steps = 0;
+      while (g.result() === null && steps < 4000 && hits < 3) {
+        for (const actor of g.pending()) {
+          const opp: Seat = actor === 0 ? 1 : 0;
+          if (!isResearchPaymentWindow(g, opp)) continue;
+          hits += 1;
+          const c = g.clone();
+          const pool = c.unseenPool(actor);
+          c.determinize(actor, sampleWorldFromObservation(c.observe(actor), pool, makePrng(7 + steps)));
+          assert.notEqual(_unsafeGetEngineGame(c).players[opp].getWaitingFor()?.type, 'payment',
+            'opponent payment closure (holding true cards) must be rewound');
+          assert.deepEqual(projectCensusDuplicates(c), [], `duplicates right after determinize (T-${gi} step ${steps})`);
+          playToCompletion(c, makePrng(99));
+          assert.deepEqual(projectCensusDuplicates(c), [], `duplicates after rollout (T-${gi} step ${steps})`);
+        }
+        const s = g.pending()[0];
+        g.choose(s, chooseSeeded(rng, g.choice(s).candidates.length));
+        steps += 1;
+      }
+    }
+    assert.ok(hits > 0, 'expected to hit an opponent research payment window');
+  });
+
+  it('actor mid-payment: own pending buy is not unseen, and samples conserve cards', () => {
+    let hits = 0;
+    for (let gi = 0; gi < 12 && hits < 3; gi++) {
+      const g = createGame({seedKey: `T-${gi}`, map: SUPPORTED_MAPS[gi % SUPPORTED_MAPS.length]});
+      const rng = makePrng(500 + gi);
+      let steps = 0;
+      while (g.result() === null && steps < 4000 && hits < 3) {
+        for (const actor of g.pending()) {
+          if (!isResearchPaymentWindow(g, actor)) continue;
+          hits += 1;
+          const obs = g.observe(actor);
+          const rb = obs.history.researchBuys.find((r) => r.generation === obs.public.generation);
+          assert.ok(rb !== undefined);
+          const pool = g.unseenPool(actor);
+          for (const card of [...rb.bought, ...rb.discarded]) {
+            assert.equal(pool.projects.includes(card), false, `pending ${card} must not be unseen`);
+            assert.equal(pool.possibleOpponentHandProjects.includes(card), false);
+            assert.equal(pool.knownProjectDiscardPile.includes(card), false, `${card} not yet discarded`);
+          }
+          const c = g.clone();
+          c.determinize(actor, sampleWorldFromObservation(c.observe(actor), c.unseenPool(actor), makePrng(11 + steps)));
+          playToCompletion(c, makePrng(98));
+          assert.deepEqual(projectCensusDuplicates(c), [], `duplicates after rollout (T-${gi} step ${steps})`);
+        }
+        const s = g.pending()[0];
+        g.choose(s, chooseSeeded(rng, g.choice(s).candidates.length));
+        steps += 1;
+      }
+    }
+    assert.ok(hits > 0, 'expected to hit an actor research payment window');
+  });
+});

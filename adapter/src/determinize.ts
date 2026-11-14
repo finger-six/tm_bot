@@ -278,6 +278,15 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
   }
   for (const c of obs.private.currentDraftPacket) actorHeldProjects.add(c);
   for (const c of obs.private.draftedCards) actorHeldProjects.add(c);
+  // Research payment window: the actor has submitted its buy, but the engine holds the bought and
+  // unbought cards in the payment closure until the "bought" log entry appears. They are still with
+  // the actor (neither in hand nor in the discard pile).
+  if (obs.public.phase === Phase.RESEARCH && !actorResearchBuyByGen.has(obs.public.generation)) {
+    for (const rb of obs.history.researchBuys) {
+      if (rb.generation !== obs.public.generation) continue;
+      for (const c of [...rb.bought, ...rb.discarded]) actorHeldProjects.add(c);
+    }
+  }
 
   const isLocatedElsewhere = (c: string): boolean => tableauProjects.has(c) || actorHeldProjects.has(c);
 
@@ -1005,6 +1014,26 @@ export function applyDeterminization(
     if (waiting !== undefined && waiting.type === 'card') {
       const cardsArr = (waiting as SelectCard<IProjectCard>).cards as Array<IProjectCard>;
       cardsArr.splice(0, cardsArr.length, ...world.opponentResearchOffer!.map(instantiateProject));
+    } else {
+      // Opponent already submitted its buy and is in the payment step: the engine holds the true
+      // bought/unbought cards in the payment closure (no public "bought" log yet). Rewind the
+      // opponent to a fresh research prompt over the sampled offer; it re-chooses in this world.
+      if (waiting === undefined || waiting.type !== 'payment') {
+        throw new Error(`determinize: unexpected opponent research prompt ${waiting?.type ?? 'none'}`);
+      }
+      const mutableOpp = oppPlayer as unknown as {
+        waitingFor?: unknown;
+        waitingForCb?: unknown;
+        runResearchPhase(): void;
+      };
+      mutableOpp.waitingFor = undefined;
+      mutableOpp.waitingForCb = undefined;
+      oppPlayer.draftedCards.splice(
+        0,
+        oppPlayer.draftedCards.length,
+        ...world.opponentResearchOffer!.map(instantiateProject),
+      );
+      mutableOpp.runResearchPhase();
     }
   }
 }
