@@ -1,0 +1,322 @@
+{
+  "stage1_smoke": {
+    "generatedAt": "2026-11-14T06:10:21.340Z",
+    "nodeVersion": "v24.18.0",
+    "seedsPerMap": 20,
+    "baseSeed": 1001,
+    "maps": [
+      {
+        "boardName": "tharsis",
+        "firstGame": {
+          "seed": 1001,
+          "completed": true,
+          "generations": 17,
+          "decisions": 328,
+          "invalidActions": 0,
+          "deadlocks": 0,
+          "unexpectedInputTypes": [],
+          "scores": {
+            "red": 85,
+            "blue": 54
+          },
+          "tie": false,
+          "wallTimeMs": 59.6
+        },
+        "corpusCount": 20,
+        "completedCount": 20,
+        "completionRate": 1,
+        "meanWallTimeMs": 23.67,
+        "p95WallTimeMs": 41.25,
+        "totalInvalidActions": 0,
+        "totalDeadlocks": 0,
+        "totalStepCaps": 0,
+        "unexpectedInputTypes": []
+      },
+      {
+        "boardName": "elysium",
+        "firstGame": {
+          "seed": 1001,
+          "completed": true,
+          "generations": 18,
+          "decisions": 375,
+          "invalidActions": 0,
+          "deadlocks": 0,
+          "unexpectedInputTypes": [],
+          "scores": {
+            "red": 92,
+            "blue": 68
+          },
+          "tie": false,
+          "wallTimeMs": 22.45
+        },
+        "corpusCount": 20,
+        "completedCount": 20,
+        "completionRate": 1,
+        "meanWallTimeMs": 20.29,
+        "p95WallTimeMs": 25.77,
+        "totalInvalidActions": 0,
+        "totalDeadlocks": 0,
+        "totalStepCaps": 0,
+        "unexpectedInputTypes": []
+      },
+      {
+        "boardName": "hellas",
+        "firstGame": {
+          "seed": 1001,
+          "completed": true,
+          "generations": 22,
+          "decisions": 447,
+          "invalidActions": 0,
+          "deadlocks": 0,
+          "unexpectedInputTypes": [],
+          "scores": {
+            "red": 77,
+            "blue": 69
+          },
+          "tie": false,
+          "wallTimeMs": 22.85
+        },
+        "corpusCount": 20,
+        "completedCount": 20,
+        "completionRate": 1,
+        "meanWallTimeMs": 18.61,
+        "p95WallTimeMs": 23.77,
+        "totalInvalidActions": 0,
+        "totalDeadlocks": 0,
+        "totalStepCaps": 0,
+        "unexpectedInputTypes": []
+      },
+      {
+        "boardName": "vastitas borealis nova",
+        "firstGame": {
+          "seed": 1001,
+          "completed": true,
+          "generations": 19,
+          "decisions": 376,
+          "invalidActions": 0,
+          "deadlocks": 0,
+          "unexpectedInputTypes": [],
+          "scores": {
+            "red": 88,
+            "blue": 65
+          },
+          "tie": false,
+          "wallTimeMs": 20.47
+        },
+        "corpusCount": 20,
+        "completedCount": 20,
+        "completionRate": 1,
+        "meanWallTimeMs": 17.9,
+        "p95WallTimeMs": 21.78,
+        "totalInvalidActions": 0,
+        "totalDeadlocks": 0,
+        "totalStepCaps": 0,
+        "unexpectedInputTypes": []
+      }
+    ]
+  },
+  "stage2_determinism": {
+    "generatedAt": "2026-11-14T06:10:28.266Z",
+    "nodeVersion": "v24.18.0",
+    "maps": [
+      {
+        "boardName": "tharsis",
+        "seed": 2001,
+        "driverSeed": 2654436968,
+        "recordedCompleted": true,
+        "totalActions": 393,
+        "strictReplay": {
+          "passed": true,
+          "stepsChecked": 393,
+          "mismatches": 0,
+          "firstDiff": null,
+          "scoresMatch": true,
+          "scores": {
+            "red": 84,
+            "blue": 56
+          }
+        },
+        "alternatedDraftAndResearchOrder": {
+          "passed": false,
+          "passedIgnoringGameLog": false,
+          "simultaneousPairsFound": 85,
+          "simultaneousPairsSwapped": 85,
+          "barriersChecked": 308,
+          "strictMismatches": 308,
+          "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: Robinson Industries !== PhoboLog",
+          "nonLogMismatches": 308,
+          "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: Robinson Industries !== PhoboLog",
+          "scoresMatch": true,
+          "scores": {
+            "red": 84,
+            "blue": 56
+          }
+        },
+        "alternatedDraftOnlyOrder": {
+          "passed": true,
+          "passedIgnoringGameLog": true,
+          "simultaneousPairsFound": 63,
+          "simultaneousPairsSwapped": 63,
+          "barriersChecked": 330,
+          "strictMismatches": 0,
+          "firstStrictDiff": null,
+          "nonLogMismatches": 0,
+          "firstNonLogDiff": null,
+          "scoresMatch": true,
+          "scores": {
+            "red": 84,
+            "blue": 56
+          }
+        }
+      },
+      {
+        "boardName": "elysium",
+        "seed": 2002,
+        "driverSeed": 2654436971,
+        "recordedCompleted": true,
+        "totalActions": 355,
+        "strictReplay": {
+          "passed": true,
+          "stepsChecked": 355,
+          "mismatches": 0,
+          "firstDiff": null,
+          "scoresMatch": true,
+          "scores": {
+            "red": 82,
+            "blue": 54
+          }
+        },
+        "alternatedDraftAndResearchOrder": {
+          "passed": false,
+          "passedIgnoringGameLog": false,
+          "simultaneousPairsFound": 73,
+          "simultaneousPairsSwapped": 73,
+          "barriersChecked": 282,
+          "strictMismatches": 282,
+          "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: Saturn Systems !== Tharsis Republic",
+          "nonLogMismatches": 282,
+          "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: Saturn Systems !== Tharsis Republic",
+          "scoresMatch": true,
+          "scores": {
+            "red": 82,
+            "blue": 54
+          }
+        },
+        "alternatedDraftOnlyOrder": {
+          "passed": true,
+          "passedIgnoringGameLog": true,
+          "simultaneousPairsFound": 54,
+          "simultaneousPairsSwapped": 54,
+          "barriersChecked": 301,
+          "strictMismatches": 0,
+          "firstStrictDiff": null,
+          "nonLogMismatches": 0,
+          "firstNonLogDiff": null,
+          "scoresMatch": true,
+          "scores": {
+            "red": 82,
+            "blue": 54
+          }
+        }
+      },
+      {
+        "boardName": "hellas",
+        "seed": 2003,
+        "driverSeed": 2654436970,
+        "recordedCompleted": true,
+        "totalActions": 348,
+        "strictReplay": {
+          "passed": true,
+          "stepsChecked": 348,
+          "mismatches": 0,
+          "firstDiff": null,
+          "scoresMatch": true,
+          "scores": {
+            "red": 61,
+            "blue": 94
+          }
+        },
+        "alternatedDraftAndResearchOrder": {
+          "passed": false,
+          "passedIgnoringGameLog": false,
+          "simultaneousPairsFound": 77,
+          "simultaneousPairsSwapped": 77,
+          "barriersChecked": 271,
+          "strictMismatches": 271,
+          "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: PhoboLog !== Robinson Industries",
+          "nonLogMismatches": 271,
+          "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: PhoboLog !== Robinson Industries",
+          "scoresMatch": true,
+          "scores": {
+            "red": 61,
+            "blue": 94
+          }
+        },
+        "alternatedDraftOnlyOrder": {
+          "passed": true,
+          "passedIgnoringGameLog": true,
+          "simultaneousPairsFound": 57,
+          "simultaneousPairsSwapped": 57,
+          "barriersChecked": 291,
+          "strictMismatches": 0,
+          "firstStrictDiff": null,
+          "nonLogMismatches": 0,
+          "firstNonLogDiff": null,
+          "scoresMatch": true,
+          "scores": {
+            "red": 61,
+            "blue": 94
+          }
+        }
+      },
+      {
+        "boardName": "vastitas borealis nova",
+        "seed": 2004,
+        "driverSeed": 2654436973,
+        "recordedCompleted": true,
+        "totalActions": 600,
+        "strictReplay": {
+          "passed": true,
+          "stepsChecked": 600,
+          "mismatches": 0,
+          "firstDiff": null,
+          "scoresMatch": true,
+          "scores": {
+            "red": 98,
+            "blue": 78
+          }
+        },
+        "alternatedDraftAndResearchOrder": {
+          "passed": false,
+          "passedIgnoringGameLog": false,
+          "simultaneousPairsFound": 94,
+          "simultaneousPairsSwapped": 93,
+          "barriersChecked": 355,
+          "strictMismatches": 355,
+          "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: Tharsis Republic !== Saturn Systems",
+          "nonLogMismatches": 355,
+          "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: Tharsis Republic !== Saturn Systems",
+          "scoresMatch": false,
+          "scores": {},
+          "error": "Replay aborted at step=449 (gen=25, phase=drafting): Card Rad-Chem Factory not found"
+        },
+        "alternatedDraftOnlyOrder": {
+          "passed": true,
+          "passedIgnoringGameLog": true,
+          "simultaneousPairsFound": 93,
+          "simultaneousPairsSwapped": 93,
+          "barriersChecked": 507,
+          "strictMismatches": 0,
+          "firstStrictDiff": null,
+          "nonLogMismatches": 0,
+          "firstNonLogDiff": null,
+          "scoresMatch": true,
+          "scores": {
+            "red": 98,
+            "blue": 78
+          }
+        }
+      }
+    ]
+  }
+}

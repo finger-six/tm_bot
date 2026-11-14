@@ -1,0 +1,16 @@
+{
+  "name": "tm-simbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "In-process benchmark and validation harness for the Terraforming Mars TypeScript engine",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "smoke": "npm run build && node dist/smoke.js",
+    "determinism": "npm run build && node dist/determinism.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  }
+}

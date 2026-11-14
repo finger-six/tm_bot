@@ -1,0 +1,3 @@
+[submodule "tools/simbench/engine"]
+	path = tools/simbench/engine
+	url = https://github.com/terraforming-mars/terraforming-mars.git
