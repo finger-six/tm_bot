@@ -6,6 +6,8 @@ dependencies:
   - python=3.12
   - numpy
   - pytest
+  - pyarrow
+  - orjson
   - pip
   - setuptools
   - pip:
