@@ -405,3 +405,62 @@ describe('Slice 5: 400 random-vs-random games (100 per supported map)', () => {
 
 
 
+
+describe('Slice 3b: Simultaneous submissions are applied in canonical seat order', () => {
+  it('yields identical engine state when seat 1 completes simultaneous decisions before seat 0', () => {
+    const seedKey = 'canonical-order-7';
+    const map: SupportedMap = 'hellas';
+    const reference = playRandomGame({seedKey, map, driverSeed: 99, recordChoices: true});
+    const perSeat: [number[], number[]] = [[], []];
+    for (const step of reference.choices ?? []) {
+      perSeat[step.seat].push(step.candidateIndex);
+    }
+
+    // Replay the same per-seat choices, but always serve the highest pending seat first.
+    const reversed = createGame({seedKey, map});
+    const cursor = [0, 0];
+    while (true) {
+      const seats = reversed.pending();
+      if (seats.length === 0) {
+        break;
+      }
+      const seat = seats[seats.length - 1];
+      reversed.choose(seat, perSeat[seat][cursor[seat]++]);
+    }
+
+    const forward = createGame({seedKey, map});
+    const cursorF = [0, 0];
+    for (const step of reference.choices ?? []) {
+      forward.choose(step.seat, perSeat[step.seat][cursorF[step.seat]++]);
+    }
+
+    assert.deepEqual(reversed.result(), forward.result());
+    const normalized = (g: typeof reversed) =>
+      JSON.stringify(_unsafeGetEngineGame(g).serialize(), (k, v) => (k === 'timestamp' || k === 'createdTimeMs' || k === 'name' || k === 'timer' || k === 'lastSaveId' ? undefined : v));
+    assert.equal(normalized(reversed), normalized(forward));
+  });
+});
+
+describe('Slice 3c: Result applies the M€ tie-break', () => {
+  it('awards a VP tie to the player with more megacredits and only declares a tie when both are equal', () => {
+    const outcome = playRandomGame({seedKey: 'tiebreak-1', map: 'tharsis', driverSeed: 5});
+    assert.ok(outcome.result !== null);
+    // Construct a finished game and force equal VP by comparing against the engine directly.
+    const game = createGame({seedKey: 'tiebreak-1', map: 'tharsis'});
+    const engine = _unsafeGetEngineGame(game);
+    for (const step of playRandomGame({seedKey: 'tiebreak-1', map: 'tharsis', driverSeed: 5, recordChoices: true}).choices ?? []) {
+      game.choose(step.seat, step.candidateIndex);
+    }
+    const [a, b] = engine.players;
+    const vp = (p: typeof a) => p.getVictoryPoints().total;
+    // Monkeypatch VP to force a tie in VP, then vary megacredits.
+    const tiedVp = vp(a);
+    (b as unknown as {getVictoryPoints: () => {total: number}}).getVictoryPoints = () => ({total: tiedVp});
+    (a as unknown as {getVictoryPoints: () => {total: number}}).getVictoryPoints = () => ({total: tiedVp});
+    a.megaCredits = 10;
+    b.megaCredits = 20;
+    assert.deepEqual([game.result()?.winner, game.result()?.tie], [1, false]);
+    a.megaCredits = 20;
+    assert.deepEqual([game.result()?.winner, game.result()?.tie], [null, true]);
+  });
+});

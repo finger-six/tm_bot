@@ -36,6 +36,11 @@ export function _unsafeGetEngineGame(game: AdapterGame): IGame {
   return internal;
 }
 
+interface DeferredSubmission {
+  readonly record: ActionRecord;
+  readonly response: InputResponse;
+}
+
 export class GameAdapter implements AdapterGame {
   public readonly seedKey: string;
   public readonly map: SupportedMap;
@@ -43,6 +48,8 @@ export class GameAdapter implements AdapterGame {
   private readonly history: Array<ActionRecord> = [];
   private readonly activeSteppers: [DecisionStepper | undefined, DecisionStepper | undefined] = [undefined, undefined];
   private readonly maxSteps: number;
+  // Completed responses held back so simultaneous prompts reach the engine in canonical seat order.
+  private readonly deferred: [DeferredSubmission | undefined, DeferredSubmission | undefined] = [undefined, undefined];
 
   constructor(engineGame: IGame, seedKey: string, map: SupportedMap, maxSteps = DEFAULT_MAX_STEPS) {
     this[ENGINE_TO_ADAPTER_SYMBOL] = engineGame;
@@ -59,7 +66,7 @@ export class GameAdapter implements AdapterGame {
     const seats: Array<Seat> = [];
     for (let i = 0; i < game.players.length; i++) {
       const waiting = game.players[i].getWaitingFor();
-      if (waiting !== undefined && !waiting.optional) {
+      if (waiting !== undefined && !waiting.optional && this.deferred[i] === undefined) {
         seats.push(i as Seat);
       }
     }
@@ -118,10 +125,40 @@ export class GameAdapter implements AdapterGame {
     };
 
     this.activeSteppers[seat] = undefined;
+
+    // A lower seat still owes an answer to the same simultaneous phase: hold this response.
+    if (this.lowerSeatPending(seat)) {
+      this.deferred[seat] = {record, response: outcome.response};
+      return;
+    }
+    this.submit(seat, record, outcome.response);
+    for (let other = seat + 1; other < this.deferred.length; other++) {
+      const held = this.deferred[other];
+      if (held !== undefined && !this.lowerSeatPending(other as Seat)) {
+        this.deferred[other] = undefined;
+        this.submit(other as Seat, held.record, held.response);
+      }
+    }
+  }
+
+  private lowerSeatPending(seat: Seat): boolean {
+    const game = this[ENGINE_TO_ADAPTER_SYMBOL];
+    for (let i = 0; i < seat; i++) {
+      const waiting = game.players[i].getWaitingFor();
+      if (waiting !== undefined && !waiting.optional && this.deferred[i] === undefined) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private submit(seat: Seat, record: ActionRecord, response: InputResponse): void {
+    const game = this[ENGINE_TO_ADAPTER_SYMBOL];
     const player = game.players[seat];
+    record = {...record, decisionIndex: this.history.length};
 
     try {
-      player.process(outcome.response);
+      player.process(response);
     } catch (err) {
       const failureHistory = [...this.history, record];
       throw new AdapterBugError({
@@ -154,8 +191,11 @@ export class GameAdapter implements AdapterGame {
     }
     const s0 = game.players[0].getVictoryPoints().total;
     const s1 = game.players[1].getVictoryPoints().total;
-    const tie = s0 === s1;
-    const winner: Seat | null = tie ? null : s0 > s1 ? 0 : 1;
+    // Official tie-break: most M€ wins; an exact tie needs equal VP and equal M€.
+    const k0 = s0 !== s1 ? s0 : game.players[0].megaCredits;
+    const k1 = s0 !== s1 ? s1 : game.players[1].megaCredits;
+    const tie = k0 === k1;
+    const winner: Seat | null = tie ? null : k0 > k1 ? 0 : 1;
     return {
       scores: [s0, s1],
       winner,
@@ -175,7 +215,7 @@ export class GameAdapter implements AdapterGame {
 
     const player = game.players[seat];
     const waiting = player.getWaitingFor();
-    if (waiting === undefined || waiting.optional) {
+    if (waiting === undefined || waiting.optional || this.deferred[seat] !== undefined) {
       throw new Error(`Seat ${seat} is not pending a required decision`);
     }
 
