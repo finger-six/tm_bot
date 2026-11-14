@@ -19,10 +19,10 @@ def paired_bootstrap_ci(
 ) -> tuple[float | None, tuple[float, float] | None]:
     """Compute mean win rate and paired bootstrap percentile CI over `(points, completed_count)` pairs.
 
-    Each element of `pair_totals` represents one `(seed_key, map)` pair of seat-swapped games:
-    `points` is the sum of Agent A scores (`win=1.0, tie=0.5, loss=0.0`), and `completed_count`
-    is the number of completed games in that pair (`1` or `2`). Pairs with `completed_count <= 0`
-    are ignored.
+    Each element of `pair_totals` is one resampling cluster of seat-swapped games (a whole seed
+    for the overall rate, a `(seed_key, map)` pair for per-map rates): `points` is the sum of
+    Agent A scores (`win=1.0, tie=0.5, loss=0.0`), and `completed_count` is the number of
+    completed games in the cluster. Clusters with `completed_count <= 0` are ignored.
     """
     if n_resamples < 1:
         raise ValueError(f"n_resamples must be >= 1, got {n_resamples}")

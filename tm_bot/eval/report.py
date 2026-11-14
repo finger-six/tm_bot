@@ -90,7 +90,7 @@ def summarize_evaluation(
     completed_decisions_list: list[int] = []
     total_decisions = 0
 
-    pair_buckets: dict[tuple[str, str], list[float]] = {}
+    pair_buckets: dict[str, list[float]] = {}
     map_pair_buckets: dict[str, dict[tuple[str, str], list[float]]] = {
         m: {} for m in SUPPORTED_MAPS
     }
@@ -137,8 +137,11 @@ def summarize_evaluation(
         )
         map_bucket["total_games"] += 1
 
+        # The adapter derives the deal from the seed key alone, so one seed's games on every map
+        # are correlated: the overall bootstrap resamples whole seeds (all maps x both seats).
         pair_key = (meta.seed_key, meta.map_name)
-        pair_buckets.setdefault(pair_key, [])
+        seed_cluster_key = meta.seed_key
+        pair_buckets.setdefault(seed_cluster_key, [])
         map_pair_buckets.setdefault(meta.map_name, {}).setdefault(pair_key, [])
 
         if not out.ok or out.result is None:
@@ -183,7 +186,7 @@ def summarize_evaluation(
             pts = 0.0
             map_bucket["losses"] += 1
 
-        pair_buckets[pair_key].append(pts)
+        pair_buckets[seed_cluster_key].append(pts)
         map_pair_buckets[meta.map_name][pair_key].append(pts)
 
     total_games = len(outcomes)

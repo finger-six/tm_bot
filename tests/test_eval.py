@@ -210,6 +210,43 @@ def test_paired_bootstrap_ci_on_synthetic_outcomes() -> None:
     assert ci_e is None
 
 
+def test_overall_bootstrap_resamples_whole_seeds_across_maps() -> None:
+    from tm_bot.eval.pairing import PairedGameMeta
+
+    # The deal depends on the seed key only, so a seed's games on all maps form one cluster.
+    # Seed 0: A wins all 8 games; seed 1: A loses all 8. Resampling 2 seed clusters can only
+    # give means {0, 0.5, 1}, so the 95% CI is [0, 1]; (seed, map) clustering would be narrower.
+    metas: list[PairedGameMeta] = []
+    outcomes: list[GameRunResult] = []
+    for s_idx in range(2):
+        sk = f"eval-{s_idx:04d}"
+        for map_name in SUPPORTED_MAPS:
+            for a_seat in (0, 1):
+                metas.append(PairedGameMeta(seed_key=sk, map_name=map_name, a_seat=a_seat, seed_a=1, seed_b=2))
+                a_vp, b_vp = (60, 40) if s_idx == 0 else (40, 60)
+                outcomes.append(
+                    _make_run_result(seed_key=sk, map_name=map_name, a_seat=a_seat, a_vp=a_vp, b_vp=b_vp)
+                )
+
+    report = summarize_evaluation(
+        outcomes=outcomes,
+        metas=metas,
+        namespace="eval",
+        agent_a_name="a",
+        agent_b_name="b",
+        a_training_seeds=0,
+        b_training_seeds=0,
+        workers=1,
+        batch_size=1,
+        wall_time_s=1.0,
+        bootstrap_resamples=2000,
+        bootstrap_seed=DEFAULT_BOOTSTRAP_SEED,
+    )
+    det = report["deterministic"]
+    assert det["win_rate"] == pytest.approx(0.5)
+    assert det["win_rate_ci_95"] == [0.0, 1.0]
+
+
 def test_scoring_ties_and_failures_excluded_from_win_rate() -> None:
     from tm_bot.eval.pairing import PairedGameMeta
 
