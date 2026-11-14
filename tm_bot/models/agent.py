@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import random
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import torch
@@ -34,11 +34,28 @@ class PolicyValueAgent:
         self.vocab = vocab
         self.temperature = float(temperature)
         self.version = version
+        self._seed = seed
         self._rng = random.Random(seed)
 
     def reset(self, seed: int | None = None) -> None:
         if seed is not None:
+            self._seed = seed
             self._rng = random.Random(seed)
+        else:
+            self._rng = random.Random(self._seed)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> PolicyValueAgent:
+        cls = self.__class__
+        clone = cls.__new__(cls)
+        memo[id(self)] = clone
+        clone.device = self.device
+        clone.model = self.model
+        clone.vocab = self.vocab
+        clone.temperature = self.temperature
+        clone.version = self.version
+        clone._seed = self._seed
+        clone._rng = random.Random(self._seed)
+        return clone
 
     @torch.inference_mode()
     def predict(
@@ -59,15 +76,21 @@ class PolicyValueAgent:
         self,
         observations: Sequence[ActorObservation],
         choices: Sequence[Choice],
+        *,
+        compute_value: bool = True,
     ) -> tuple[list[np.ndarray], np.ndarray]:
         """Batched inference returning `(list_of_prob_arrays, values_array)`."""
         enc_obs = [encode_observation(o, self.vocab) for o in observations]
         enc_ch = [encode_choice(c, o, self.vocab) for o, c in zip(observations, choices)]
         batch = collate_encoded_batch(enc_obs, enc_ch)
         tensors = {k: v.to(self.device) for k, v in batch.items()}
-        out = self.model(tensors, compute_policy=True, compute_value=True)
+        out = self.model(tensors, compute_policy=True, compute_value=compute_value)
         probs_tensor = out["policy_probs"].detach().cpu().numpy()
-        values = out["value"].detach().cpu().numpy()
+        values = (
+            out["value"].detach().cpu().numpy()
+            if compute_value
+            else np.zeros((len(observations),), dtype=np.float32)
+        )
         probs_list = [probs_tensor[i, : len(c.candidates)].copy() for i, c in enumerate(choices)]
         return probs_list, values
 

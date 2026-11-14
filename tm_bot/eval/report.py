@@ -111,16 +111,23 @@ def summarize_evaluation(
     failures: list[dict[str, Any]] = []
     latencies_a: list[float] = []
     latencies_b: list[float] = []
+    searched_latencies_a: list[float] = []
+    searched_latencies_b: list[float] = []
 
     for out, meta in zip(outcomes, metas):
         total_decisions += int(out.decisions)
         lat0, lat1 = out.decision_latencies_ms
+        slat0, slat1 = out.searched_decision_latencies_ms
         if meta.a_seat == 0:
             latencies_a.extend(lat0)
             latencies_b.extend(lat1)
+            searched_latencies_a.extend(slat0)
+            searched_latencies_b.extend(slat1)
         else:
             latencies_a.extend(lat1)
             latencies_b.extend(lat0)
+            searched_latencies_a.extend(slat1)
+            searched_latencies_b.extend(slat0)
 
         map_bucket = map_stats_raw.setdefault(
             meta.map_name,
@@ -302,17 +309,23 @@ def summarize_evaluation(
         "failures": failures,
     }
 
+    latency_ms: dict[str, Any] = {
+        "agent_a": summarize_latency(latencies_a),
+        "agent_b": summarize_latency(latencies_b),
+        "overall": summarize_latency([*latencies_a, *latencies_b]),
+    }
+    if searched_latencies_a:
+        latency_ms["agent_a_searched"] = summarize_latency(searched_latencies_a)
+    if searched_latencies_b:
+        latency_ms["agent_b_searched"] = summarize_latency(searched_latencies_b)
+
     runtime: dict[str, Any] = {
         "workers": int(workers),
         "batch_size": int(batch_size),
         "wall_time_s": float(wall_time_s),
         "games_per_s": (float(total_games) / float(wall_time_s)) if wall_time_s > 0.0 else None,
         "hardware": collect_hardware_info(),
-        "latency_ms": {
-            "agent_a": summarize_latency(latencies_a),
-            "agent_b": summarize_latency(latencies_b),
-            "overall": summarize_latency([*latencies_a, *latencies_b]),
-        },
+        "latency_ms": latency_ms,
     }
 
     return {
@@ -437,6 +450,20 @@ def format_markdown_report(
                 f"(n={lat_all['decisions']})",
             ]
         )
+        if "agent_a_searched" in rt["latency_ms"]:
+            lat_sa = rt["latency_ms"]["agent_a_searched"]
+            lines.append(
+                f"- **{a_info['name']} Searched Decision Latency**: p50={_fmt_float(lat_sa['p50_ms'], digits=4)} ms | "
+                f"p95={_fmt_float(lat_sa['p95_ms'], digits=4)} ms | mean={_fmt_float(lat_sa['mean_ms'], digits=4)} ms "
+                f"(n={lat_sa['decisions']})"
+            )
+        if "agent_b_searched" in rt["latency_ms"]:
+            lat_sb = rt["latency_ms"]["agent_b_searched"]
+            lines.append(
+                f"- **{b_info['name']} Searched Decision Latency**: p50={_fmt_float(lat_sb['p50_ms'], digits=4)} ms | "
+                f"p95={_fmt_float(lat_sb['p95_ms'], digits=4)} ms | mean={_fmt_float(lat_sb['mean_ms'], digits=4)} ms "
+                f"(n={lat_sb['decisions']})"
+            )
 
     lines.append("")
     return "\n".join(lines)

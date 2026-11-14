@@ -183,9 +183,31 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
     }
 
     if (msg === 'Discarded ${0} cards ${1}') {
-      for (const c of extractCardNames(entry.data[1]?.value)) {
-        if (pools.projectSet.has(c)) {
-          publicDiscards.push({card: c, logIdx: idx, generation: curGen});
+      // Deck.drawByConditionOrThrow emits this summary only after its draw loop finishes,
+      // whereas Deck.shuffleIfNecessary emits the reshuffle message *during* the loop.
+      // If a reshuffle occurred inside the same loop (immediately before this entry,
+      // optionally separated only by the exhausted-deck log), earlier entries in this
+      // batch were shuffled back into drawPile and we cannot split which subset remained
+      // in discardPile. Leave the batch in the unseen pool so belief stays sound.
+      let spansReshuffle = false;
+      if (lastReshuffleIdx !== -1) {
+        spansReshuffle = true;
+        for (let j = lastReshuffleIdx + 1; j < idx; j++) {
+          const between = log[j].message;
+          if (
+            between !== 'The project discard pile has been shuffled to form a new deck.' &&
+            between !== 'discarded every project card without a match'
+          ) {
+            spansReshuffle = false;
+            break;
+          }
+        }
+      }
+      if (!spansReshuffle) {
+        for (const c of extractCardNames(entry.data[1]?.value)) {
+          if (pools.projectSet.has(c)) {
+            publicDiscards.push({card: c, logIdx: idx, generation: curGen});
+          }
         }
       }
       continue;
@@ -589,17 +611,12 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
     }
   }
 
-  // Cards actor previously bought/took/selected into own hand, now missing from both actorHand and tableau
+  // Cards actor previously bought or selected into own hand, now missing from both actorHand and tableau
   // -> actor discarded them via Sell Patents or Mars University!
+  // Note: drafted cards only enter actorHand if bought in researchBuys (unbought ones go via rb.discarded).
   const allActorAcquired = new Set<string>();
   if (actorInitialBuy !== null) {
     for (const c of actorInitialBuy.projectsBought) allActorAcquired.add(c);
-  }
-  for (const d of obs.history.drafts) {
-    // Only consider drafts whose Research phase finished (not still in DRAFTING or incomplete)
-    if (d.generation < obs.public.generation || (obs.public.phase !== Phase.DRAFTING && obs.public.phase !== Phase.RESEARCH)) {
-      for (const c of d.taken) allActorAcquired.add(c);
-    }
   }
   for (const rb of obs.history.researchBuys) {
     for (const c of rb.bought) allActorAcquired.add(c);
@@ -766,20 +783,139 @@ function deriveWorldShuffleSeed(obs: ActorObservation, world: SampledWorld): num
   return (h ^ (h >>> 16)) >>> 0;
 }
 
-function shuffleWithSeed<T>(items: ReadonlyArray<T>, seedU32: number): Array<T> {
-  const arr = items.slice();
-  let s = seedU32 >>> 0;
-  for (let i = arr.length - 1; i > 0; i--) {
+function makeMulberry32(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
     let t = (s = (s + 0x6d2b79f5) | 0);
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    const r = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    const j = Math.floor(r * (i + 1));
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleWithSeed<T>(items: ReadonlyArray<T>, seedU32: number): Array<T> {
+  return shuffleWithRng(items, makeMulberry32(seedU32));
+}
+
+function shuffleWithRng<T>(items: ReadonlyArray<T>, rng: () => number): Array<T> {
+  const arr = items.slice();
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
     const tmp = arr[i];
     arr[i] = arr[j];
     arr[j] = tmp;
   }
   return arr;
+}
+
+/**
+ * Pure belief sampler constructing a legal SampledWorld from (ActorObservation, seed) ONLY.
+ * Uniform over the actor-consistent unseen pool, respecting known passed cards and hand sizes.
+ */
+export function sampleWorldFromObservation(obs: ActorObservation, seed: number): SampledWorld {
+  const pool = computeUnseenPool(obs);
+  const seedU32 = seed >>> 0;
+  const rng = makeMulberry32(seedU32);
+
+  const availableProjects = shuffleWithRng(pool.projects, rng);
+  const availablePreludes = shuffleWithRng(pool.preludes, rng);
+  const availableCorps = shuffleWithRng(pool.corporations, rng);
+  const availablePossOpp = shuffleWithRng(pool.possibleOpponentHandProjects, rng);
+
+  const takeProjects = (count: number): Array<string> => {
+    if (availableProjects.length < count) {
+      throw new Error(`Not enough unseen projects: need ${count}, have ${availableProjects.length}`);
+    }
+    return availableProjects.splice(0, count);
+  };
+
+  let opponentDealtCorporations: Array<string> | undefined;
+  let opponentDealtPreludes: Array<string> | undefined;
+  let opponentDealtProjects: Array<string> | undefined;
+  let opponentPickedCorporation: string | undefined;
+  let opponentPreludes: Array<string> | undefined;
+  let opponentDraftHand: Array<string> | undefined;
+  let opponentDrafted: Array<string> | undefined;
+  let opponentResearchOffer: Array<string> | undefined;
+
+  if (!pool.opponentInitialBuyComplete) {
+    opponentDealtCorporations = availableCorps.splice(0, constants.CORPORATION_CARDS_DEALT_PER_PLAYER);
+    opponentDealtPreludes = availablePreludes.splice(0, constants.PRELUDE_CARDS_DEALT_PER_PLAYER);
+    opponentDealtProjects = takeProjects(10);
+  } else if (pool.opponentHasHiddenPickedCorp) {
+    opponentPickedCorporation = shuffleWithRng(pool.opponentPickedCorporationCandidates, rng)[0];
+  }
+
+  if (pool.opponentPreludeHandSize > 0) {
+    opponentPreludes = availablePreludes.splice(0, pool.opponentPreludeHandSize);
+  }
+
+  if (pool.opponentDraftHandSize > 0 || pool.opponentDraftedSize > 0) {
+    const needDraftHandUnseen = Math.max(
+      0,
+      pool.opponentDraftHandSize - pool.knownOpponentDraftHandProjects.length,
+    );
+    const needDraftedUnseen = Math.max(
+      0,
+      pool.opponentDraftedSize - pool.knownOpponentDraftedProjects.length,
+    );
+    opponentDraftHand = [
+      ...pool.knownOpponentDraftHandProjects,
+      ...takeProjects(needDraftHandUnseen),
+    ];
+    opponentDrafted = [
+      ...pool.knownOpponentDraftedProjects,
+      ...takeProjects(needDraftedUnseen),
+    ];
+  }
+
+  if (pool.opponentResearchOfferSize > 0) {
+    const needResUnseen = Math.max(
+      0,
+      pool.opponentResearchOfferSize - pool.knownOpponentResearchProjects.length,
+    );
+    opponentResearchOffer = [
+      ...pool.knownOpponentResearchProjects,
+      ...takeProjects(needResUnseen),
+    ];
+  }
+
+  const opponentHand: Array<string> = [...pool.knownOpponentHandProjects];
+  const minPossNeeded = Math.max(
+    0,
+    pool.knownProjectDiscardPile.length + availablePossOpp.length - pool.discardPileSize,
+  );
+  const maxPossAllowed = Math.min(
+    availablePossOpp.length,
+    pool.opponentHandSize - opponentHand.length,
+  );
+  const takePoss =
+    minPossNeeded >= maxPossAllowed
+      ? minPossNeeded
+      : minPossNeeded + Math.floor(rng() * (maxPossAllowed - minPossNeeded + 1));
+  opponentHand.push(...availablePossOpp.splice(0, takePoss));
+
+  const remainingOppHand = pool.opponentHandSize - opponentHand.length;
+  if (remainingOppHand < 0) {
+    throw new Error('opponentHand exceeded opponentHandSize');
+  }
+  opponentHand.push(...takeProjects(remainingOppHand));
+
+  const projectDeck = takeProjects(pool.deckSize);
+
+  return {
+    opponentHand,
+    projectDeck,
+    seed: seedU32,
+    ...(opponentDealtCorporations !== undefined ? {opponentDealtCorporations} : {}),
+    ...(opponentDealtPreludes !== undefined ? {opponentDealtPreludes} : {}),
+    ...(opponentDealtProjects !== undefined ? {opponentDealtProjects} : {}),
+    ...(opponentPickedCorporation !== undefined ? {opponentPickedCorporation} : {}),
+    ...(opponentPreludes !== undefined ? {opponentPreludes} : {}),
+    ...(opponentDraftHand !== undefined ? {opponentDraftHand} : {}),
+    ...(opponentDrafted !== undefined ? {opponentDrafted} : {}),
+    ...(opponentResearchOffer !== undefined ? {opponentResearchOffer} : {}),
+  };
 }
 
 export function applyDeterminization(

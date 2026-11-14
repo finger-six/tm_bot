@@ -488,5 +488,55 @@ def test_latency_benchmark_reports_single_and_batched_latencies() -> None:
     assert report.batched_amortized_step_ms < report.single_step_mean_ms
 
 
+def test_determinize_clone_single_batched_and_pool_routing() -> None:
+    with WorkerClient() as client:
+        with client.open("det-clone-bridge-1", "tharsis") as live:
+            obs0_before = live.observe(0)
+            obs1_before = live.observe(1)
+            ch0_before = live.choice(0)
 
+            det_a = live.determinize_clone(0, seed=101)
+            det_b = live.determinize_clone(0, seed=101)
+            det_c = live.determinize_clone(0, seed=202)
+            assert det_a.game_id != live.game_id
+            assert det_a.observe(0) == obs0_before
+            assert det_a.observe(1) == det_b.observe(1)
+            assert det_a.observe(1) != det_c.observe(1)
 
+            # Mutating clone leaves live game untouched
+            det_a.choose(0, 0)
+            assert live.observe(0) == obs0_before
+            assert live.observe(1) == obs1_before
+            assert live.choice(0) == ch0_before
+
+            det_a.close()
+            det_b.close()
+            det_c.close()
+            assert client.ping()["games"] == 1
+
+    with WorkerPool(num_workers=2) as pool:
+        gid0 = pool.create("det-pool-0", "tharsis", worker_index=0)
+        gid1 = pool.create("det-pool-1", "elysium", worker_index=1)
+
+        det_ids = pool.batch(
+            [
+                Op.determinize_clone(gid0, 0, seed=77),
+                Op.determinize_clone(gid1, 1, seed=88),
+            ]
+        )
+        assert len(det_ids) == 2
+        assert pool.game_worker_map[det_ids[0]] == 0
+        assert pool.game_worker_map[det_ids[1]] == 1
+        assert pool.active_games == 4
+
+        # Error on non-pending seat does not leak game registration
+        while 0 in pool.pending(gid0):
+            ch = pool.choice(gid0, 0)
+            idx = next((i for i, c in enumerate(ch.candidates) if c.id == "done"), 0)
+            pool.choose(gid0, 0, idx)
+        with pytest.raises(AdapterBugError, match="requires seat 0 to be pending"):
+            pool.determinize_clone(gid0, 0, seed=99)
+        assert pool.active_games == 4
+
+        pool.batch([Op.close(gid) for gid in [gid0, gid1, *det_ids]])
+        assert pool.active_games == 0

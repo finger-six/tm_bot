@@ -7,7 +7,7 @@ from pathlib import Path
 
 from tm_bot.agents.runner import DEFAULT_MAX_DECISIONS
 from tm_bot.env.types import SUPPORTED_MAPS
-from tm_bot.eval.harness import evaluate_agents, resolve_agent_factory
+from tm_bot.eval.harness import evaluate_agents, evaluate_agents_chunked, resolve_agent_factory
 from tm_bot.eval.report import format_markdown_report, write_report_files
 from tm_bot.eval.seeds import SEED_NAMESPACES, validate_namespace
 from tm_bot.eval.stats import DEFAULT_BOOTSTRAP_RESAMPLES, DEFAULT_BOOTSTRAP_SEED
@@ -60,6 +60,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Omit runtime timing, latency, and hardware sections from report.json and report.md.",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from out/_eval_checkpoint.jsonl if present, or initialize it.",
+    )
+    parser.add_argument(
+        "--max-games-per-run",
+        type=int,
+        default=None,
+        help="Optional cap on games executed in this invocation when checkpointing with --resume.",
+    )
 
     args = parser.parse_args(argv)
     namespace = validate_namespace(args.namespace)
@@ -75,25 +86,67 @@ def main(argv: list[str] | None = None) -> int:
     factory_a = resolve_agent_factory(args.a)
     factory_b = resolve_agent_factory(args.b)
 
-    report = evaluate_agents(
-        agent_a=factory_a,
-        agent_b=factory_b,
-        agent_a_name=args.a,
-        agent_b_name=args.b,
-        a_training_seeds=args.a_training_seeds,
-        b_training_seeds=args.b_training_seeds,
-        namespace=namespace,
-        num_seeds=num_seeds,
-        seed_start=args.seed_start,
-        maps=SUPPORTED_MAPS,
-        num_workers=args.workers,
-        batch_size=args.batch_size,
-        max_decisions=args.max_decisions,
-        bootstrap_resamples=args.bootstrap_resamples,
-        bootstrap_seed=args.bootstrap_seed,
-    )
+    if args.resume or args.max_games_per_run is not None:
+        ckpt_path = args.out / "_eval_checkpoint.jsonl"
+        report, done, total, acc_wall = evaluate_agents_chunked(
+            checkpoint_path=ckpt_path,
+            resume=args.resume,
+            max_games_per_run=args.max_games_per_run,
+            run_signature={
+                "a": args.a,
+                "b": args.b,
+                "namespace": namespace,
+                "num_seeds": num_seeds,
+                "seed_start": args.seed_start,
+                "maps": list(SUPPORTED_MAPS),
+                "total_games": args.games,
+            },
+            agent_a=factory_a,
+            agent_b=factory_b,
+            agent_a_name=args.a,
+            agent_b_name=args.b,
+            a_training_seeds=args.a_training_seeds,
+            b_training_seeds=args.b_training_seeds,
+            namespace=namespace,
+            num_seeds=num_seeds,
+            seed_start=args.seed_start,
+            maps=SUPPORTED_MAPS,
+            num_workers=args.workers,
+            batch_size=args.batch_size,
+            max_decisions=args.max_decisions,
+            bootstrap_resamples=args.bootstrap_resamples,
+            bootstrap_seed=args.bootstrap_seed,
+        )
+        if report is None:
+            print(
+                f"Progress: {done}/{total} games completed "
+                f"(accumulated_wall_time_s={acc_wall:.2f}s). Re-run with --resume to continue."
+            )
+            return 0
+    else:
+        report = evaluate_agents(
+            agent_a=factory_a,
+            agent_b=factory_b,
+            agent_a_name=args.a,
+            agent_b_name=args.b,
+            a_training_seeds=args.a_training_seeds,
+            b_training_seeds=args.b_training_seeds,
+            namespace=namespace,
+            num_seeds=num_seeds,
+            seed_start=args.seed_start,
+            maps=SUPPORTED_MAPS,
+            num_workers=args.workers,
+            batch_size=args.batch_size,
+            max_decisions=args.max_decisions,
+            bootstrap_resamples=args.bootstrap_resamples,
+            bootstrap_seed=args.bootstrap_seed,
+        )
 
     paths = write_report_files(report, args.out, omit_timing=args.omit_timing)
+    ckpt_file = args.out / "_eval_checkpoint.jsonl"
+    if (args.resume or args.max_games_per_run is not None) and ckpt_file.exists():
+        # Keep the per-game outcomes (failures included) next to the report.
+        ckpt_file.replace(args.out / "games.jsonl")
     print(format_markdown_report(report, omit_timing=args.omit_timing))
     print(f"Wrote reports: {paths['json']}, {paths['deterministic_json']}, {paths['markdown']}")
     return 0

@@ -70,6 +70,14 @@ class GameSession:
         cloned_id = self._client.clone(self.game_id, new_game_id=new_game_id)
         return GameSession(self._client, cloned_id, self.seed_key, self.map)
 
+    def determinize_clone(
+        self, seat: Seat, seed: int, *, new_game_id: str | None = None
+    ) -> GameSession:
+        cloned_id = self._client.determinize_clone(
+            self.game_id, seat, seed, new_game_id=new_game_id
+        )
+        return GameSession(self._client, cloned_id, self.seed_key, self.map)
+
     def close(self) -> bool:
         if self._closed:
             return False
@@ -316,6 +324,22 @@ class WorkerClient:
         self._game_seeds[assigned_id] = str(res.get("seedKey") or self._game_seeds.get(game_id, ""))
         return assigned_id
 
+    def determinize_clone(
+        self,
+        game_id: str,
+        seat: Seat,
+        seed: int,
+        *,
+        new_game_id: str | None = None,
+    ) -> str:
+        params: dict[str, Any] = {"gameId": game_id, "seat": seat, "seed": int(seed)}
+        if new_game_id is not None:
+            params["newGameId"] = new_game_id
+        res = self._call("determinize_clone", params, game_id=game_id)
+        assigned_id = str(res["gameId"])
+        self._game_seeds[assigned_id] = str(res.get("seedKey") or self._game_seeds.get(game_id, ""))
+        return assigned_id
+
     def close_game(self, game_id: str) -> bool:
         res = self._call("close", {"gameId": game_id}, game_id=game_id)
         self._game_seeds.pop(game_id, None)
@@ -339,7 +363,7 @@ class WorkerClient:
             return None
         if method == "result":
             return _parse_result(res["result"])
-        if method == "clone":
+        if method in ("clone", "determinize_clone"):
             assigned_id = str(res["gameId"])
             src_id = params.get("gameId")
             fallback_seed = self._game_seeds.get(src_id, "") if isinstance(src_id, str) else ""

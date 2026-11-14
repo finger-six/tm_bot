@@ -506,6 +506,27 @@ def test_evaluation_reproduces_byte_identical_deterministic_report_and_cli(tmp_p
     assert B0_VERSION in md1
 
 
+def test_resolve_agent_factory_query_kwargs() -> None:
+    from tm_bot.env import Candidate, Choice
+    from tm_bot.eval import resolve_agent_factory
+
+    f_b0 = resolve_agent_factory("tm_bot.agents.b0:B0Agent?seed=42")
+    a_b0 = f_b0()
+    assert isinstance(a_b0, B0Agent)
+    a_b0_2 = resolve_agent_factory("tm_bot.agents.b0:B0Agent?seed=42")()
+    obs: Any = {"actor": 0}
+    ch = Choice(
+        seat=0,
+        kind="branch",
+        prompt="p",
+        candidates=tuple(Candidate(id=f"c{i}", label=f"C{i}") for i in range(5)),
+    )
+    assert [a_b0.act(obs, ch) for _ in range(10)] == [a_b0_2.act(obs, ch) for _ in range(10)]
+
+    with pytest.raises(ValueError):
+        resolve_agent_factory("tm_bot.agents.b0:B0Agent?badparam")
+
+
 def test_cli_omit_timing_and_games_validation(tmp_path: Path) -> None:
     # Invalid --games (not a multiple of 8)
     bad_proc = subprocess.run(
@@ -563,4 +584,139 @@ def test_cli_omit_timing_and_games_validation(tmp_path: Path) -> None:
     assert (out1 / "report.md").read_bytes() == (out2 / "report.md").read_bytes()
     payload = json.loads((out1 / "report.json").read_text(encoding="utf-8"))
     assert "runtime" not in payload
+
+
+def test_cli_resume_chunked_reproduces_byte_identical_report(tmp_path: Path) -> None:
+    single_out = tmp_path / "single"
+    chunked_out = tmp_path / "chunked"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tm_bot.eval",
+            "--a",
+            "b1",
+            "--b",
+            "b0",
+            "--games",
+            "8",
+            "--namespace",
+            "eval",
+            "--workers",
+            "2",
+            "--batch-size",
+            "4",
+            "--out",
+            str(single_out),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    p1 = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tm_bot.eval",
+            "--a",
+            "b1",
+            "--b",
+            "b0",
+            "--games",
+            "8",
+            "--namespace",
+            "eval",
+            "--workers",
+            "2",
+            "--batch-size",
+            "4",
+            "--resume",
+            "--max-games-per-run",
+            "3",
+            "--out",
+            str(chunked_out),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "3/8" in p1.stdout
+    assert (chunked_out / "_eval_checkpoint.jsonl").exists()
+    assert not (chunked_out / "report.json").exists()
+
+    p2 = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tm_bot.eval",
+            "--a",
+            "b1",
+            "--b",
+            "b0",
+            "--games",
+            "8",
+            "--namespace",
+            "eval",
+            "--workers",
+            "2",
+            "--batch-size",
+            "4",
+            "--resume",
+            "--max-games-per-run",
+            "3",
+            "--out",
+            str(chunked_out),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "6/8" in p2.stdout
+
+    p3 = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tm_bot.eval",
+            "--a",
+            "b1",
+            "--b",
+            "b0",
+            "--games",
+            "8",
+            "--namespace",
+            "eval",
+            "--workers",
+            "2",
+            "--batch-size",
+            "4",
+            "--resume",
+            "--max-games-per-run",
+            "3",
+            "--out",
+            str(chunked_out),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "win rate" in p3.stdout.lower()
+    assert not (chunked_out / "_eval_checkpoint.jsonl").exists()
+    kept = (chunked_out / "games.jsonl").read_text(encoding="utf-8").splitlines()
+    assert json.loads(kept[0])["type"] == "header"
+    assert len({json.loads(l)["index"] for l in kept if json.loads(l)["type"] == "outcome"}) == 8
+
+    assert (single_out / "report_deterministic.json").read_bytes() == (
+        chunked_out / "report_deterministic.json"
+    ).read_bytes()
+
+    full_single = json.loads((single_out / "report.json").read_text(encoding="utf-8"))
+    full_chunked = json.loads((chunked_out / "report.json").read_text(encoding="utf-8"))
+    assert full_chunked["runtime"]["latency_ms"]["agent_a"]["decisions"] == (
+        full_single["runtime"]["latency_ms"]["agent_a"]["decisions"]
+    )
+    assert full_chunked["runtime"]["wall_time_s"] > 0.0
+
 

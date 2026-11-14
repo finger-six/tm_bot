@@ -1,5 +1,6 @@
 import readline from 'node:readline';
 import {createGame} from './adapter';
+import {sampleWorldFromObservation} from './determinize';
 import {serializeObservation} from './observe';
 import {AdapterBugError, AdapterGame, Seat, SupportedMap} from './types';
 
@@ -260,6 +261,54 @@ export class GameWorker {
           }
 
           const cloned = maybeClone.call(game);
+          this.games.set(newGameId, cloned);
+          const sourceLog = this.actionLogs.get(gameId);
+          this.actionLogs.set(newGameId, sourceLog ? sourceLog.slice() : []);
+          return {
+            id: reqId,
+            ok: true,
+            result: {
+              gameId: newGameId,
+              seedKey: cloned.seedKey,
+              map: cloned.map,
+            },
+          };
+        }
+
+        case 'determinize_clone': {
+          const {gameId, game} = this.requireGame(params);
+          targetGameId = gameId;
+          targetGame = game;
+          const seat = this.requireSeat(params);
+          const seed = params.seed;
+          if (typeof seed !== 'number' || !Number.isFinite(seed)) {
+            throw new ProtocolError(`Invalid seed "${String(seed)}": expected finite number`);
+          }
+          if (!game.pending().includes(seat)) {
+            throw new ProtocolError(`determinize_clone(${seat}) requires seat ${seat} to be pending`);
+          }
+
+          const requestedNewId = params.newGameId;
+          let newGameId: string;
+          if (requestedNewId !== undefined && requestedNewId !== null) {
+            if (typeof requestedNewId !== 'string' || requestedNewId.length === 0) {
+              throw new ProtocolError('determinize_clone "newGameId" must be a non-empty string when provided');
+            }
+            if (this.games.has(requestedNewId)) {
+              throw new ProtocolError(`Game "${requestedNewId}" already exists`);
+            }
+            newGameId = requestedNewId;
+          } else {
+            do {
+              newGameId = `g-${this.nextGameSeq++}`;
+            } while (this.games.has(newGameId));
+          }
+
+          // Sample strictly from the acting seat's own observation before cloning/applying.
+          const obs = game.observe(seat);
+          const world = sampleWorldFromObservation(obs, seed);
+          const cloned = game.clone();
+          cloned.determinize(seat, world);
           this.games.set(newGameId, cloned);
           const sourceLog = this.actionLogs.get(gameId);
           this.actionLogs.set(newGameId, sourceLog ? sourceLog.slice() : []);

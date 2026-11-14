@@ -194,6 +194,27 @@ class WorkerPool:
                     self._worker_game_counts[w_idx] -= 1
             raise
 
+    def determinize_clone(
+        self, game_id: str, seat: Seat, seed: int, *, new_game_id: str | None = None
+    ) -> str:
+        with self._lock:
+            if game_id not in self._game_to_worker:
+                raise BridgeError(f"Unknown game_id {game_id!r}")
+            w_idx = self._game_to_worker[game_id]
+            assigned_new_id = self._allocate_game_id_locked(new_game_id)
+            self._game_to_worker[assigned_new_id] = w_idx
+            self._worker_game_counts[w_idx] += 1
+            worker = self._workers[w_idx]
+
+        try:
+            return worker.determinize_clone(game_id, seat, seed, new_game_id=assigned_new_id)
+        except Exception:
+            with self._lock:
+                if self._game_to_worker.get(assigned_new_id) == w_idx:
+                    self._game_to_worker.pop(assigned_new_id, None)
+                    self._worker_game_counts[w_idx] -= 1
+            raise
+
     def close_game(self, game_id: str) -> bool:
         _, worker = self._worker_for_game(game_id)
         closed = worker.close_game(game_id)
@@ -237,10 +258,10 @@ class WorkerPool:
                     self._game_to_worker[assigned_id] = w_idx
                     self._worker_game_counts[w_idx] += 1
                     new_registrations.append((idx, assigned_id, w_idx))
-                elif method == "clone":
+                elif method in ("clone", "determinize_clone"):
                     src_id = params.get("gameId")
                     if not isinstance(src_id, str) or src_id not in self._game_to_worker:
-                        raise BridgeError(f"Unknown game_id {src_id!r} in batched clone")
+                        raise BridgeError(f"Unknown game_id {src_id!r} in batched {method}")
                     w_idx = self._game_to_worker[src_id]
                     assigned_new_id = self._allocate_game_id_locked(params.get("newGameId"))
                     params["newGameId"] = assigned_new_id

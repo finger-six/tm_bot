@@ -100,6 +100,19 @@ class Op:
         return BatchOp("clone", params)
 
     @staticmethod
+    def determinize_clone(
+        game_id: str,
+        seat: Seat,
+        seed: int,
+        *,
+        new_game_id: str | None = None,
+    ) -> BatchOp:
+        params: dict[str, Any] = {"gameId": game_id, "seat": seat, "seed": int(seed)}
+        if new_game_id is not None:
+            params["newGameId"] = new_game_id
+        return BatchOp("determinize_clone", params)
+
+    @staticmethod
     def close(game_id: str) -> BatchOp:
         return BatchOp("close", {"gameId": game_id})
 

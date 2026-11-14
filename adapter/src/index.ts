@@ -34,7 +34,7 @@ export {
   _unsafeGetEngineGame,
 } from './adapter';
 export {serializeObservation} from './observe';
-export {computeUnseenPool} from './determinize';
+export {computeUnseenPool, sampleWorldFromObservation} from './determinize';
 export {playRandomGame} from './randomPlayer';
 export type {
   RecordedAtomicChoice,

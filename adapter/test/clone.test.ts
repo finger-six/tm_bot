@@ -10,6 +10,7 @@ import {
   UnseenPool,
   computeUnseenPool,
   createGame,
+  sampleWorldFromObservation,
   serializeObservation,
   _unsafeGetEngineGame,
 } from '../src/index';
@@ -156,9 +157,10 @@ function shuffleWithRng<T>(items: ReadonlyArray<T>, rng: () => number): Array<T>
 }
 
 /**
+ * Independent test oracle (the pre-#23 sampler, deliberately kept separate from production).
  * Pure sampler constructing a legal SampledWorld from ActorObservation + UnseenPool ONLY.
  */
-function sampleWorldFromObservation(
+function sampleWorldFromObservationLegacy(
   obs: ActorObservation,
   pool: UnseenPool,
   rng: () => number,
@@ -622,6 +624,125 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
       assert.equal(synthPool.knownProjectDiscardPile.includes(pubRevealCard), true);
       assert.equal(synthPool.knownProjectDiscardPile.includes(pubDiscardCard), true);
     });
+
+    it('excludes pre-reshuffle unbought drafted cards when actor sells patents post-reshuffle', () => {
+      const g = findGameAt(
+        (game) => _unsafeGetEngineGame(game).phase === 'action' && _unsafeGetEngineGame(game).generation >= 2,
+        'pool-draft-sell-reshuffle',
+        'tharsis',
+      );
+      const baseObs = g.observe(0);
+      const actorColor = baseObs.public.players[0].color;
+      const basePool = computeUnseenPool(baseObs);
+      assert.ok(basePool.projects.length >= 3);
+      const [unbought1, unbought2, passedCard] = basePool.projects;
+      const filteredLog = baseObs.public.publicLog.filter(
+        (e) =>
+          !(
+            e.data[0]?.value === actorColor &&
+            (e.message === '${0} sold ${1} patents' ||
+              e.message === '${0} is using their ${1} effect to draw a card by discarding a card.')
+          ),
+      );
+      const synthObs: ActorObservation = {
+        ...baseObs,
+        public: {
+          ...baseObs.public,
+          generation: 5,
+          discardPileSize: 0,
+          publicLog: [
+            ...filteredLog,
+            {type: 0, message: 'Generation ${0}', data: [{type: 0, value: '4'}]},
+            {type: 0, message: 'The project discard pile has been shuffled to form a new deck.', data: []},
+            {type: 0, message: 'Generation ${0}', data: [{type: 0, value: '5'}]},
+            {
+              type: 0,
+              message: '${0} sold ${1} patents',
+              data: [
+                {type: 3, value: actorColor},
+                {type: 0, value: '1'},
+              ],
+            },
+          ],
+        },
+        history: {
+          ...baseObs.history,
+          drafts: [
+            ...baseObs.history.drafts,
+            {
+              generation: 2,
+              draftRound: 1,
+              packet: [unbought1, unbought2, passedCard],
+              taken: [unbought1, unbought2],
+              passed: [passedCard],
+            },
+          ],
+          researchBuys: [
+            ...baseObs.history.researchBuys,
+            {
+              generation: 2,
+              offered: [unbought1, unbought2],
+              bought: [],
+              discarded: [unbought1, unbought2],
+            },
+          ],
+        },
+      };
+      const pool = computeUnseenPool(synthObs);
+      assert.equal(
+        pool.knownProjectDiscardPile.includes(unbought1),
+        false,
+        'Pre-reshuffle unbought drafted card must not be marked in post-reshuffle discard pile',
+      );
+      assert.equal(pool.knownProjectDiscardPile.includes(unbought2), false);
+      const world = sampleWorldFromObservation(synthObs, 42);
+      assert.equal(world.opponentHand.length, synthObs.public.players[1].cardsInHandCount);
+    });
+
+    it('leaves Discarded N cards in unseen pool when a reshuffle occurs inside drawByConditionOrThrow', () => {
+      const g = findGameAt(
+        (game) => _unsafeGetEngineGame(game).phase === 'action' && _unsafeGetEngineGame(game).generation >= 2,
+        'pool-discard-spans-reshuffle',
+        'tharsis',
+      );
+      const baseObs = g.observe(0);
+      const actorColor = baseObs.public.players[0].color;
+      const basePool = computeUnseenPool(baseObs);
+      assert.ok(basePool.projects.length >= 10);
+      const discardedBatch = basePool.projects.slice(0, 10);
+      const synthObs: ActorObservation = {
+        ...baseObs,
+        public: {
+          ...baseObs.public,
+          deckSize: basePool.deckSize + basePool.discardPileSize - 3,
+          discardPileSize: 3,
+          publicLog: [
+            ...baseObs.public.publicLog,
+            {type: 0, message: '${0} played ${1}', data: [{type: 2, value: actorColor}, {type: 3, value: 'Experimental Forest'}]},
+            {type: 0, message: 'The project discard pile has been shuffled to form a new deck.', data: []},
+            {
+              type: 0,
+              message: 'Discarded ${0} cards ${1}',
+              data: [
+                {type: 1, value: String(discardedBatch.length)},
+                {type: 14, value: discardedBatch},
+              ],
+            },
+          ],
+        },
+      };
+      const pool = computeUnseenPool(synthObs);
+      for (const c of discardedBatch) {
+        assert.equal(
+          pool.knownProjectDiscardPile.includes(c),
+          false,
+          `Batch card ${c} spanning reshuffle must not be forced into knownProjectDiscardPile`,
+        );
+      }
+      const world = sampleWorldFromObservation(synthObs, 42);
+      assert.equal(world.projectDeck.length, synthObs.public.deckSize);
+      assert.equal(world.opponentHand.length, synthObs.public.players[1].cardsInHandCount);
+    });
   });
 
   describe('4. determinize(actor, world)', () => {
@@ -693,7 +814,7 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
         const obsBefore = clone.observe(actor);
         const obsJsonBefore = serializeObservation(obsBefore);
         const pool = clone.unseenPool(actor);
-        const world = sampleWorldFromObservation(obsBefore, pool, makePrng(900 + i));
+        const world = sampleWorldFromObservationLegacy(obsBefore, pool, makePrng(900 + i));
 
         clone.determinize(actor, world);
 
@@ -737,7 +858,7 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
       const actor = gAct.pending()[0];
       const obs = gAct.observe(actor);
       const pool = gAct.unseenPool(actor);
-      const baseWorld = sampleWorldFromObservation(obs, pool, makePrng(42));
+      const baseWorld = sampleWorldFromObservationLegacy(obs, pool, makePrng(42));
 
       // 1. Card outside unseen pool (card from actor's hand or tableau)
       const knownActorCard = obs.public.players[actor].tableau[1]?.name ?? obs.private.cardsInHand[0]?.name;
@@ -787,7 +908,7 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
       );
       const dObs = gDraftR2.observe(0);
       const dPool = gDraftR2.unseenPool(0);
-      const dWorld = sampleWorldFromObservation(dObs, dPool, makePrng(77));
+      const dWorld = sampleWorldFromObservationLegacy(dObs, dPool, makePrng(77));
       const badDraftHand = [dPool.projects[0], ...(dWorld.opponentDraftHand?.slice(1) ?? [])];
       assert.throws(
         () => gDraftR2.clone().determinize(0, {...dWorld, opponentDraftHand: badDraftHand}),
@@ -882,7 +1003,7 @@ describe('Ticket 16 regression: research payment window', () => {
       hits += 1;
       const c = g.clone();
       const pool = c.unseenPool(actor);
-      c.determinize(actor, sampleWorldFromObservation(c.observe(actor), pool, makePrng(7 + actor)));
+      c.determinize(actor, sampleWorldFromObservationLegacy(c.observe(actor), pool, makePrng(7 + actor)));
       assert.notEqual(
         _unsafeGetEngineGame(c).players[opp].getWaitingFor()?.type,
         'payment',
@@ -915,7 +1036,7 @@ describe('Ticket 16 regression: research payment window', () => {
             assert.equal(pool.knownProjectDiscardPile.includes(card), false, `${card} not yet discarded`);
           }
           const c = g.clone();
-          c.determinize(actor, sampleWorldFromObservation(c.observe(actor), c.unseenPool(actor), makePrng(11 + steps)));
+          c.determinize(actor, sampleWorldFromObservationLegacy(c.observe(actor), c.unseenPool(actor), makePrng(11 + steps)));
           playToCompletion(c, makePrng(98));
           assert.deepEqual(projectCensusDuplicates(c), [], `duplicates after rollout (T-${gi} step ${steps})`);
         }
@@ -1077,7 +1198,7 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
       );
 
       const pool = c1.unseenPool(actor);
-      const world = sampleWorldFromObservation(obs1, pool, makePrng(3000 + i));
+      const world = sampleWorldFromObservationLegacy(obs1, pool, makePrng(3000 + i));
 
       c1.determinize(actor, world);
       c2.determinize(actor, world);
@@ -1173,7 +1294,7 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
       const c = g.clone();
       const obs = c.observe(actor);
       const pool = c.unseenPool(actor);
-      c.determinize(actor, sampleWorldFromObservation(obs, pool, makePrng(4001)));
+      c.determinize(actor, sampleWorldFromObservationLegacy(obs, pool, makePrng(4001)));
       const census = fullCensus(c);
       assertExactPool(census.projects, 215, `${label} projects`);
       assertExactPool(census.corps, 17, `${label} corps`);
@@ -1193,7 +1314,7 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
         150,
       );
       const c = gFizzle.clone();
-      c.determinize(actor, sampleWorldFromObservation(c.observe(actor), c.unseenPool(actor), makePrng(4002 + actor)));
+      c.determinize(actor, sampleWorldFromObservationLegacy(c.observe(actor), c.unseenPool(actor), makePrng(4002 + actor)));
       const census = fullCensus(c);
       assertExactPool(census.projects, 215, `fizzle seat ${actor} projects`);
       assertExactPool(census.corps, 17, `fizzle seat ${actor} corps`);
@@ -1211,8 +1332,8 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
     const obs = gAct.observe(actor);
     const pool = gAct.unseenPool(actor);
 
-    const w1 = sampleWorldFromObservation(obs, pool, makePrng(5001));
-    const w2 = sampleWorldFromObservation(obs, pool, makePrng(5002));
+    const w1 = sampleWorldFromObservationLegacy(obs, pool, makePrng(5001));
+    const w2 = sampleWorldFromObservationLegacy(obs, pool, makePrng(5002));
     assert.equal(w1.projectDiscardPile, undefined);
     assert.equal(w2.projectDiscardPile, undefined);
 
@@ -1451,7 +1572,7 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
     try {
       const obs = gDeferred.observe(1);
       const pool = gDeferred.unseenPool(1);
-      const baseWorld = sampleWorldFromObservation(obs, pool, makePrng(7001));
+      const baseWorld = sampleWorldFromObservationLegacy(obs, pool, makePrng(7001));
       const origCurrentSeed = (_unsafeGetEngineGame(gDraft) as unknown as {rng: {current: number}}).rng.current;
 
       const c1 = gDeferred.clone();
@@ -1703,7 +1824,7 @@ describe('Ticket 28 regression: hidden picked corporation affordability', () => 
     assert.ok(!candidates.has('PhoboLog'));
     assert.ok(pool.corporations.includes('PhoboLog'));
 
-    const base = sampleWorldFromObservation(cDirect.observe(1), pool, makePrng(77));
+    const base = sampleWorldFromObservationLegacy(cDirect.observe(1), pool, makePrng(77));
     const bad = cDirect.clone();
     assert.throws(
       () => bad.determinize(1, {...base, opponentPickedCorporation: 'PhoboLog'}),
@@ -1736,7 +1857,67 @@ describe('Ticket 28 regression: determinize contract', () => {
     }
     const idle: Seat = g.pending()[0] === 0 ? 1 : 0;
     const c = g.clone();
-    const world = sampleWorldFromObservation(c.observe(idle), c.unseenPool(idle), makePrng(5));
+    const world = sampleWorldFromObservationLegacy(c.observe(idle), c.unseenPool(idle), makePrng(5));
     assert.throws(() => c.determinize(idle, world), /requires seat \d to be pending/);
   });
 });
+
+describe('Ticket 23: sampleWorldFromObservation(obs, seed)', () => {
+  it('takes only (obs, seed), is deterministic, and is unchanged when opponent hand changes', () => {
+    const g = findGameAt(
+      (gm) => _unsafeGetEngineGame(gm).phase === 'action' && _unsafeGetEngineGame(gm).generation >= 2,
+      't23-sampler-obs-only',
+      'tharsis',
+    );
+    const actor = g.pending()[0];
+    const opp: Seat = actor === 0 ? 1 : 0;
+
+    const obsBefore = g.observe(actor);
+    const w1 = sampleWorldFromObservation(obsBefore, 123456);
+    const w2 = sampleWorldFromObservation(obsBefore, 123456);
+    const wDiff = sampleWorldFromObservation(obsBefore, 654321);
+    assert.deepEqual(w1, w2);
+    assert.notDeepEqual(w1, wDiff);
+
+    // Mutate opponent's hand in the live engine by swapping an unseen hand card with drawPile
+    const eng = _unsafeGetEngineGame(g);
+    const pool = g.unseenPool(actor);
+    const unseenSet = new Set(pool.projects);
+    const twin = g.clone();
+    const handIdx = eng.players[opp].cardsInHand.findIndex((c) => unseenSet.has(c.name));
+    const deckIdx = eng.projectDeck.drawPile.findIndex((c) => unseenSet.has(c.name));
+    assert.notEqual(handIdx, -1, 'fixture must give the opponent an unseen hand card');
+    assert.notEqual(deckIdx, -1, 'fixture must have an unseen draw-pile card');
+    const handBefore = eng.players[opp].cardsInHand.map((c) => c.name);
+    const tmp = eng.players[opp].cardsInHand[handIdx];
+    eng.players[opp].cardsInHand[handIdx] = eng.projectDeck.drawPile[deckIdx];
+    eng.projectDeck.drawPile[deckIdx] = tmp;
+    assert.notDeepEqual(
+      eng.players[opp].cardsInHand.map((c) => c.name),
+      handBefore,
+      'opponent true hand must actually change',
+    );
+
+    const obsAfter = g.observe(actor);
+    assert.equal(serializeObservation(obsAfter), serializeObservation(obsBefore));
+    const wAfter = sampleWorldFromObservation(obsAfter, 123456);
+    assert.deepEqual(wAfter, w1);
+
+    // End to end: determinizing the mutated game and its unmutated twin with the same seed
+    // yields identical hidden worlds, so nothing about the true opponent hand reaches the clone.
+    const hiddenState = (gm: ReturnType<typeof createGame>) => {
+      const e = _unsafeGetEngineGame(gm);
+      return {
+        oppHand: e.players[opp].cardsInHand.map((c) => c.name),
+        drawPile: e.projectDeck.drawPile.map((c) => c.name),
+      };
+    };
+    const cMut = g.clone();
+    cMut.determinize(actor, sampleWorldFromObservation(cMut.observe(actor), 99));
+    const cTwin = twin.clone();
+    cTwin.determinize(actor, sampleWorldFromObservation(cTwin.observe(actor), 99));
+    assert.deepEqual(hiddenState(cMut), hiddenState(cTwin));
+    assert.notDeepEqual(hiddenState(g).oppHand, hiddenState(twin).oppHand);
+  });
+});
+

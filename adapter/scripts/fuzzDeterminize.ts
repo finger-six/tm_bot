@@ -4,9 +4,9 @@ import {
   SUPPORTED_MAPS,
   SampledWorld,
   Seat,
-  UnseenPool,
   _unsafeGetEngineGame,
   createGame,
+  sampleWorldFromObservation,
   serializeObservation,
 } from '../src/index';
 
@@ -27,91 +27,6 @@ function makePrng(seed: number): () => number {
   return () => {
     s = (Math.imul(1664525, s) + 1013904223) >>> 0;
     return s / 0x1_0000_0000;
-  };
-}
-
-function shuffleWithRng<T>(items: ReadonlyArray<T>, rng: () => number): Array<T> {
-  const arr = items.slice();
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-function sampleWorldFromObservation(
-  pool: UnseenPool,
-  rng: () => number,
-): SampledWorld {
-  const availableProjects = shuffleWithRng(pool.projects, rng);
-  const availablePreludes = shuffleWithRng(pool.preludes, rng);
-  const availableCorps = shuffleWithRng(pool.corporations, rng);
-  const availablePossOpp = shuffleWithRng(pool.possibleOpponentHandProjects, rng);
-
-  const takeProjects = (count: number): Array<string> => {
-    assert.ok(availableProjects.length >= count, `Not enough unseen projects: need ${count}, have ${availableProjects.length}`);
-    return availableProjects.splice(0, count);
-  };
-
-  let opponentDealtCorporations: Array<string> | undefined;
-  let opponentDealtPreludes: Array<string> | undefined;
-  let opponentDealtProjects: Array<string> | undefined;
-  let opponentPickedCorporation: string | undefined;
-  let opponentPreludes: Array<string> | undefined;
-  let opponentDraftHand: Array<string> | undefined;
-  let opponentDrafted: Array<string> | undefined;
-  let opponentResearchOffer: Array<string> | undefined;
-
-  if (!pool.opponentInitialBuyComplete) {
-    opponentDealtCorporations = availableCorps.splice(0, 2);
-    opponentDealtPreludes = availablePreludes.splice(0, 4);
-    opponentDealtProjects = takeProjects(10);
-  } else if (pool.opponentHasHiddenPickedCorp) {
-    opponentPickedCorporation = shuffleWithRng(pool.opponentPickedCorporationCandidates, rng)[0];
-  }
-
-  if (pool.opponentPreludeHandSize > 0) {
-    opponentPreludes = availablePreludes.splice(0, pool.opponentPreludeHandSize);
-  }
-
-  if (pool.opponentDraftHandSize > 0 || pool.opponentDraftedSize > 0) {
-    const needDraftHandUnseen = Math.max(0, pool.opponentDraftHandSize - pool.knownOpponentDraftHandProjects.length);
-    const needDraftedUnseen = Math.max(0, pool.opponentDraftedSize - pool.knownOpponentDraftedProjects.length);
-    opponentDraftHand = [...pool.knownOpponentDraftHandProjects, ...takeProjects(needDraftHandUnseen)];
-    opponentDrafted = [...pool.knownOpponentDraftedProjects, ...takeProjects(needDraftedUnseen)];
-  }
-
-  if (pool.opponentResearchOfferSize > 0) {
-    const needResUnseen = Math.max(0, pool.opponentResearchOfferSize - pool.knownOpponentResearchProjects.length);
-    opponentResearchOffer = [...pool.knownOpponentResearchProjects, ...takeProjects(needResUnseen)];
-  }
-
-  const opponentHand: Array<string> = [...pool.knownOpponentHandProjects];
-  const minPossNeeded = Math.max(
-    0,
-    pool.knownProjectDiscardPile.length + availablePossOpp.length - pool.discardPileSize,
-  );
-  const maxPossAllowed = Math.min(availablePossOpp.length, pool.opponentHandSize - opponentHand.length);
-  const takePoss = Math.min(maxPossAllowed, Math.max(minPossNeeded, Math.floor(rng() * (maxPossAllowed + 1))));
-  opponentHand.push(...availablePossOpp.splice(0, takePoss));
-
-  const remainingOppHand = pool.opponentHandSize - opponentHand.length;
-  assert.ok(remainingOppHand >= 0, 'opponentHand exceeded opponentHandSize');
-  opponentHand.push(...takeProjects(remainingOppHand));
-
-  const projectDeck = takeProjects(pool.deckSize);
-
-  return {
-    opponentHand,
-    projectDeck,
-    ...(opponentDealtCorporations !== undefined ? {opponentDealtCorporations} : {}),
-    ...(opponentDealtPreludes !== undefined ? {opponentDealtPreludes} : {}),
-    ...(opponentDealtProjects !== undefined ? {opponentDealtProjects} : {}),
-    ...(opponentPickedCorporation !== undefined ? {opponentPickedCorporation} : {}),
-    ...(opponentPreludes !== undefined ? {opponentPreludes} : {}),
-    ...(opponentDraftHand !== undefined ? {opponentDraftHand} : {}),
-    ...(opponentDrafted !== undefined ? {opponentDrafted} : {}),
-    ...(opponentResearchOffer !== undefined ? {opponentResearchOffer} : {}),
   };
 }
 
@@ -318,8 +233,9 @@ function main(): void {
           }
 
           const cSample = g.clone();
-          const pool = cSample.unseenPool(actor);
-          const sampledWorld = sampleWorldFromObservation(pool, sampleRng);
+          const obs = cSample.observe(actor);
+          const worldSeed = Math.floor(sampleRng() * 0x1_0000_0000);
+          const sampledWorld = sampleWorldFromObservation(obs, worldSeed);
           cSample.determinize(actor, sampledWorld);
           assert.deepEqual(
             censusDuplicates(cSample),

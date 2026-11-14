@@ -90,4 +90,119 @@ describe('GameWorker JSON protocol', () => {
     // Verify AdapterBugError type stays wired
     assert.equal(typeof AdapterBugError, 'function');
   });
+
+  it('handles determinize_clone without mutating live game and produces deterministic clones from actor obs only', () => {
+    const worker = new GameWorker();
+    const createResp = worker.handleMessage({
+      id: 1,
+      method: 'create',
+      params: {gameId: 'live-1', seedKey: 'det-clone-test-1', map: 'tharsis'},
+    });
+    assert.equal(createResp.ok, true);
+    assert.equal(worker.gameCount, 1);
+
+    const obs0Before = worker.handleMessage({id: 2, method: 'observe', params: {gameId: 'live-1', seat: 0, serialized: true}});
+    const obs1Before = worker.handleMessage({id: 3, method: 'observe', params: {gameId: 'live-1', seat: 1, serialized: true}});
+    const choice0Before = worker.handleMessage({id: 4, method: 'choice', params: {gameId: 'live-1', seat: 0}});
+
+    const dc1 = worker.handleMessage({
+      id: 5,
+      method: 'determinize_clone',
+      params: {gameId: 'live-1', seat: 0, seed: 4242, newGameId: 'det-a'},
+    });
+    assert.equal(dc1.ok, true);
+    assert.deepEqual((dc1 as {result: {gameId: string; seedKey: string; map: string}}).result, {
+      gameId: 'det-a',
+      seedKey: 'det-clone-test-1',
+      map: 'tharsis',
+    });
+    assert.equal(worker.gameCount, 2);
+
+    const dc2 = worker.handleMessage({
+      id: 6,
+      method: 'determinize_clone',
+      params: {gameId: 'live-1', seat: 0, seed: 4242, newGameId: 'det-b'},
+    });
+    assert.equal(dc2.ok, true);
+    assert.equal(worker.gameCount, 3);
+
+    // Determinism: identical (gameId, seat, seed) yields identical opponent observations in the two clones
+    const detAOpp = worker.handleMessage({id: 7, method: 'observe', params: {gameId: 'det-a', seat: 1, serialized: true}});
+    const detBOpp = worker.handleMessage({id: 8, method: 'observe', params: {gameId: 'det-b', seat: 1, serialized: true}});
+    assert.equal(
+      (detAOpp as {result: {observation: string}}).result.observation,
+      (detBOpp as {result: {observation: string}}).result.observation,
+    );
+
+    // Different seed yields a different sampled world
+    const dc3 = worker.handleMessage({
+      id: 9,
+      method: 'determinize_clone',
+      params: {gameId: 'live-1', seat: 0, seed: 9999, newGameId: 'det-c'},
+    });
+    assert.equal(dc3.ok, true);
+    const detCOpp = worker.handleMessage({id: 10, method: 'observe', params: {gameId: 'det-c', seat: 1, serialized: true}});
+    assert.notEqual(
+      (detAOpp as {result: {observation: string}}).result.observation,
+      (detCOpp as {result: {observation: string}}).result.observation,
+    );
+
+    // Actor observation on clone matches live game byte-for-byte
+    const detASelf = worker.handleMessage({id: 11, method: 'observe', params: {gameId: 'det-a', seat: 0, serialized: true}});
+    assert.equal(
+      (detASelf as {result: {observation: string}}).result.observation,
+      (obs0Before as {result: {observation: string}}).result.observation,
+    );
+
+    // Advance clone and verify live game is untouched
+    const stepClone = worker.handleMessage({
+      id: 12,
+      method: 'choose',
+      params: {gameId: 'det-a', seat: 0, candidateIndex: 0},
+    });
+    assert.equal(stepClone.ok, true);
+    const obs0After = worker.handleMessage({id: 13, method: 'observe', params: {gameId: 'live-1', seat: 0, serialized: true}});
+    const obs1After = worker.handleMessage({id: 14, method: 'observe', params: {gameId: 'live-1', seat: 1, serialized: true}});
+    const choice0After = worker.handleMessage({id: 15, method: 'choice', params: {gameId: 'live-1', seat: 0}});
+    assert.equal(
+      (obs0After as {result: {observation: string}}).result.observation,
+      (obs0Before as {result: {observation: string}}).result.observation,
+    );
+    assert.equal(
+      (obs1After as {result: {observation: string}}).result.observation,
+      (obs1Before as {result: {observation: string}}).result.observation,
+    );
+    assert.deepEqual(
+      (choice0After as {result: unknown}).result,
+      (choice0Before as {result: unknown}).result,
+    );
+
+    // Validation errors do not leak clones
+    const badSeed = worker.handleMessage({
+      id: 16,
+      method: 'determinize_clone',
+      params: {gameId: 'live-1', seat: 0, seed: 'not-a-number'},
+    });
+    assert.equal(badSeed.ok, false);
+    assert.equal(worker.gameCount, 4);
+
+    // Advance seat 0 completely in live-1 until seat 0 is no longer pending (deferred)
+    while (true) {
+      const pend = worker.handleMessage({id: 17, method: 'pending', params: {gameId: 'live-1'}});
+      const pendingSeats = (pend as {result: {pending: Array<number>}}).result.pending;
+      if (!pendingSeats.includes(0)) break;
+      const ch = worker.handleMessage({id: 18, method: 'choice', params: {gameId: 'live-1', seat: 0}});
+      const cands = (ch as {result: {choice: {candidates: Array<{id: string}>}}}).result.choice.candidates;
+      const doneIdx = cands.findIndex((c) => c.id === 'done');
+      worker.handleMessage({id: 19, method: 'choose', params: {gameId: 'live-1', seat: 0, candidateIndex: doneIdx >= 0 ? doneIdx : 0}});
+    }
+    const nonPendingResp = worker.handleMessage({
+      id: 20,
+      method: 'determinize_clone',
+      params: {gameId: 'live-1', seat: 0, seed: 123},
+    });
+    assert.equal(nonPendingResp.ok, false);
+    assert.equal(worker.gameCount, 4);
+  });
 });
+
