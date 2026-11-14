@@ -7,7 +7,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "smoke": "npm run build && node dist/smoke.js",
-    "determinism": "npm run build && node dist/determinism.js"
+    "determinism": "npm run build && node dist/determinism.js",
+    "cloning": "npm run build && node dist/cloning.js",
+    "latency": "npm run build && node dist/latency.js",
+    "scaling": "npm run build && node dist/scaling.js"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

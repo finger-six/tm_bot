@@ -34,22 +34,32 @@ npm run build
 Inside `tools/simbench/`:
 
 ```powershell
-# Stage 1: Smoke (1 detailed game + 20 seeds per target map)
+# Stage 1: Smoke (1 detailed game + 20 seeds per target map, canonical simultaneous order)
 npm run smoke
 
 # Stage 2: Determinism (strict replay + alternated simultaneous draft/research order)
 npm run determinism
+
+# Stage 3: Cloning (direct Game.deserialize + fallback checkpoint+replay + atomicity)
+npm run cloning
+
+# Stage 4: Latency (in-process distributions by generation tertile + localhost HTTP comparison)
+npm run latency
+
+# Stage 5: Scaling (worker_threads throughput, RSS, GC & event-loop delay across 1..CPU cores)
+npm run scaling
 ```
 
-Optional flag for Stage 1:
+Optional flags:
 
 ```powershell
 node dist/smoke.js --seeds 50
+node dist/scaling.js --seconds 60
 ```
 
 Outputs are written to `tools/simbench/results/`:
-- `results/summary.json` (tracked in git; combined Stage 1 + Stage 2 summary)
-- `results/smoke.json` and `results/determinism.json` (gitignored by `tools/simbench/.gitignore`)
+- `results/summary.json` (tracked in git; combined Stage 1–5 summary)
+- `results/smoke.json`, `results/determinism.json`, `results/cloning.json`, `results/latency.json`, `results/scaling.json` (gitignored by `tools/simbench/.gitignore`)
 
 ## In-Process Isolation
 
@@ -72,7 +82,7 @@ Every game is constructed via `createExplicitTwoPlayerGame()` in `src/config.ts`
   - `shuffleMapOption: false`, `randomMA: RandomMAOptionType.NONE`, `includeFanMA: false`, `modularMA: false`
   - `startingCorporations: 2`, `startingPreludes: 4`, empty custom/banned/included card lists.
 
-## Stage 2 State Normalization
+## Stage 2 State Normalization & Canonical Submission Order
 
 `normalizeSerializedGame()` in `src/normalize.ts` strips or canonicalizes the following non-gameplay / wall-clock / identity fields before deep structural comparison:
 
@@ -89,10 +99,10 @@ Every game is constructed via `createExplicitTwoPlayerGame()` in `src/config.ts`
 
 - **Exact replay** (same seed, same action sequence and submission order, distinct `gameId`/`spectatorId`) is 100% deterministic across every step on all 4 maps.
 - **Alternated `DRAFTING` submission order** (with canonical `RESEARCH`/`SelectInitialCards` order) is also 100% deterministic across all 4 maps (`0` mismatches).
-- **Alternated `RESEARCH` / `SelectInitialCards` submission order** causes `corporationDeck.discardPile`, `preludeDeck.discardPile`, `projectDeck.discardPile`, and `gameLog` to reflect submission order immediately at step 2; if `projectDeck` exhausts and reshuffles its `discardPile` later in the game (e.g., `vastitas borealis nova` seed `2004` at gen 22–25), the shuffled deck permutation diverges. Future training wrappers must enforce a canonical submission order during `RESEARCH` / `SelectInitialCards`.
+- **Alternated `RESEARCH` / `SelectInitialCards` submission order** causes `corporationDeck.discardPile`, `preludeDeck.discardPile`, `projectDeck.discardPile`, and `gameLog` to reflect submission order immediately at step 2; if `projectDeck` exhausts and reshuffles its `discardPile` later in the game, the shuffled deck permutation diverges. `src/driver.ts` (`pickNextWaitingPlayer`) enforces `'canonical'` seat order (seat 0 first whenever >1 required player is waiting).
 
-## Hooks for Stages 3–5 (Not Implemented Yet)
+## Stages 3–5 Modules
 
-- **Stage 3 (Cloning):** `createExplicitTwoPlayerGame()` returns `{game, players, options}` and `src/engine.ts` exposes `Game.deserialize`, ready for `game.serialize()` / `Game.deserialize()` round-trip and branch-independence tests at arbitrary prompts.
-- **Stage 4 (Latency):** `runRandomGame()` already tracks `process.hrtime.bigint()` wall-clock timings and decision counts; per-phase/per-step instrumentation can wrap `player.process()`, `game.serialize()`, and `Server.getPlayerModel()`.
-- **Stage 5 (Scaling):** `initializeEngine()`, `SeededPrng`, and `runRandomGame()` hold no shared mutable global game state (beyond one-time `globalInitialize()`), allowing straightforward execution inside `worker_threads` workers.
+- **Stage 3 (`src/cloning.ts`):** Tests direct `Game.deserialize(deepCopy(game.serialize()))` across 12 decision-point categories per map (prompt equivalence, continuation equivalence, 20-step branch isolation, and invalid-input atomicity), plus fallback **checkpoint + replay** at every point where direct restore fails and a suffix-length cost sweep (`0..40`).
+- **Stage 4 (`src/latency.ts`, `src/httpBench.ts`):** Measures reset, `Server.getPlayerModel()` observation, `player.process()` step, `serialize()+JSON.stringify`, `JSON.parse+Game.deserialize`, snapshot bytes (overall & early/mid/late generation tertiles), completed-game wall time with/without observation, RSS/heapUsed, and localhost HTTP `GET /api/waitingfor` + `POST /player/input` comparison against the built engine server.
+- **Stage 5 (`src/scaling.ts`):** Benchmarks multi-worker throughput (`games/s`, `decisions/s`), process RSS, worker `heapUsed`, GC pause events (`PerformanceObserver`), and event-loop delay (`monitorEventLoopDelay`) using `worker_threads` (isolated V8 isolates per worker) across 1, 2, 4, 8, and logical-CPU worker counts.

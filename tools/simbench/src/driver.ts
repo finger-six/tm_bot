@@ -68,8 +68,8 @@ export interface GameRunResult {
   trace?: Array<RecordedAction>;
 }
 
-const DEFAULT_MAX_STEPS = 20_000;
-const MAX_RETRIES_PER_DECISION = 16;
+export const DEFAULT_MAX_STEPS = 20_000;
+export const MAX_RETRIES_PER_DECISION = 16;
 
 function isStandardProjectCard(card: ICard): card is IStandardProjectCard {
   return typeof (card as IStandardProjectCard).canAct === 'function' &&
@@ -301,7 +301,7 @@ function hasAnyLegalChoice(input: PlayerInput, player: IPlayer): boolean {
   }
 }
 
-function buildRandomResponse(
+export function buildRandomResponse(
   input: PlayerInput,
   player: IPlayer,
   prng: SeededPrng,
@@ -497,18 +497,79 @@ export function collectPlayerScores(game: IGame): {scores: Record<string, number
   return {scores, tie: winners.length > 1};
 }
 
+export type SimultaneousOrderMode = 'canonical' | 'random';
+
+export function pickNextWaitingPlayer(
+  waitingPlayers: ReadonlyArray<IPlayer>,
+  prng: SeededPrng,
+  simultaneousOrder: SimultaneousOrderMode = 'canonical',
+): IPlayer {
+  if (waitingPlayers.length === 1 || simultaneousOrder === 'canonical') {
+    return waitingPlayers[0];
+  }
+  return prng.pick(waitingPlayers);
+}
+
+export interface StepDecisionResult {
+  succeeded: boolean;
+  response?: InputResponse;
+  invalidActions: number;
+  error?: string;
+}
+
+export function stepDecision(
+  player: IPlayer,
+  waitingFor: PlayerInput,
+  prng: SeededPrng,
+  unexpectedInputTypes: Set<string>,
+): StepDecisionResult {
+  const failedOrIndices = new Set<number>();
+  let invalidActions = 0;
+  let lastErr: unknown;
+
+  for (let attempt = 0; attempt < MAX_RETRIES_PER_DECISION; attempt++) {
+    let response: InputResponse;
+    try {
+      response = buildRandomResponse(waitingFor, player, prng, unexpectedInputTypes, failedOrIndices);
+    } catch (err) {
+      invalidActions += 1;
+      lastErr = err;
+      break;
+    }
+
+    try {
+      player.process(response);
+      return {succeeded: true, response, invalidActions};
+    } catch (err) {
+      invalidActions += 1;
+      lastErr = err;
+      if (response.type === 'or') {
+        failedOrIndices.add(response.index);
+      }
+    }
+  }
+
+  return {
+    succeeded: false,
+    invalidActions,
+    error: lastErr instanceof Error ? lastErr.message : String(lastErr),
+  };
+}
+
 export interface RunRandomGameOptions {
   boardName: BoardNameValue;
   seed: number;
   driverSeed?: number;
   maxSteps?: number;
   recordTrace?: boolean;
+  simultaneousOrder?: SimultaneousOrderMode;
 }
 
 export function runRandomGame(opts: RunRandomGameOptions): GameRunResult {
   const startNs = process.hrtime.bigint();
   const driverSeed = opts.driverSeed ?? (opts.seed ^ 0x9e3779b9) >>> 0;
   const maxSteps = opts.maxSteps ?? DEFAULT_MAX_STEPS;
+  const simultaneousOrder: SimultaneousOrderMode = opts.simultaneousOrder ?? 'canonical';
   const prng = new SeededPrng(driverSeed);
 
   const {game} = createExplicitTwoPlayerGame({
@@ -537,58 +598,35 @@ export function runRandomGame(opts: RunRandomGameOptions): GameRunResult {
       break;
     }
 
-    const player = prng.pick(waitingPlayers);
+    const player = pickNextWaitingPlayer(waitingPlayers, prng, simultaneousOrder);
     const waitingFor = player.getWaitingFor();
     if (!waitingFor) {
       deadlocks += 1;
       break;
     }
 
-    const failedOrIndices = new Set<number>();
-    let succeeded = false;
-    let lastErr: unknown;
+    const phaseBefore = game.phase;
+    const genBefore = game.generation;
+    const step = stepDecision(player, waitingFor, prng, unexpectedInputTypes);
+    invalidActions += step.invalidActions;
 
-    for (let attempt = 0; attempt < MAX_RETRIES_PER_DECISION; attempt++) {
-      let response: InputResponse;
-      try {
-        response = buildRandomResponse(waitingFor, player, prng, unexpectedInputTypes, failedOrIndices);
-      } catch (err) {
-        invalidActions += 1;
-        lastErr = err;
-        break;
-      }
-
-      const phaseBefore = game.phase;
-      const genBefore = game.generation;
-      try {
-        player.process(response);
-        decisions += 1;
-        succeeded = true;
-        if (trace) {
-          trace.push({
-            step: decisions,
-            playerColor: player.color,
-            playerId: player.id,
-            phase: phaseBefore,
-            generation: genBefore,
-            waitingRequiredColors: waitingPlayers.map((p) => p.color),
-            inputType: waitingFor.type,
-            response,
-          });
-        }
-        break;
-      } catch (err) {
-        invalidActions += 1;
-        lastErr = err;
-        if (response.type === 'or') {
-          failedOrIndices.add(response.index);
-        }
-      }
+    if (!step.succeeded || !step.response) {
+      fatalError = `Failed after retries at phase=${game.phase}, gen=${game.generation}, player=${player.color}, input=${waitingFor.type}: ${step.error}`;
+      break;
     }
 
-    if (!succeeded) {
-      fatalError = `Failed after retries at phase=${game.phase}, gen=${game.generation}, player=${player.color}, input=${waitingFor.type}: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`;
-      break;
+    decisions += 1;
+    if (trace) {
+      trace.push({
+        step: decisions,
+        playerColor: player.color,
+        playerId: player.id,
+        phase: phaseBefore,
+        generation: genBefore,
+        waitingRequiredColors: waitingPlayers.map((p) => p.color),
+        inputType: waitingFor.type,
+        response: step.response,
+      });
     }
   }
 

@@ -199,13 +199,13 @@ function main(): void {
   const baseSeed = 2001;
   const mapResults: Array<MapDeterminismResult> = [];
 
-  console.log('=== Stage 2: Determinism (Strict Replay + Alternated Simultaneous Submission Order) ===');
+  console.log('=== Stage 2: Determinism (Strict Replay + Alternated Simultaneous Submission Order, canonical baseline) ===');
 
   for (let idx = 0; idx < TARGET_MAPS.length; idx++) {
     const boardName = TARGET_MAPS[idx];
     const seed = baseSeed + idx;
 
-    const recorded = runRandomGame({boardName, seed, recordTrace: true});
+    const recorded = runRandomGame({boardName, seed, recordTrace: true, simultaneousOrder: 'canonical'});
     const trace = recorded.trace ?? [];
     if (!recorded.completed) {
       throw new Error(`Recording game did not complete on ${boardName} (seed=${seed}): ${recorded.error}`);
@@ -306,6 +306,7 @@ function main(): void {
   const payload = {
     generatedAt: new Date().toISOString(),
     nodeVersion: process.version,
+    simultaneousOrder: 'canonical',
     maps: mapResults,
   };
 

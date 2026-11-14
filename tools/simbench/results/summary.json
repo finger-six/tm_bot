@@ -1,7 +1,8 @@
 {
   "stage1_smoke": {
-    "generatedAt": "2026-11-14T06:10:21.340Z",
+    "generatedAt": "2026-11-14T06:15:03.891Z",
     "nodeVersion": "v24.18.0",
+    "simultaneousOrder": "canonical",
     "seedsPerMap": 20,
     "baseSeed": 1001,
     "maps": [
@@ -10,23 +11,23 @@
         "firstGame": {
           "seed": 1001,
           "completed": true,
-          "generations": 17,
-          "decisions": 328,
+          "generations": 21,
+          "decisions": 436,
           "invalidActions": 0,
           "deadlocks": 0,
           "unexpectedInputTypes": [],
           "scores": {
-            "red": 85,
-            "blue": 54
+            "red": 94,
+            "blue": 46
           },
           "tie": false,
-          "wallTimeMs": 59.6
+          "wallTimeMs": 69.4
         },
         "corpusCount": 20,
         "completedCount": 20,
         "completionRate": 1,
-        "meanWallTimeMs": 23.67,
-        "p95WallTimeMs": 41.25,
+        "meanWallTimeMs": 26.64,
+        "p95WallTimeMs": 43.59,
         "totalInvalidActions": 0,
         "totalDeadlocks": 0,
         "totalStepCaps": 0,
@@ -37,23 +38,23 @@
         "firstGame": {
           "seed": 1001,
           "completed": true,
-          "generations": 18,
-          "decisions": 375,
+          "generations": 20,
+          "decisions": 431,
           "invalidActions": 0,
           "deadlocks": 0,
           "unexpectedInputTypes": [],
           "scores": {
-            "red": 92,
-            "blue": 68
+            "red": 98,
+            "blue": 52
           },
           "tie": false,
-          "wallTimeMs": 22.45
+          "wallTimeMs": 23.86
         },
         "corpusCount": 20,
         "completedCount": 20,
         "completionRate": 1,
-        "meanWallTimeMs": 20.29,
-        "p95WallTimeMs": 25.77,
+        "meanWallTimeMs": 19.09,
+        "p95WallTimeMs": 24.06,
         "totalInvalidActions": 0,
         "totalDeadlocks": 0,
         "totalStepCaps": 0,
@@ -64,23 +65,23 @@
         "firstGame": {
           "seed": 1001,
           "completed": true,
-          "generations": 22,
-          "decisions": 447,
+          "generations": 23,
+          "decisions": 435,
           "invalidActions": 0,
           "deadlocks": 0,
           "unexpectedInputTypes": [],
           "scores": {
-            "red": 77,
-            "blue": 69
+            "red": 87,
+            "blue": 72
           },
           "tie": false,
-          "wallTimeMs": 22.85
+          "wallTimeMs": 23.36
         },
         "corpusCount": 20,
         "completedCount": 20,
         "completionRate": 1,
-        "meanWallTimeMs": 18.61,
-        "p95WallTimeMs": 23.77,
+        "meanWallTimeMs": 18.27,
+        "p95WallTimeMs": 23.36,
         "totalInvalidActions": 0,
         "totalDeadlocks": 0,
         "totalStepCaps": 0,
@@ -92,22 +93,22 @@
           "seed": 1001,
           "completed": true,
           "generations": 19,
-          "decisions": 376,
+          "decisions": 389,
           "invalidActions": 0,
           "deadlocks": 0,
           "unexpectedInputTypes": [],
           "scores": {
-            "red": 88,
-            "blue": 65
+            "red": 104,
+            "blue": 45
           },
           "tie": false,
-          "wallTimeMs": 20.47
+          "wallTimeMs": 21.9
         },
         "corpusCount": 20,
         "completedCount": 20,
         "completionRate": 1,
-        "meanWallTimeMs": 17.9,
-        "p95WallTimeMs": 21.78,
+        "meanWallTimeMs": 18.08,
+        "p95WallTimeMs": 21.9,
         "totalInvalidActions": 0,
         "totalDeadlocks": 0,
         "totalStepCaps": 0,
@@ -116,24 +117,25 @@
     ]
   },
   "stage2_determinism": {
-    "generatedAt": "2026-11-14T06:10:28.266Z",
+    "generatedAt": "2026-11-14T06:15:10.755Z",
     "nodeVersion": "v24.18.0",
+    "simultaneousOrder": "canonical",
     "maps": [
       {
         "boardName": "tharsis",
         "seed": 2001,
         "driverSeed": 2654436968,
         "recordedCompleted": true,
-        "totalActions": 393,
+        "totalActions": 392,
         "strictReplay": {
           "passed": true,
-          "stepsChecked": 393,
+          "stepsChecked": 392,
           "mismatches": 0,
           "firstDiff": null,
           "scoresMatch": true,
           "scores": {
-            "red": 84,
-            "blue": 56
+            "red": 65,
+            "blue": 72
           }
         },
         "alternatedDraftAndResearchOrder": {
@@ -141,15 +143,15 @@
           "passedIgnoringGameLog": false,
           "simultaneousPairsFound": 85,
           "simultaneousPairsSwapped": 85,
-          "barriersChecked": 308,
-          "strictMismatches": 308,
+          "barriersChecked": 307,
+          "strictMismatches": 307,
           "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: Robinson Industries !== PhoboLog",
-          "nonLogMismatches": 308,
+          "nonLogMismatches": 307,
           "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: Robinson Industries !== PhoboLog",
           "scoresMatch": true,
           "scores": {
-            "red": 84,
-            "blue": 56
+            "red": 65,
+            "blue": 72
           }
         },
         "alternatedDraftOnlyOrder": {
@@ -157,15 +159,15 @@
           "passedIgnoringGameLog": true,
           "simultaneousPairsFound": 63,
           "simultaneousPairsSwapped": 63,
-          "barriersChecked": 330,
+          "barriersChecked": 329,
           "strictMismatches": 0,
           "firstStrictDiff": null,
           "nonLogMismatches": 0,
           "firstNonLogDiff": null,
           "scoresMatch": true,
           "scores": {
-            "red": 84,
-            "blue": 56
+            "red": 65,
+            "blue": 72
           }
         }
       },
@@ -174,48 +176,46 @@
         "seed": 2002,
         "driverSeed": 2654436971,
         "recordedCompleted": true,
-        "totalActions": 355,
+        "totalActions": 469,
         "strictReplay": {
           "passed": true,
-          "stepsChecked": 355,
+          "stepsChecked": 469,
           "mismatches": 0,
           "firstDiff": null,
           "scoresMatch": true,
           "scores": {
-            "red": 82,
-            "blue": 54
+            "red": 94,
+            "blue": 66
           }
         },
         "alternatedDraftAndResearchOrder": {
           "passed": false,
           "passedIgnoringGameLog": false,
-          "simultaneousPairsFound": 73,
-          "simultaneousPairsSwapped": 73,
-          "barriersChecked": 282,
-          "strictMismatches": 282,
-          "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: Saturn Systems !== Tharsis Republic",
-          "nonLogMismatches": 282,
-          "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: Saturn Systems !== Tharsis Republic",
-          "scoresMatch": true,
-          "scores": {
-            "red": 82,
-            "blue": 54
-          }
+          "simultaneousPairsFound": 94,
+          "simultaneousPairsSwapped": 93,
+          "barriersChecked": 325,
+          "strictMismatches": 325,
+          "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: Robinson Industries !== Tharsis Republic",
+          "nonLogMismatches": 325,
+          "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: Robinson Industries !== Tharsis Republic",
+          "scoresMatch": false,
+          "scores": {},
+          "error": "Replay aborted at step=419 (gen=25, phase=drafting): Card Interstellar Colony Ship not found"
         },
         "alternatedDraftOnlyOrder": {
           "passed": true,
           "passedIgnoringGameLog": true,
-          "simultaneousPairsFound": 54,
-          "simultaneousPairsSwapped": 54,
-          "barriersChecked": 301,
+          "simultaneousPairsFound": 78,
+          "simultaneousPairsSwapped": 78,
+          "barriersChecked": 391,
           "strictMismatches": 0,
           "firstStrictDiff": null,
           "nonLogMismatches": 0,
           "firstNonLogDiff": null,
           "scoresMatch": true,
           "scores": {
-            "red": 82,
-            "blue": 54
+            "red": 94,
+            "blue": 66
           }
         }
       },
@@ -224,48 +224,48 @@
         "seed": 2003,
         "driverSeed": 2654436970,
         "recordedCompleted": true,
-        "totalActions": 348,
+        "totalActions": 426,
         "strictReplay": {
           "passed": true,
-          "stepsChecked": 348,
+          "stepsChecked": 426,
           "mismatches": 0,
           "firstDiff": null,
           "scoresMatch": true,
           "scores": {
-            "red": 61,
-            "blue": 94
+            "red": 92,
+            "blue": 57
           }
         },
         "alternatedDraftAndResearchOrder": {
           "passed": false,
           "passedIgnoringGameLog": false,
-          "simultaneousPairsFound": 77,
-          "simultaneousPairsSwapped": 77,
-          "barriersChecked": 271,
-          "strictMismatches": 271,
-          "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: PhoboLog !== Robinson Industries",
-          "nonLogMismatches": 271,
-          "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: PhoboLog !== Robinson Industries",
+          "simultaneousPairsFound": 89,
+          "simultaneousPairsSwapped": 89,
+          "barriersChecked": 337,
+          "strictMismatches": 337,
+          "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: Saturn Systems !== Tharsis Republic",
+          "nonLogMismatches": 337,
+          "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: Saturn Systems !== Tharsis Republic",
           "scoresMatch": true,
           "scores": {
-            "red": 61,
-            "blue": 94
+            "red": 92,
+            "blue": 57
           }
         },
         "alternatedDraftOnlyOrder": {
           "passed": true,
           "passedIgnoringGameLog": true,
-          "simultaneousPairsFound": 57,
-          "simultaneousPairsSwapped": 57,
-          "barriersChecked": 291,
+          "simultaneousPairsFound": 66,
+          "simultaneousPairsSwapped": 66,
+          "barriersChecked": 360,
           "strictMismatches": 0,
           "firstStrictDiff": null,
           "nonLogMismatches": 0,
           "firstNonLogDiff": null,
           "scoresMatch": true,
           "scores": {
-            "red": 61,
-            "blue": 94
+            "red": 92,
+            "blue": 57
           }
         }
       },
@@ -274,48 +274,931 @@
         "seed": 2004,
         "driverSeed": 2654436973,
         "recordedCompleted": true,
-        "totalActions": 600,
+        "totalActions": 386,
         "strictReplay": {
           "passed": true,
-          "stepsChecked": 600,
+          "stepsChecked": 386,
           "mismatches": 0,
           "firstDiff": null,
           "scoresMatch": true,
           "scores": {
-            "red": 98,
-            "blue": 78
+            "red": 71,
+            "blue": 79
           }
         },
         "alternatedDraftAndResearchOrder": {
           "passed": false,
           "passedIgnoringGameLog": false,
-          "simultaneousPairsFound": 94,
-          "simultaneousPairsSwapped": 93,
-          "barriersChecked": 355,
-          "strictMismatches": 355,
-          "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: Tharsis Republic !== Saturn Systems",
-          "nonLogMismatches": 355,
-          "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: Tharsis Republic !== Saturn Systems",
-          "scoresMatch": false,
-          "scores": {},
-          "error": "Replay aborted at step=449 (gen=25, phase=drafting): Card Rad-Chem Factory not found"
+          "simultaneousPairsFound": 73,
+          "simultaneousPairsSwapped": 73,
+          "barriersChecked": 313,
+          "strictMismatches": 313,
+          "firstStrictDiff": "step=2: $.corporationDeck.discardPile[0]: Saturn Systems !== Tharsis Republic",
+          "nonLogMismatches": 313,
+          "firstNonLogDiff": "step=2: $.corporationDeck.discardPile[0]: Saturn Systems !== Tharsis Republic",
+          "scoresMatch": true,
+          "scores": {
+            "red": 71,
+            "blue": 79
+          }
         },
         "alternatedDraftOnlyOrder": {
           "passed": true,
           "passedIgnoringGameLog": true,
-          "simultaneousPairsFound": 93,
-          "simultaneousPairsSwapped": 93,
-          "barriersChecked": 507,
+          "simultaneousPairsFound": 54,
+          "simultaneousPairsSwapped": 54,
+          "barriersChecked": 332,
           "strictMismatches": 0,
           "firstStrictDiff": null,
           "nonLogMismatches": 0,
           "firstNonLogDiff": null,
           "scoresMatch": true,
           "scores": {
-            "red": 98,
-            "blue": 78
+            "red": 71,
+            "blue": 79
           }
         }
+      }
+    ]
+  },
+  "stage3_cloning": {
+    "generatedAt": "2026-11-14T06:35:20.855Z",
+    "nodeVersion": "v24.18.0",
+    "simultaneousOrder": "canonical",
+    "missingByMap": {
+      "tharsis": [],
+      "elysium": [],
+      "hellas": [],
+      "vastitas borealis nova": []
+    },
+    "categorySummary": [
+      {
+        "category": "initial_selection",
+        "mapsTested": 4,
+        "directPromptPass": 4,
+        "directContinuationPass": 4,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 4,
+        "fallbackTested": 0,
+        "fallbackPass": 0
+      },
+      {
+        "category": "drafting_before_pick",
+        "mapsTested": 4,
+        "directPromptPass": 4,
+        "directContinuationPass": 4,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 4,
+        "fallbackTested": 0,
+        "fallbackPass": 0
+      },
+      {
+        "category": "drafting_after_one_pick",
+        "mapsTested": 4,
+        "directPromptPass": 4,
+        "directContinuationPass": 4,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 4,
+        "fallbackTested": 0,
+        "fallbackPass": 0
+      },
+      {
+        "category": "research_buy",
+        "mapsTested": 4,
+        "directPromptPass": 0,
+        "directContinuationPass": 0,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 0,
+        "fallbackTested": 4,
+        "fallbackPass": 4
+      },
+      {
+        "category": "prelude_root",
+        "mapsTested": 4,
+        "directPromptPass": 4,
+        "directContinuationPass": 4,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 4,
+        "fallbackTested": 0,
+        "fallbackPass": 0
+      },
+      {
+        "category": "prelude_effect",
+        "mapsTested": 4,
+        "directPromptPass": 0,
+        "directContinuationPass": 0,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 0,
+        "fallbackTested": 4,
+        "fallbackPass": 4
+      },
+      {
+        "category": "action_root",
+        "mapsTested": 4,
+        "directPromptPass": 4,
+        "directContinuationPass": 4,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 4,
+        "fallbackTested": 0,
+        "fallbackPass": 0
+      },
+      {
+        "category": "nested_payment",
+        "mapsTested": 4,
+        "directPromptPass": 0,
+        "directContinuationPass": 0,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 0,
+        "fallbackTested": 4,
+        "fallbackPass": 4
+      },
+      {
+        "category": "nested_space",
+        "mapsTested": 4,
+        "directPromptPass": 0,
+        "directContinuationPass": 0,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 0,
+        "fallbackTested": 4,
+        "fallbackPass": 4
+      },
+      {
+        "category": "nested_player_attack",
+        "mapsTested": 4,
+        "directPromptPass": 0,
+        "directContinuationPass": 0,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 0,
+        "fallbackTested": 4,
+        "fallbackPass": 4
+      },
+      {
+        "category": "nested_deferred_action",
+        "mapsTested": 4,
+        "directPromptPass": 0,
+        "directContinuationPass": 0,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 0,
+        "fallbackTested": 4,
+        "fallbackPass": 4
+      },
+      {
+        "category": "final_greenery",
+        "mapsTested": 4,
+        "directPromptPass": 4,
+        "directContinuationPass": 4,
+        "directIsolationPass": 4,
+        "atomicityPass": 4,
+        "directAllPass": 4,
+        "fallbackTested": 0,
+        "fallbackPass": 0
+      }
+    ],
+    "fallbackSuffixSweep": [
+      {
+        "suffixLength": 0,
+        "medianMs": 0.78,
+        "p95Ms": 0.881,
+        "maxMs": 0.946,
+        "samples": 25
+      },
+      {
+        "suffixLength": 1,
+        "medianMs": 0.898,
+        "p95Ms": 1.051,
+        "maxMs": 3.578,
+        "samples": 25
+      },
+      {
+        "suffixLength": 2,
+        "medianMs": 1.337,
+        "p95Ms": 2.301,
+        "maxMs": 13.787,
+        "samples": 25
+      },
+      {
+        "suffixLength": 5,
+        "medianMs": 1.247,
+        "p95Ms": 2.022,
+        "maxMs": 4.671,
+        "samples": 25
+      },
+      {
+        "suffixLength": 10,
+        "medianMs": 1.184,
+        "p95Ms": 1.602,
+        "maxMs": 3.314,
+        "samples": 25
+      },
+      {
+        "suffixLength": 20,
+        "medianMs": 1.349,
+        "p95Ms": 2.419,
+        "maxMs": 3,
+        "samples": 25
+      },
+      {
+        "suffixLength": 40,
+        "medianMs": 2.035,
+        "p95Ms": 3.519,
+        "maxMs": 3.682,
+        "samples": 25
+      }
+    ],
+    "atomicityFailures": [],
+    "directFailureSamples": [
+      {
+        "category": "research_buy",
+        "boardName": "tharsis",
+        "seed": 3001,
+        "phase": "research",
+        "activeInputType": "card",
+        "promptDiff": "$[0].model.buttonLabel: Buy !== Ok",
+        "continuationError": "Too many cards selected",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "prelude_effect",
+        "boardName": "tharsis",
+        "seed": 3001,
+        "phase": "preludes",
+        "activeInputType": "projectCard",
+        "promptDiff": "$[0].model.auroraiData: missing in B (A=0)",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "nested_payment",
+        "boardName": "tharsis",
+        "seed": 3003,
+        "phase": "action",
+        "activeInputType": "payment",
+        "promptDiff": "$[0].model.amount: missing in B (A=12)",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.board.spaces[45].player: missing in A (B=\"p-2\")"
+      },
+      {
+        "category": "nested_space",
+        "boardName": "tharsis",
+        "seed": 3001,
+        "phase": "action",
+        "activeInputType": "space",
+        "promptDiff": "$[0].model.buttonLabel: Save !== Take action",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "nested_player_attack",
+        "boardName": "tharsis",
+        "seed": 3001,
+        "phase": "action",
+        "activeInputType": "player",
+        "promptDiff": "$[0].model.buttonLabel: Decrease !== Take action",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.board.spaces[20].player: missing in B (A=\"p-1\")"
+      },
+      {
+        "category": "nested_deferred_action",
+        "boardName": "tharsis",
+        "seed": 3001,
+        "phase": "action",
+        "activeInputType": "or",
+        "promptDiff": "$[0].model.buttonLabel: Save !== Take action",
+        "continuationError": "Not a valid SelectProjectCardToPlayResponse",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "research_buy",
+        "boardName": "elysium",
+        "seed": 3001,
+        "phase": "research",
+        "activeInputType": "card",
+        "promptDiff": "$[0].model.buttonLabel: Buy !== Ok",
+        "continuationError": "Too many cards selected",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "prelude_effect",
+        "boardName": "elysium",
+        "seed": 3001,
+        "phase": "preludes",
+        "activeInputType": "projectCard",
+        "promptDiff": "$[0].model.auroraiData: missing in B (A=0)",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "nested_payment",
+        "boardName": "elysium",
+        "seed": 3008,
+        "phase": "action",
+        "activeInputType": "payment",
+        "promptDiff": "$[0].model.amount: missing in B (A=8)",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.board.spaces[6].player: missing in A (B=\"p-1\")"
+      },
+      {
+        "category": "nested_space",
+        "boardName": "elysium",
+        "seed": 3001,
+        "phase": "action",
+        "activeInputType": "space",
+        "promptDiff": "$[0].model.buttonLabel: Save !== Take action",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.board.spaces[0].player: missing in A (B=\"p-2\")"
+      },
+      {
+        "category": "nested_player_attack",
+        "boardName": "elysium",
+        "seed": 3001,
+        "phase": "action",
+        "activeInputType": "player",
+        "promptDiff": "$[0].model.buttonLabel: Decrease !== Take action",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "nested_deferred_action",
+        "boardName": "elysium",
+        "seed": 3001,
+        "phase": "action",
+        "activeInputType": "or",
+        "promptDiff": "$[0].model.buttonLabel: Save !== Take action",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "research_buy",
+        "boardName": "hellas",
+        "seed": 3001,
+        "phase": "research",
+        "activeInputType": "card",
+        "promptDiff": "$[0].model.buttonLabel: Buy !== Ok",
+        "continuationError": "Too many cards selected",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "prelude_effect",
+        "boardName": "hellas",
+        "seed": 3001,
+        "phase": "preludes",
+        "activeInputType": "projectCard",
+        "promptDiff": "$[0].model.auroraiData: missing in B (A=0)",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.board.spaces[0].player: missing in A (B=\"p-2\")"
+      },
+      {
+        "category": "nested_payment",
+        "boardName": "hellas",
+        "seed": 3007,
+        "phase": "action",
+        "activeInputType": "payment",
+        "promptDiff": "$[0].model.amount: missing in B (A=8)",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "nested_space",
+        "boardName": "hellas",
+        "seed": 3001,
+        "phase": "action",
+        "activeInputType": "space",
+        "promptDiff": "$[0].model.buttonLabel: Save !== Take action",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "nested_player_attack",
+        "boardName": "hellas",
+        "seed": 3001,
+        "phase": "action",
+        "activeInputType": "player",
+        "promptDiff": "$[0].model.buttonLabel: Decrease !== Take action",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.gameLog[322].data[1].type: 1 !== 3"
+      },
+      {
+        "category": "nested_deferred_action",
+        "boardName": "hellas",
+        "seed": 3001,
+        "phase": "action",
+        "activeInputType": "or",
+        "promptDiff": "$[0].model.buttonLabel: Save !== Take action",
+        "continuationError": "Not a valid SelectCardResponse",
+        "continuationFinalStateDiff": "$.activePlayer: p-2 !== p-1"
+      },
+      {
+        "category": "research_buy",
+        "boardName": "vastitas borealis nova",
+        "seed": 3001,
+        "phase": "research",
+        "activeInputType": "card",
+        "promptDiff": "$[0].model.buttonLabel: Buy !== Ok",
+        "continuationError": "Too many cards selected",
+        "continuationFinalStateDiff": "$.activePlayer: p-1 !== p-2"
+      },
+      {
+        "category": "prelude_effect",
+        "boardName": "vastitas borealis nova",
+        "seed": 3001,
+        "phase": "preludes",
+        "activeInputType": "projectCard",
+        "promptDiff": "$[0].model.auroraiData: missing in B (A=0)",
+        "continuationError": "Not a valid OrOptionsResponse",
+        "continuationFinalStateDiff": "$.activePlayer: p-1 !== p-2"
+      }
+    ]
+  },
+  "stage4_latency": {
+    "generatedAt": "2026-11-14T06:28:21.325Z",
+    "nodeVersion": "v24.18.0",
+    "simultaneousOrder": "canonical",
+    "gamesPerMap": 20,
+    "totalGames": 80,
+    "completedNoObs": 80,
+    "completedWithObs": 80,
+    "totalDecisionsNoObs": 31790,
+    "totalDecisionsWithObs": 31790,
+    "totalDeserializeErrors": 0,
+    "passes30sBareEngineBar": true,
+    "resetMs": {
+      "count": 80,
+      "mean": 0.6641,
+      "median": 0.5974,
+      "p95": 1.0123,
+      "max": 2.2516,
+      "min": 0.5144
+    },
+    "gameWallNoObsMs": {
+      "count": 80,
+      "mean": 17.98,
+      "median": 17.1,
+      "p95": 25.43,
+      "max": 28.66,
+      "min": 11.39
+    },
+    "gameWallWithObsMs": {
+      "count": 80,
+      "mean": 46.72,
+      "median": 44.26,
+      "p95": 67.22,
+      "max": 78.56,
+      "min": 28.97
+    },
+    "perMapSummary": [
+      {
+        "boardName": "tharsis",
+        "gameWallNoObsMs": {
+          "count": 20,
+          "mean": 17.53,
+          "median": 16.35,
+          "p95": 26.12,
+          "max": 28.46,
+          "min": 11.72
+        },
+        "gameWallWithObsMs": {
+          "count": 20,
+          "mean": 40.89,
+          "median": 38.57,
+          "p95": 53.67,
+          "max": 68.68,
+          "min": 30.96
+        }
+      },
+      {
+        "boardName": "elysium",
+        "gameWallNoObsMs": {
+          "count": 20,
+          "mean": 17.38,
+          "median": 17.15,
+          "p95": 21.11,
+          "max": 23.17,
+          "min": 12.13
+        },
+        "gameWallWithObsMs": {
+          "count": 20,
+          "mean": 48.23,
+          "median": 45.26,
+          "p95": 61.05,
+          "max": 69.07,
+          "min": 38.15
+        }
+      },
+      {
+        "boardName": "hellas",
+        "gameWallNoObsMs": {
+          "count": 20,
+          "mean": 20.32,
+          "median": 20.61,
+          "p95": 25.51,
+          "max": 28.66,
+          "min": 15.03
+        },
+        "gameWallWithObsMs": {
+          "count": 20,
+          "mean": 53.49,
+          "median": 52.05,
+          "p95": 71.41,
+          "max": 78.56,
+          "min": 31.85
+        }
+      },
+      {
+        "boardName": "vastitas borealis nova",
+        "gameWallNoObsMs": {
+          "count": 20,
+          "mean": 16.7,
+          "median": 15.88,
+          "p95": 22.69,
+          "max": 25.43,
+          "min": 11.39
+        },
+        "gameWallWithObsMs": {
+          "count": 20,
+          "mean": 44.29,
+          "median": 39.26,
+          "p95": 65.94,
+          "max": 67.22,
+          "min": 28.97
+        }
+      }
+    ],
+    "observationMs": {
+      "overall": {
+        "count": 31790,
+        "mean": 0.0627,
+        "median": 0.0545,
+        "p95": 0.1159,
+        "max": 1.9785,
+        "min": 0.0228
+      },
+      "early": {
+        "count": 9820,
+        "mean": 0.0462,
+        "median": 0.0413,
+        "p95": 0.0786,
+        "max": 1.1484,
+        "min": 0.0228
+      },
+      "mid": {
+        "count": 10769,
+        "mean": 0.0608,
+        "median": 0.0537,
+        "p95": 0.1047,
+        "max": 1.9785,
+        "min": 0.026
+      },
+      "late": {
+        "count": 11201,
+        "mean": 0.0791,
+        "median": 0.0706,
+        "p95": 0.1388,
+        "max": 1.3152,
+        "min": 0.029
+      }
+    },
+    "stepMs": {
+      "overall": {
+        "count": 31790,
+        "mean": 0.0393,
+        "median": 0.0283,
+        "p95": 0.1161,
+        "max": 1.613,
+        "min": 0.0005
+      },
+      "early": {
+        "count": 9820,
+        "mean": 0.0321,
+        "median": 0.0227,
+        "p95": 0.0939,
+        "max": 1.3133,
+        "min": 0.0005
+      },
+      "mid": {
+        "count": 10769,
+        "mean": 0.0389,
+        "median": 0.0277,
+        "p95": 0.1149,
+        "max": 1.613,
+        "min": 0.0005
+      },
+      "late": {
+        "count": 11201,
+        "mean": 0.046,
+        "median": 0.0355,
+        "p95": 0.131,
+        "max": 1.1578,
+        "min": 0.0006
+      }
+    },
+    "serializeJsonMs": {
+      "overall": {
+        "count": 31790,
+        "mean": 0.2012,
+        "median": 0.1747,
+        "p95": 0.3576,
+        "max": 1.8467,
+        "min": 0.0641
+      },
+      "early": {
+        "count": 9820,
+        "mean": 0.123,
+        "median": 0.1138,
+        "p95": 0.1778,
+        "max": 1.3324,
+        "min": 0.0641
+      },
+      "mid": {
+        "count": 10769,
+        "mean": 0.1876,
+        "median": 0.1694,
+        "p95": 0.2776,
+        "max": 1.4706,
+        "min": 0.0988
+      },
+      "late": {
+        "count": 11201,
+        "mean": 0.283,
+        "median": 0.2779,
+        "p95": 0.4057,
+        "max": 1.8467,
+        "min": 0.1381
+      }
+    },
+    "parseDeserializeMs": {
+      "overall": {
+        "count": 31790,
+        "mean": 0.7708,
+        "median": 0.7295,
+        "p95": 1.149,
+        "max": 12.8609,
+        "min": 0.424
+      },
+      "early": {
+        "count": 9820,
+        "mean": 0.6481,
+        "median": 0.6166,
+        "p95": 0.9683,
+        "max": 6.5604,
+        "min": 0.424
+      },
+      "mid": {
+        "count": 10769,
+        "mean": 0.7549,
+        "median": 0.7259,
+        "p95": 1.0612,
+        "max": 7.2702,
+        "min": 0.4977
+      },
+      "late": {
+        "count": 11201,
+        "mean": 0.8937,
+        "median": 0.8467,
+        "p95": 1.3064,
+        "max": 12.8609,
+        "min": 0.5672
+      }
+    },
+    "snapshotBytes": {
+      "overall": {
+        "count": 31790,
+        "mean": 50214,
+        "median": 48939,
+        "p95": 84873,
+        "max": 118421,
+        "min": 14675
+      },
+      "early": {
+        "count": 9820,
+        "mean": 27067,
+        "median": 26601,
+        "p95": 37787,
+        "max": 50801,
+        "min": 14675
+      },
+      "mid": {
+        "count": 10769,
+        "mean": 48308,
+        "median": 47428,
+        "p95": 63529,
+        "max": 82267,
+        "min": 30085
+      },
+      "late": {
+        "count": 11201,
+        "mean": 72340,
+        "median": 71025,
+        "p95": 94646,
+        "max": 118421,
+        "min": 44470
+      }
+    },
+    "rssMB": {
+      "count": 160,
+      "mean": 422.07,
+      "median": 429.96,
+      "p95": 541.97,
+      "max": 550.04,
+      "min": 121.18
+    },
+    "heapUsedMB": {
+      "count": 160,
+      "mean": 199.81,
+      "median": 186.85,
+      "p95": 344.02,
+      "max": 384.48,
+      "min": 30.07
+    },
+    "httpComparison": {
+      "measured": true,
+      "dbBackend": "SQLite (engine default in temp dir)",
+      "gamesRun": 4,
+      "gamesCompleted": 4,
+      "decisions": 1456,
+      "waitingForMs": {
+        "count": 1456,
+        "mean": 13.256,
+        "median": 14.75,
+        "p95": 16.2,
+        "max": 17.228,
+        "min": 0.251
+      },
+      "postInputMs": {
+        "count": 1456,
+        "mean": 16.956,
+        "median": 17.882,
+        "p95": 20.603,
+        "max": 39.26,
+        "min": 0.675
+      },
+      "decisionTotalMs": {
+        "count": 1456,
+        "mean": 30.212,
+        "median": 31.52,
+        "p95": 35.97,
+        "max": 55.079,
+        "min": 2.017
+      },
+      "gameWallMs": {
+        "count": 4,
+        "mean": 16651.49,
+        "median": 14823.64,
+        "p95": 20339.1,
+        "max": 20339.1,
+        "min": 14331.08
+      },
+      "speedupInProcessVsHttpDecisionMedian": 380.7,
+      "speedupInProcessVsHttpGameWallMedian": 334.9
+    }
+  },
+  "stage5_scaling": {
+    "generatedAt": "2026-11-14T06:34:12.148Z",
+    "nodeVersion": "v24.18.0",
+    "simultaneousOrder": "canonical",
+    "concurrencyModel": "worker_threads (isolated V8 isolates; module globals isolated per worker)",
+    "host": {
+      "cpuModel": "Intel(R) Core(TM) Ultra 7 265F",
+      "logicalCores": 20,
+      "totalRamGB": 31.52,
+      "platform": "win32",
+      "release": "10.0.26300"
+    },
+    "durationSecPerTier": 60,
+    "tiers": [
+      {
+        "workers": 1,
+        "durationSec": 60,
+        "actualWallSec": 60,
+        "totalGamesCompleted": 3770,
+        "totalGamesFailed": 0,
+        "totalDecisions": 1552774,
+        "gamesPerSec": 62.83,
+        "decisionsPerSec": 25877.4,
+        "processRssMeanMB": 333.93,
+        "processRssMaxMB": 354.86,
+        "rssPerWorkerMaxMB": 354.86,
+        "workerHeapPeakAvgMB": 171.43,
+        "workerHeapPeakMaxMB": 171.43,
+        "gcTotalEvents": 1639,
+        "gcTotalTimeMs": 1079.67,
+        "gcMaxPauseMs": 4.69,
+        "gcMajorEvents": 62,
+        "gcMajorMaxPauseMs": 4.69,
+        "eldP50AvgMs": 15.23,
+        "eldP95MaxMs": 23.86,
+        "eldMaxPauseMs": 41.22,
+        "speedupVs1Worker": 1,
+        "scalingEfficiencyPct": 100
+      },
+      {
+        "workers": 2,
+        "durationSec": 60,
+        "actualWallSec": 60.01,
+        "totalGamesCompleted": 7364,
+        "totalGamesFailed": 0,
+        "totalDecisions": 3028145,
+        "gamesPerSec": 122.71,
+        "decisionsPerSec": 50457.8,
+        "processRssMeanMB": 589.49,
+        "processRssMaxMB": 615.65,
+        "rssPerWorkerMaxMB": 307.83,
+        "workerHeapPeakAvgMB": 195.78,
+        "workerHeapPeakMaxMB": 250.98,
+        "gcTotalEvents": 3166,
+        "gcTotalTimeMs": 2157.31,
+        "gcMaxPauseMs": 6.41,
+        "gcMajorEvents": 121,
+        "gcMajorMaxPauseMs": 6.41,
+        "eldP50AvgMs": 15.54,
+        "eldP95MaxMs": 24.58,
+        "eldMaxPauseMs": 49.91,
+        "speedupVs1Worker": 1.95,
+        "scalingEfficiencyPct": 97.7
+      },
+      {
+        "workers": 4,
+        "durationSec": 60,
+        "actualWallSec": 60.02,
+        "totalGamesCompleted": 13229,
+        "totalGamesFailed": 0,
+        "totalDecisions": 5450592,
+        "gamesPerSec": 220.42,
+        "decisionsPerSec": 90816,
+        "processRssMeanMB": 993.06,
+        "processRssMaxMB": 1036.79,
+        "rssPerWorkerMaxMB": 259.2,
+        "workerHeapPeakAvgMB": 162.19,
+        "workerHeapPeakMaxMB": 192.48,
+        "gcTotalEvents": 5752,
+        "gcTotalTimeMs": 4230.73,
+        "gcMaxPauseMs": 22.52,
+        "gcMajorEvents": 228,
+        "gcMajorMaxPauseMs": 22.52,
+        "eldP50AvgMs": 17.15,
+        "eldP95MaxMs": 28.26,
+        "eldMaxPauseMs": 76.48,
+        "speedupVs1Worker": 3.51,
+        "scalingEfficiencyPct": 87.7
+      },
+      {
+        "workers": 8,
+        "durationSec": 60,
+        "actualWallSec": 60.02,
+        "totalGamesCompleted": 20335,
+        "totalGamesFailed": 0,
+        "totalDecisions": 8376179,
+        "gamesPerSec": 338.79,
+        "decisionsPerSec": 139549.1,
+        "processRssMeanMB": 1813.9,
+        "processRssMaxMB": 2269.93,
+        "rssPerWorkerMaxMB": 283.74,
+        "workerHeapPeakAvgMB": 148.81,
+        "workerHeapPeakMaxMB": 206.57,
+        "gcTotalEvents": 8950,
+        "gcTotalTimeMs": 7880.82,
+        "gcMaxPauseMs": 53.92,
+        "gcMajorEvents": 360,
+        "gcMajorMaxPauseMs": 53.92,
+        "eldP50AvgMs": 22.69,
+        "eldP95MaxMs": 35.68,
+        "eldMaxPauseMs": 127.27,
+        "speedupVs1Worker": 5.39,
+        "scalingEfficiencyPct": 67.4
+      },
+      {
+        "workers": 20,
+        "durationSec": 60,
+        "actualWallSec": 60.06,
+        "totalGamesCompleted": 32789,
+        "totalGamesFailed": 0,
+        "totalDecisions": 13502221,
+        "gamesPerSec": 545.94,
+        "decisionsPerSec": 224812.6,
+        "processRssMeanMB": 4303,
+        "processRssMaxMB": 4680.41,
+        "rssPerWorkerMaxMB": 234.02,
+        "workerHeapPeakAvgMB": 151.21,
+        "workerHeapPeakMaxMB": 204.13,
+        "gcTotalEvents": 14768,
+        "gcTotalTimeMs": 21800.43,
+        "gcMaxPauseMs": 71.02,
+        "gcMajorEvents": 518,
+        "gcMajorMaxPauseMs": 71.02,
+        "eldP50AvgMs": 35.12,
+        "eldP95MaxMs": 76.74,
+        "eldMaxPauseMs": 278.4,
+        "speedupVs1Worker": 8.69,
+        "scalingEfficiencyPct": 43.4
       }
     ]
   }

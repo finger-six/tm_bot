@@ -9,6 +9,16 @@ export class SeededPrng {
     this.state = seed >>> 0;
   }
 
+  public getState(): number {
+    return this.state >>> 0;
+  }
+
+  public clone(): SeededPrng {
+    const copy = new SeededPrng(0);
+    copy.state = this.state >>> 0;
+    return copy;
+  }
+
   /** Returns a float in [0, 1). */
   public next(): number {
     let t = (this.state += 0x6d2b79f5);

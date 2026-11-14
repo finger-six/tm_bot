@@ -67,13 +67,13 @@ function main(): void {
   const allRuns: Array<GameRunResult> = [];
   const mapSummaries: Array<MapSmokeSummary> = [];
 
-  console.log(`=== Stage 1: Smoke (${seedsPerMap} seeds/map, 2P Corporate Era + Prelude + Drafting) ===`);
+  console.log(`=== Stage 1: Smoke (${seedsPerMap} seeds/map, 2P Corporate Era + Prelude + Drafting, canonical order) ===`);
 
   for (const boardName of TARGET_MAPS) {
     const mapRuns: Array<GameRunResult> = [];
     for (let i = 0; i < seedsPerMap; i++) {
       const seed = baseSeed + i;
-      const run = runRandomGame({boardName, seed});
+      const run = runRandomGame({boardName, seed, simultaneousOrder: 'canonical'});
       mapRuns.push(run);
       allRuns.push(run);
     }
@@ -132,6 +132,7 @@ function main(): void {
   const smokePayload = {
     generatedAt: new Date().toISOString(),
     nodeVersion: process.version,
+    simultaneousOrder: 'canonical',
     seedsPerMap,
     baseSeed,
     maps: mapSummaries,
@@ -148,6 +149,7 @@ function main(): void {
     stage1_smoke: {
       generatedAt: smokePayload.generatedAt,
       nodeVersion: process.version,
+      simultaneousOrder: 'canonical',
       seedsPerMap,
       baseSeed,
       maps: mapSummaries.map((m) => ({

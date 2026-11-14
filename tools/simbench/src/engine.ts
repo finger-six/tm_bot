@@ -160,6 +160,8 @@ export interface IStandardProjectCard extends ICard {
 
 export interface PlayerInput {
   type: string;
+  title?: unknown;
+  buttonLabel?: string;
   optional?: boolean;
 }
 
@@ -280,6 +282,13 @@ export interface IGame {
   phase: string;
   generation: number;
   players: Array<IPlayer>;
+  playersInGenerationOrder: Array<IPlayer>;
+  activePlayer: IPlayer;
+  gameAge: number;
+  undoCount: number;
+  deferredActions: {length: number};
+  gameIsOver(): boolean;
+  isDoneWithFinalProduction(): boolean;
   serialize(): SerializedGame;
 }
 
@@ -342,10 +351,26 @@ const {Game} = engineRequire<{
 const {Player} = engineRequire<{
   Player: new (name: string, color: Color, beginner: boolean, handicap: number, id: PlayerId) => IPlayer;
 }>('server/Player.js');
+const {Server} = engineRequire<{
+  Server: {
+    getPlayerModel(player: IPlayer): Record<string, unknown>;
+    getWaitingFor(player: IPlayer, waitingFor: PlayerInput | undefined): Record<string, unknown> | undefined;
+  };
+}>('server/models/ServerModel.js');
 const {Database} = engineRequire<{Database: {getInstance: () => IDatabase}}>('server/database/Database.js');
 const {GameLoader} = engineRequire<{GameLoader: {getInstance: () => IGameLoader}}>('server/database/GameLoader.js');
 const {BoardName} = engineRequire<{BoardName: Record<string, BoardNameValue>}>('common/boards/BoardName.js');
-const {Phase} = engineRequire<{Phase: Record<string, string> & {END: string; RESEARCH: string; DRAFTING: string; INITIALDRAFTING: string}}>('common/Phase.js');
+const {Phase} = engineRequire<{
+  Phase: Record<string, string> & {
+    END: string;
+    RESEARCH: string;
+    DRAFTING: string;
+    INITIALDRAFTING: string;
+    PRELUDES: string;
+    ACTION: string;
+    PRODUCTION: string;
+  };
+}>('common/Phase.js');
 const {RandomMAOptionType} = engineRequire<{RandomMAOptionType: Record<string, string> & {NONE: string}}>('common/ma/RandomMAOptionType.js');
 const constants = engineRequire<{
   CORPORATION_CARDS_DEALT_PER_PLAYER: number;
@@ -373,6 +398,7 @@ const {CardName} = engineRequire<{CardName: Record<string, string>}>('common/car
 export {
   Game,
   Player,
+  Server,
   BoardName,
   Phase,
   RandomMAOptionType,
