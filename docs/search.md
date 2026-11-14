@@ -98,7 +98,37 @@ appear in the evaluation report.
 
 ## Results
 
-RESULTS_PLACEHOLDER
+400 `eval-*` games per pairing (seat-swapped pairs, four supported maps, Amazonis
+Planitia reported as not supported), setting `ismcts-s8-k4-warmstart-v2`, 16 workers,
+batch size 32, one training seed. Reports: `data/reports/search_vs_b0/` and
+`data/reports/search_vs_b1/` (gitignored). Runs with `--resume` or
+`--max-games-per-run` also keep per-game rows in `games.jsonl`.
+
+| Pairing | Completed | Failures | Search win rate (95% paired bootstrap CI) | Mean VP margin | Gens/game | Wall time |
+| --- | ---: | ---: | --- | ---: | ---: | ---: |
+| Search vs B0 | 400 | 0 | **62.00%** [56.75%, 67.25%] | +6.87 (84.4 vs 77.5) | 23.69 (15-40) | 3,368 s |
+| Search vs B1 | 400 | 0 | **4.00%** [1.00%, 8.00%] | -83.38 (43.5 vs 126.8) | 14.82 (11-51) | 2,051 s |
+
+Per map vs B0: Tharsis 53%, Elysium 67%, Hellas 65%, Vastitas Borealis Nova 63%.
+Per map vs B1: 4% on every map (each seed key fixes the deal on all four maps, so
+outcomes are strongly correlated across maps; win attribution was checked).
+The longest games (up to 51 generations vs B1, 40 vs B0) exceed the 6-25 game-shape
+range of #10. Both runs had 0 failures and 0 step caps, so these are slow games rather
+than adapter errors; the likely cause is the untrained action policy (see "Known limits").
+The longest games (up to 51 generations vs B1, 40 vs B0) exceed the 6-25 game-shape
+range of #10; they come from the weak action policy stalling terraforming, not from
+adapter errors (0 failures, 0 step caps).
+
+Decision latency of the search agent (wall clock, 16 concurrent games sharing one GPU):
+
+| Pairing | All decisions p50 / p95 | Searched decisions p50 / p95 (n) |
+| --- | --- | --- |
+| vs B0 | 27.7 / 50.4 ms | 34.2 / 53.5 ms (82,321) |
+| vs B1 | 28.4 / 51.4 ms | 34.4 / 55.7 ms (48,969) |
+
+Sampler fallbacks (`world sampling failed` / `belief root sampling failed` warnings):
+0 in both runs. An earlier pre-fix run vs B0 had 2 of 400 games fail in the sampler
+(see "Known limits").
 
 ## Known limits
 
