@@ -13,3 +13,4 @@ include = ["tm_bot*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

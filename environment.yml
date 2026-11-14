@@ -4,6 +4,10 @@ channels:
   - defaults
 dependencies:
   - python=3.12
+  - numpy
   - pytest
   - pip
   - setuptools
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu130
+      - torch==2.14.1+cu130
