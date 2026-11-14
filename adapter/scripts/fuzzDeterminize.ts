@@ -67,7 +67,7 @@ function sampleWorldFromObservation(
     opponentDealtPreludes = availablePreludes.splice(0, 4);
     opponentDealtProjects = takeProjects(10);
   } else if (pool.opponentHasHiddenPickedCorp) {
-    opponentPickedCorporation = availableCorps.splice(0, 1)[0];
+    opponentPickedCorporation = shuffleWithRng(pool.opponentPickedCorporationCandidates, rng)[0];
   }
 
   if (pool.opponentPreludeHandSize > 0) {

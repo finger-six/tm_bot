@@ -187,7 +187,7 @@ function sampleWorldFromObservation(
     opponentDealtPreludes = availablePreludes.splice(0, 4);
     opponentDealtProjects = takeProjects(10);
   } else if (pool.opponentHasHiddenPickedCorp) {
-    opponentPickedCorporation = availableCorps.splice(0, 1)[0];
+    opponentPickedCorporation = shuffleWithRng(pool.opponentPickedCorporationCandidates, rng)[0];
   }
 
   if (pool.opponentPreludeHandSize > 0) {
@@ -1156,16 +1156,18 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
       assertExactPool(census.preludes, 35, `${label} preludes`);
     }
 
-    // Also verify a game where a prelude fizzles conserves all 35 preludes in action phase
-    const gFizzle = findGameAt(
-      (g) =>
-        _unsafeGetEngineGame(g).phase === 'action' &&
-        g.observe(0).public.publicLog.some((e) => e.message.includes('fizzled.')),
-      't28-l2-fizzle',
-      'tharsis',
-      150,
-    );
+    // Also verify a game where a prelude fizzles conserves all 35 preludes in action phase, for
+    // each seat while it is the pending (deciding) seat.
     for (const actor of [0, 1] as const) {
+      const gFizzle = findGameAt(
+        (g) =>
+          _unsafeGetEngineGame(g).phase === 'action' &&
+          g.pending().includes(actor) &&
+          g.observe(0).public.publicLog.some((e) => e.message.includes('fizzled.')),
+        't28-l2-fizzle',
+        'tharsis',
+        150,
+      );
       const c = gFizzle.clone();
       c.determinize(actor, sampleWorldFromObservation(c.observe(actor), c.unseenPool(actor), makePrng(4002 + actor)));
       const census = fullCensus(c);
@@ -1614,3 +1616,62 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
 });
 
 
+
+describe('Ticket 28 regression: hidden picked corporation affordability', () => {
+  it('only offers opponent corporations that can pay for the publicly counted initial buy, and rejects others', () => {
+    // t28-truth-2 / hellas at decision 24: seat 0 has submitted a 9-card initial buy (27 M€) while
+    // its corporation is still hidden from seat 1. A sampled PhoboLog (23 M€) made the engine log
+    // "Illegal state: Adjusting -27 megacredits".
+    const g = createGame({seedKey: 't28-truth-2', map: 'hellas'});
+    const mainRng = makePrng(9000 + 2 * 17);
+    for (let d = 0; d < 24; d++) {
+      const s = g.pending()[0];
+      g.choose(s, chooseSeeded(mainRng, g.choice(s).candidates.length));
+    }
+    assert.ok(g.pending().includes(1));
+    const pool = g.unseenPool(1);
+    assert.equal(pool.opponentHasHiddenPickedCorp, true);
+    assert.equal(pool.opponentHandSize, 9);
+    const candidates = new Set(pool.opponentPickedCorporationCandidates);
+    assert.ok(candidates.size > 0);
+    for (const c of candidates) assert.ok(pool.corporations.includes(c));
+    assert.ok(!candidates.has('PhoboLog'));
+    assert.ok(pool.corporations.includes('PhoboLog'));
+
+    const base = sampleWorldFromObservation(g.observe(1), pool, makePrng(77));
+    const bad = g.clone();
+    assert.throws(
+      () => bad.determinize(1, {...base, opponentPickedCorporation: 'PhoboLog'}),
+      /opponentPickedCorporation/,
+    );
+
+    const warnings: Array<string> = [];
+    const origWarn = console.warn;
+    console.warn = (m: unknown) => { warnings.push(String(m)); };
+    try {
+      for (const corp of candidates) {
+        const c = g.clone();
+        c.determinize(1, {...base, opponentPickedCorporation: corp});
+        playToCompletion(c, makePrng(4242));
+      }
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.deepEqual(warnings.filter((w) => w.startsWith('Illegal state')), []);
+  });
+});
+
+describe('Ticket 28 regression: determinize contract', () => {
+  it('rejects determinize for a seat that is not pending', () => {
+    const g = createGame({seedKey: 't28-contract', map: 'tharsis'});
+    const rng = makePrng(31);
+    while (g.pending().length !== 1) {
+      const s = g.pending()[0];
+      g.choose(s, chooseSeeded(rng, g.choice(s).candidates.length));
+    }
+    const idle: Seat = g.pending()[0] === 0 ? 1 : 0;
+    const c = g.clone();
+    const world = sampleWorldFromObservation(c.observe(idle), c.unseenPool(idle), makePrng(5));
+    assert.throws(() => c.determinize(idle, world), /requires seat \d to be pending/);
+  });
+});

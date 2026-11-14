@@ -654,6 +654,9 @@ export function computeUnseenPool(obs: ActorObservation): UnseenPool {
     projects: unseenProjects,
     preludes: unseenPreludes,
     corporations: unseenCorps,
+    opponentPickedCorporationCandidates: opponentHasHiddenPickedCorp
+      ? unseenCorps.filter((c) => canAffordInitialBuy(c, obs.public.players[opp].cardsInHandCount))
+      : [],
     knownOpponentHandProjects: Array.from(knownOppHandSet).sort(compareStrings),
     possibleOpponentHandProjects: Array.from(possibleOppHandSet).sort(compareStrings),
     knownOpponentDraftHandProjects: Array.from(knownOpponentDraftHandSet).sort(compareStrings),
@@ -690,6 +693,13 @@ function instantiatePrelude(name: string): IPreludeCard {
     throw new Error(`Unknown prelude card "${name}" in sampled world`);
   }
   return card;
+}
+
+/** Mirrors SelectInitialCards: the picked corporation must fund the initial buy (Beginner Corporation is exempt). */
+function canAffordInitialBuy(corpName: string, boughtCount: number): boolean {
+  const corp = instantiateCorp(corpName);
+  if (corp.name === CardNames.BEGINNER_CORPORATION) return true;
+  return boughtCount * (corp.cardCost ?? constants.CARD_COST) <= corp.startingMegaCredits;
 }
 
 function instantiateCorp(name: string): ICorporationCard {
@@ -868,6 +878,11 @@ export function applyDeterminization(
     if (typeof world.opponentPickedCorporation !== 'string' || !unseenCorpSet.has(world.opponentPickedCorporation)) {
       throw new Error(
         'Invalid sampled world: opponentPickedCorporation must be a valid unseen corporation when opponent submitted initial selection first',
+      );
+    }
+    if (!pool.opponentPickedCorporationCandidates.includes(world.opponentPickedCorporation)) {
+      throw new Error(
+        `Invalid sampled world: opponentPickedCorporation "${world.opponentPickedCorporation}" cannot pay for the opponent's ${pool.opponentHandSize}-card initial buy`,
       );
     }
     usedCorps.add(world.opponentPickedCorporation);

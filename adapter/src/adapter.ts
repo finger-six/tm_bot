@@ -647,6 +647,11 @@ export class GameAdapter implements AdapterGame {
   }
 
   public determinize(seat: Seat, world: SampledWorld): void {
+    // Contract: determinize only for a seat that is deciding. While the other seat holds an open
+    // prompt over unseen cards, those cards sit in no zone the sampled world can fill.
+    if (!this.pending().includes(seat)) {
+      throw new Error(`determinize(${seat}) requires seat ${seat} to be pending`);
+    }
     const obs = this.observe(seat);
     const game = this[ENGINE_TO_ADAPTER_SYMBOL];
     const opp: Seat = seat === 0 ? 1 : 0;

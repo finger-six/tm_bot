@@ -239,6 +239,8 @@ export interface UnseenPool {
   readonly projects: ReadonlyArray<string>;
   readonly preludes: ReadonlyArray<string>;
   readonly corporations: ReadonlyArray<string>;
+  /** Unseen corporations the opponent could have picked given its publicly counted initial buy; empty unless opponentHasHiddenPickedCorp. */
+  readonly opponentPickedCorporationCandidates: ReadonlyArray<string>;
   readonly knownOpponentHandProjects: ReadonlyArray<string>;
   readonly possibleOpponentHandProjects: ReadonlyArray<string>;
   readonly knownOpponentDraftHandProjects: ReadonlyArray<string>;
@@ -277,6 +279,7 @@ export interface AdapterGame {
   result(): GameResult | null;
   clone(): AdapterGame;
   unseenPool(seat: Seat): UnseenPool;
+  /** Writes a sampled hidden world into this game; `seat` must be pending. */
   determinize(seat: Seat, world: SampledWorld): void;
 }
 

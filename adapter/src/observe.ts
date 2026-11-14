@@ -319,9 +319,15 @@ export function buildActorObservation(
       /^Select how to spend \d+ M\u20ac for \d+ cards$/.test(formatEngineTitle(waiting.title)) &&
       history.cardSelections.length > 0
     ) {
-      pendingCardSelection = history.cardSelections[history.cardSelections.length - 1].offered
-        .slice()
-        .sort(compareStrings);
+      // The open payment pays for the most recent look-and-buy selection. Only paid look-and-buy
+      // actions (Business Network, Inventors' Guild) reach this prompt, so nothing can resolve in between.
+      const last = history.cardSelections[history.cardSelections.length - 1];
+      if (last.generation !== model.game.generation || last.phase !== engineGame.phase) {
+        throw new Error(
+          `pendingCardSelection: last card selection (gen ${last.generation}, ${last.phase}) does not match the open payment (gen ${model.game.generation}, ${engineGame.phase})`,
+        );
+      }
+      pendingCardSelection = last.offered.slice().sort(compareStrings);
     }
   }
 
