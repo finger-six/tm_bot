@@ -252,6 +252,130 @@ export interface SelectResources extends PlayerInput {
   count: number;
 }
 
+export interface EngineLogMessageData {
+  type?: number;
+  value: string | ReadonlyArray<string>;
+}
+
+export interface EngineLogMessage {
+  playerId?: PlayerId;
+  timestamp: number;
+  type?: number;
+  message: string;
+  data: ReadonlyArray<EngineLogMessageData>;
+}
+
+export interface EngineCardModel {
+  name: CardName;
+  resources?: number;
+  calculatedCost?: number;
+  isDisabled?: boolean;
+}
+
+export interface EngineSpaceModel {
+  id: SpaceId;
+  x: number;
+  y: number;
+  spaceType: string;
+  bonus: ReadonlyArray<number>;
+  tileType?: number;
+  color?: Color;
+  highlight?: 'noctis' | 'volcanic';
+  rotated?: true;
+}
+
+export interface EngineMilestoneModel {
+  name: string;
+  playerName: string | undefined;
+  color: Color | undefined;
+  scores: ReadonlyArray<{
+    color: Color;
+    score: number;
+    claimable: boolean;
+  }>;
+}
+
+export interface EngineAwardModel {
+  name: string;
+  playerName: string | undefined;
+  color: Color | undefined;
+  scores: ReadonlyArray<{
+    color: Color;
+    score: number;
+  }>;
+}
+
+export interface EnginePublicPlayerModel {
+  actionsTakenThisRound: number;
+  actionsThisGeneration: ReadonlyArray<CardName>;
+  actionsTakenThisGame: number;
+  availableBlueCardActionCount: number;
+  cardCost: number;
+  cardDiscount: number;
+  cardsInHandNbr: number;
+  citiesCount: number;
+  color: Color;
+  energy: number;
+  energyProduction: number;
+  heat: number;
+  heatProduction: number;
+  isActive: boolean;
+  lastCardPlayed?: CardName;
+  megacredits: number;
+  megacreditProduction: number;
+  name: string;
+  noTagsCount: number;
+  plants: number;
+  plantProduction: number;
+  protectedResources: Record<string, string>;
+  protectedProduction: Record<string, string>;
+  tableau: ReadonlyArray<EngineCardModel>;
+  steel: number;
+  steelProduction: number;
+  steelValue: number;
+  tags: Record<string, number>;
+  terraformRating: number;
+  titanium: number;
+  titaniumProduction: number;
+  titaniumValue: number;
+}
+
+export interface EngineGameModel {
+  awards: ReadonlyArray<EngineAwardModel>;
+  deckSize: number;
+  discardPileSize: number;
+  otherDeckSizes: {
+    corporations: {drawPile: number; discardPile: number};
+    preludes: {drawPile: number; discardPile: number} | undefined;
+  };
+  gameOptions: {
+    boardName: BoardNameValue;
+  };
+  generation: number;
+  isTerraformed: boolean;
+  milestones: ReadonlyArray<EngineMilestoneModel>;
+  oceans: number;
+  oxygenLevel: number;
+  passedPlayers: ReadonlyArray<Color>;
+  phase: string;
+  spaces: ReadonlyArray<EngineSpaceModel>;
+  temperature: number;
+}
+
+export interface EnginePlayerViewModel {
+  cardsInHand: ReadonlyArray<EngineCardModel>;
+  dealtCorporationCards: ReadonlyArray<EngineCardModel>;
+  dealtPreludeCards: ReadonlyArray<EngineCardModel>;
+  dealtProjectCards: ReadonlyArray<EngineCardModel>;
+  draftedCards: ReadonlyArray<EngineCardModel>;
+  game: EngineGameModel;
+  color: Color;
+  pickedCorporationCard: ReadonlyArray<EngineCardModel>;
+  preludeCardsInHand: ReadonlyArray<EngineCardModel>;
+  thisPlayer: EnginePublicPlayerModel;
+  players: ReadonlyArray<EnginePublicPlayerModel>;
+}
+
 export interface IPlayer {
   id: PlayerId;
   name: string;
@@ -263,6 +387,7 @@ export interface IPlayer {
   plants: number;
   energy: number;
   heat: number;
+  needsToDraft?: boolean;
   canUseHeatAsMegaCredits: boolean;
   canUseTitaniumAsMegacredits: boolean;
   tableau: {has(name: CardName): boolean};
@@ -290,6 +415,8 @@ export interface IGame {
   spectatorId: SpectatorId;
   phase: string;
   generation: number;
+  draftRound: number;
+  gameLog: ReadonlyArray<EngineLogMessage>;
   gameOptions: GameOptions;
   players: Array<IPlayer>;
   playersInGenerationOrder: Array<IPlayer>;
@@ -398,10 +525,16 @@ const {Units: UnitsUtil} = engineRequire<{
   };
 }>('common/Units.js');
 const {CardName: CardNames} = engineRequire<{CardName: Record<string, string>}>('common/cards/CardName.js');
+const {Server} = engineRequire<{
+  Server: {
+    getPlayerModel(player: IPlayer): EnginePlayerViewModel;
+  };
+}>('server/models/ServerModel.js');
 
 export {
   Game,
   Player,
+  Server,
   BoardName,
   Phase,
   RandomMAOptionType,

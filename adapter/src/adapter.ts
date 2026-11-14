@@ -7,19 +7,25 @@ import {
   Phase,
   Player,
   PlayerId,
-  PlayerInput,
+  SelectCard,
+  SelectInitialCards,
   SpectatorId,
   initializeEngine,
 } from './engine';
 import {buildTrainingGameOptions, hashSeedKey, validateCreateGameOptions} from './config';
 import {DecisionStepper} from './factor';
+import {buildActorObservation} from './observe';
 import {
   ActionRecord,
+  ActorObservation,
   AdapterBugError,
   AdapterGame,
   Choice,
   CreateGameOptions,
+  DraftHistoryEntry,
   GameResult,
+  InitialBuyHistory,
+  ResearchBuyHistoryEntry,
   Seat,
   SupportedMap,
 } from './types';
@@ -41,6 +47,41 @@ interface DeferredSubmission {
   readonly response: InputResponse;
 }
 
+interface MutableActorHistory {
+  initialBuy: InitialBuyHistory | null;
+  readonly drafts: Array<DraftHistoryEntry>;
+  readonly researchBuys: Array<ResearchBuyHistoryEntry>;
+}
+
+function createEmptyActorHistory(): MutableActorHistory {
+  return {
+    initialBuy: null,
+    drafts: [],
+    researchBuys: [],
+  };
+}
+
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function subtractCards(offeredSorted: ReadonlyArray<string>, chosenSorted: ReadonlyArray<string>): Array<string> {
+  const counts = new Map<string, number>();
+  for (const name of chosenSorted) {
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const remaining: Array<string> = [];
+  for (const name of offeredSorted) {
+    const c = counts.get(name) ?? 0;
+    if (c > 0) {
+      counts.set(name, c - 1);
+    } else {
+      remaining.push(name);
+    }
+  }
+  return remaining;
+}
+
 export class GameAdapter implements AdapterGame {
   public readonly seedKey: string;
   public readonly map: SupportedMap;
@@ -50,6 +91,10 @@ export class GameAdapter implements AdapterGame {
   private readonly maxSteps: number;
   // Completed responses held back so simultaneous prompts reach the engine in canonical seat order.
   private readonly deferred: [DeferredSubmission | undefined, DeferredSubmission | undefined] = [undefined, undefined];
+  private readonly actorHistories: [MutableActorHistory, MutableActorHistory] = [
+    createEmptyActorHistory(),
+    createEmptyActorHistory(),
+  ];
 
   constructor(engineGame: IGame, seedKey: string, map: SupportedMap, maxSteps = DEFAULT_MAX_STEPS) {
     this[ENGINE_TO_ADAPTER_SYMBOL] = engineGame;
@@ -85,6 +130,18 @@ export class GameAdapter implements AdapterGame {
   public choice(seat: Seat): Choice {
     const stepper = this.ensureStepper(seat);
     return stepper.currentChoice();
+  }
+
+  public observe(seat: Seat): ActorObservation {
+    if (seat !== 0 && seat !== 1) {
+      throw new Error(`Invalid seat ${String(seat)}: expected 0 or 1`);
+    }
+    return buildActorObservation(
+      this[ENGINE_TO_ADAPTER_SYMBOL],
+      this.map,
+      seat,
+      this.actorHistories[seat],
+    );
   }
 
   public choose(seat: Seat, candidateIndex: number): void {
@@ -157,6 +214,8 @@ export class GameAdapter implements AdapterGame {
     const player = game.players[seat];
     record = {...record, decisionIndex: this.history.length};
 
+    const historySnapshot = this.snapshotHistoryContext(player, game);
+
     try {
       player.process(response);
     } catch (err) {
@@ -172,6 +231,7 @@ export class GameAdapter implements AdapterGame {
     }
 
     this.history.push(record);
+    this.commitHistoryContext(seat, historySnapshot, response);
 
     if (game.phase !== Phase.END && this.history.length >= this.maxSteps) {
       throw new AdapterBugError({
@@ -180,6 +240,144 @@ export class GameAdapter implements AdapterGame {
         map: this.map,
         seat,
         history: this.history.slice(),
+      });
+    }
+  }
+
+  private snapshotHistoryContext(
+    player: IPlayer,
+    game: IGame,
+  ):
+    | {
+        kind: 'initialCards';
+        slots: Array<{role: 'corp' | 'prelude' | 'project' | 'other'; offered: Array<string>}>;
+      }
+    | {kind: 'draft'; generation: number; draftRound: number; packet: Array<string>}
+    | {kind: 'research'; generation: number; offered: Array<string>}
+    | null {
+    const waitingBefore = player.getWaitingFor();
+    if (waitingBefore === undefined) {
+      return null;
+    }
+
+    if (waitingBefore.type === 'initialCards') {
+      const initInput = waitingBefore as SelectInitialCards;
+      const slots = initInput.options.map((opt) => {
+        const offered =
+          opt.type === 'card'
+            ? (opt as SelectCard).cards.map((c) => c.name).sort(compareStrings)
+            : [];
+        const role: 'corp' | 'prelude' | 'project' | 'other' =
+          opt === initInput.inputs.corp
+            ? 'corp'
+            : opt === initInput.inputs.prelude
+              ? 'prelude'
+              : opt === initInput.inputs.project
+                ? 'project'
+                : 'other';
+        return {role, offered};
+      });
+      return {kind: 'initialCards', slots};
+    }
+
+    if (
+      (game.phase === Phase.DRAFTING || game.phase === Phase.INITIALDRAFTING) &&
+      player.needsToDraft === true &&
+      waitingBefore.type === 'card'
+    ) {
+      return {
+        kind: 'draft',
+        generation: game.generation,
+        draftRound: game.draftRound,
+        packet: (waitingBefore as SelectCard).cards.map((c) => c.name).sort(compareStrings),
+      };
+    }
+
+    if (game.phase === Phase.RESEARCH && waitingBefore.type === 'card') {
+      return {
+        kind: 'research',
+        generation: game.generation,
+        offered: (waitingBefore as SelectCard).cards.map((c) => c.name).sort(compareStrings),
+      };
+    }
+
+    return null;
+  }
+
+  private commitHistoryContext(
+    seat: Seat,
+    snapshot: ReturnType<GameAdapter['snapshotHistoryContext']>,
+    response: InputResponse,
+  ): void {
+    if (snapshot === null) {
+      return;
+    }
+    const actorHistory = this.actorHistories[seat];
+
+    if (snapshot.kind === 'initialCards' && response.type === 'initialCards') {
+      let corporationsOffered: Array<string> = [];
+      let corporationChosen = '';
+      let preludesOffered: Array<string> = [];
+      let preludesChosen: Array<string> = [];
+      let projectsOffered: Array<string> = [];
+      let projectsBought: Array<string> = [];
+
+      for (let i = 0; i < snapshot.slots.length; i++) {
+        const slot = snapshot.slots[i];
+        const resp = response.responses[i];
+        if (slot === undefined || resp === undefined || resp.type !== 'card') {
+          continue;
+        }
+        const chosen = resp.cards.slice().sort(compareStrings);
+        if (slot.role === 'corp') {
+          corporationsOffered = slot.offered;
+          corporationChosen = chosen[0] ?? '';
+        } else if (slot.role === 'prelude') {
+          preludesOffered = slot.offered;
+          preludesChosen = chosen;
+        } else if (slot.role === 'project') {
+          projectsOffered = slot.offered;
+          projectsBought = chosen;
+        }
+      }
+
+      actorHistory.initialBuy = {
+        corporationsOffered,
+        corporationChosen,
+        corporationsDiscarded: corporationChosen
+          ? subtractCards(corporationsOffered, [corporationChosen])
+          : corporationsOffered.slice(),
+        preludesOffered,
+        preludesChosen,
+        preludesDiscarded: subtractCards(preludesOffered, preludesChosen),
+        projectsOffered,
+        projectsBought,
+        projectsDiscarded: subtractCards(projectsOffered, projectsBought),
+      };
+      return;
+    }
+
+    if (snapshot.kind === 'draft' && response.type === 'card') {
+      const taken = response.cards.slice().sort(compareStrings);
+      const passed = subtractCards(snapshot.packet, taken);
+      actorHistory.drafts.push({
+        generation: snapshot.generation,
+        draftRound: snapshot.draftRound,
+        packet: snapshot.packet,
+        taken,
+        passed,
+      });
+      return;
+    }
+
+    if (snapshot.kind === 'research' && response.type === 'card') {
+      const bought = response.cards.slice().sort(compareStrings);
+      const discarded = subtractCards(snapshot.offered, bought);
+      actorHistory.researchBuys.push({
+        generation: snapshot.generation,
+        offered: snapshot.offered,
+        bought,
+        discarded,
       });
     }
   }

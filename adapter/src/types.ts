@@ -52,6 +52,166 @@ export interface ActionRecord {
   readonly response: InputResponse | undefined;
 }
 
+export interface SpaceObservation {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly spaceType: string;
+  readonly bonus: ReadonlyArray<number>;
+  readonly tileType: number | null;
+  readonly owner: Seat | null;
+  readonly highlight: string | null;
+  readonly rotated: boolean;
+}
+
+export interface MilestoneObservation {
+  readonly name: string;
+  readonly claimedBy: Seat | null;
+  readonly scores: ReadonlyArray<{
+    readonly seat: Seat;
+    readonly score: number;
+    readonly claimable: boolean;
+  }>;
+}
+
+export interface AwardObservation {
+  readonly name: string;
+  readonly fundedBy: Seat | null;
+  readonly scores: ReadonlyArray<{
+    readonly seat: Seat;
+    readonly score: number;
+  }>;
+}
+
+export interface TableauCardObservation {
+  readonly name: string;
+  readonly resources: number;
+  readonly isDisabled: boolean;
+}
+
+export interface PublicPlayerObservation {
+  readonly seat: Seat;
+  readonly color: string;
+  readonly terraformRating: number;
+  readonly megacredits: number;
+  readonly steel: number;
+  readonly titanium: number;
+  readonly plants: number;
+  readonly energy: number;
+  readonly heat: number;
+  readonly megacreditProduction: number;
+  readonly steelProduction: number;
+  readonly titaniumProduction: number;
+  readonly plantProduction: number;
+  readonly energyProduction: number;
+  readonly heatProduction: number;
+  readonly steelValue: number;
+  readonly titaniumValue: number;
+  readonly cardCost: number;
+  readonly cardDiscount: number;
+  readonly cardsInHandCount: number;
+  readonly citiesCount: number;
+  readonly noTagsCount: number;
+  readonly tags: Readonly<Record<string, number>>;
+  readonly tableau: ReadonlyArray<TableauCardObservation>;
+  readonly usedActions: ReadonlyArray<string>;
+  readonly actionsTakenThisRound: number;
+  readonly actionsTakenThisGame: number;
+  readonly availableBlueCardActionCount: number;
+  readonly lastCardPlayed: string | null;
+  readonly isActive: boolean;
+  readonly passed: boolean;
+  readonly protectedResources: Readonly<Record<string, string>>;
+  readonly protectedProduction: Readonly<Record<string, string>>;
+}
+
+export interface PublicLogEntryObservation {
+  readonly type: number;
+  readonly message: string;
+  readonly data: ReadonlyArray<{
+    readonly type: number | null;
+    readonly value: string | ReadonlyArray<string>;
+  }>;
+}
+
+export interface HandCardObservation {
+  readonly name: string;
+  readonly calculatedCost: number;
+}
+
+export interface DraftHistoryEntry {
+  readonly generation: number;
+  readonly draftRound: number;
+  readonly packet: ReadonlyArray<string>;
+  readonly taken: ReadonlyArray<string>;
+  readonly passed: ReadonlyArray<string>;
+}
+
+export interface InitialBuyHistory {
+  readonly corporationsOffered: ReadonlyArray<string>;
+  readonly corporationChosen: string;
+  readonly corporationsDiscarded: ReadonlyArray<string>;
+  readonly preludesOffered: ReadonlyArray<string>;
+  readonly preludesChosen: ReadonlyArray<string>;
+  readonly preludesDiscarded: ReadonlyArray<string>;
+  readonly projectsOffered: ReadonlyArray<string>;
+  readonly projectsBought: ReadonlyArray<string>;
+  readonly projectsDiscarded: ReadonlyArray<string>;
+}
+
+export interface ResearchBuyHistoryEntry {
+  readonly generation: number;
+  readonly offered: ReadonlyArray<string>;
+  readonly bought: ReadonlyArray<string>;
+  readonly discarded: ReadonlyArray<string>;
+}
+
+export interface ActorHistory {
+  readonly initialBuy: InitialBuyHistory | null;
+  readonly drafts: ReadonlyArray<DraftHistoryEntry>;
+  readonly researchBuys: ReadonlyArray<ResearchBuyHistoryEntry>;
+}
+
+export interface ActorObservation {
+  readonly actor: Seat;
+  readonly public: {
+    readonly map: SupportedMap;
+    readonly generation: number;
+    readonly phase: string;
+    readonly firstPlayer: Seat;
+    readonly activePlayer: Seat;
+    readonly passedPlayers: ReadonlyArray<Seat>;
+    readonly globalParameters: {
+      readonly temperature: number;
+      readonly oxygenLevel: number;
+      readonly oceans: number;
+      readonly isTerraformed: boolean;
+    };
+    readonly deckSize: number;
+    readonly discardPileSize: number;
+    readonly otherDeckSizes: {
+      readonly corporations: {readonly drawPile: number; readonly discardPile: number};
+      readonly preludes: {readonly drawPile: number; readonly discardPile: number} | null;
+    };
+    readonly spaces: ReadonlyArray<SpaceObservation>;
+    readonly milestones: ReadonlyArray<MilestoneObservation>;
+    readonly awards: ReadonlyArray<AwardObservation>;
+    readonly players: readonly [PublicPlayerObservation, PublicPlayerObservation];
+    readonly publicLog: ReadonlyArray<PublicLogEntryObservation>;
+  };
+  readonly private: {
+    readonly cardsInHand: ReadonlyArray<HandCardObservation>;
+    readonly dealtCorporationCards: ReadonlyArray<string>;
+    readonly dealtPreludeCards: ReadonlyArray<string>;
+    readonly dealtProjectCards: ReadonlyArray<string>;
+    readonly pickedCorporationCard: string | null;
+    readonly preludeCardsInHand: ReadonlyArray<string>;
+    readonly draftedCards: ReadonlyArray<string>;
+    readonly currentDraftPacket: ReadonlyArray<string>;
+  };
+  readonly history: ActorHistory;
+}
+
 export interface CreateGameOptions {
   readonly seedKey: string;
   readonly map: SupportedMap;
@@ -63,6 +223,7 @@ export interface AdapterGame {
   pending(): Array<Seat>;
   choice(seat: Seat): Choice;
   choose(seat: Seat, candidateIndex: number): void;
+  observe(seat: Seat): ActorObservation;
   result(): GameResult | null;
 }
 
