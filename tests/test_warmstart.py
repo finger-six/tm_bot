@@ -234,26 +234,31 @@ def _synthetic_tables(vocab: CardVocab):
         chosen_proj_len=np.array([3, 2], dtype=np.uint8),
         split_indices={"train": np.array([0, 1]), "val": np.array([]), "test": np.array([])},
     )
+    # Row 2 is seat 0's next-generation pick: its history is row 0 (via prev_row), and both
+    # seat-0 rows see the opponent's public setup (setup row 1).
     dp = DraftPicksTable(
-        setup_idx=np.array([0, 1], dtype=np.int32),
-        map_id=np.array([0, 2], dtype=np.uint8),
-        seat=np.array([0, 1], dtype=np.uint8),
-        split=np.array([0, 0], dtype=np.uint8),
-        generation=np.array([2, 3], dtype=np.uint8),
-        draft_round_id=np.array([1, 2], dtype=np.uint16),
-        pick_index=np.array([2, 1], dtype=np.uint8),
+        setup_idx=np.array([0, 1, 0], dtype=np.int32),
+        map_id=np.array([0, 2, 0], dtype=np.uint8),
+        seat=np.array([0, 1, 0], dtype=np.uint8),
+        split=np.array([0, 0, 0], dtype=np.uint8),
+        generation=np.array([2, 3, 3], dtype=np.uint8),
+        draft_round_id=np.array([1, 2, 2], dtype=np.uint16),
+        pick_index=np.array([2, 1, 0], dtype=np.uint8),
         packet_cards=np.array(
             [
                 [cid("Earth Catapult"), cid("Moss"), cid("Virus"), 0, 0],
                 [cid("AI Central"), cid("Comet"), cid("Research"), cid("Worms"), 0],
+                [cid("Comet"), cid("Moss"), cid("Soletta"), cid("Worms"), 0],
             ],
             dtype=np.uint16,
         ),
-        packet_len=np.array([3, 4], dtype=np.uint8),
-        chosen_card=np.array([cid("Earth Catapult"), cid("AI Central")], dtype=np.uint16),
-        drafted_this_round=np.array([[cid("Tardigrades"), 0, 0, 0], [0, 0, 0, 0]], dtype=np.uint16),
-        drafted_len=np.array([1, 0], dtype=np.uint8),
-        split_indices={"train": np.array([0, 1]), "val": np.array([]), "test": np.array([])},
+        packet_len=np.array([3, 4, 4], dtype=np.uint8),
+        chosen_card=np.array([cid("Earth Catapult"), cid("AI Central"), cid("Soletta")], dtype=np.uint16),
+        drafted_this_round=np.array([[cid("Tardigrades"), 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], dtype=np.uint16),
+        drafted_len=np.array([1, 0, 0], dtype=np.uint8),
+        prev_row=np.array([-1, -1, 0], dtype=np.int32),
+        opp_setup_idx=np.array([1, -1, 1], dtype=np.int32),
+        split_indices={"train": np.array([0, 1, 2]), "val": np.array([]), "test": np.array([])},
     )
     so = SetupOutcomesTable(
         map_id=np.array([0, 2], dtype=np.uint8),
@@ -319,25 +324,48 @@ def test_fast_batch_builder_matches_warmstart_builder_tensors():
     for k in slow_p:
         assert torch.allclose(fast_p[k].float(), slow_p[k].float()), f"prelude mismatch on {k}"
 
-    # Draft parity
-    fast_d, _ = builder.build_draft_batch(dp, sc, idx)
+    # Draft parity (incl. own draft history and the opponent's public setup)
+    didx = np.array([0, 1, 2], dtype=np.int64)
+    fast_d, _ = builder.build_draft_batch(dp, sc, didx)
     slow_obs_d, slow_ch_d = [], []
-    for r in range(2):
+    names = vocab.names
+    for r in range(3):
+        chain = []
+        k = int(dp.prev_row[r])
+        while k >= 0:
+            pkt = sorted(names[int(dp.packet_cards[k, j])] for j in range(int(dp.packet_len[k])))
+            taken = names[int(dp.chosen_card[k])]
+            chain.append(
+                {
+                    "generation": int(dp.draft_round_id[k]) + 1,
+                    "draftRound": int(dp.pick_index[k]),
+                    "packet": pkt,
+                    "taken": [taken],
+                    "passed": [x for x in pkt if x != taken],
+                }
+            )
+            k = int(dp.prev_row[k])
+        chain.reverse()
+        si = int(dp.setup_idx[r])
+        opp_i = int(dp.opp_setup_idx[r])
         o, c = build_draft_pick_choice(
-            maps[r],
+            ["tharsis", "hellas", "tharsis"][r],
             int(dp.seat[r]),
             int(dp.draft_round_id[r]),
             [vocab.names[int(dp.packet_cards[r, j])] for j in range(int(dp.packet_len[r]))],
-            vocab.names[int(sc.chosen_corp[r])],
-            [vocab.names[int(x)] for x in sc.chosen_preludes[r]],
-            [vocab.names[int(sc.chosen_projects[r, j])] for j in range(int(sc.chosen_proj_len[r]))],
-            offered_corps=[vocab.names[int(x)] for x in sc.offered_corps[r]],
-            offered_preludes=[vocab.names[int(x)] for x in sc.offered_preludes[r]],
-            offered_projects=[vocab.names[int(x)] for x in sc.offered_projects[r]],
+            vocab.names[int(sc.chosen_corp[si])],
+            [vocab.names[int(x)] for x in sc.chosen_preludes[si]],
+            [vocab.names[int(sc.chosen_projects[si, j])] for j in range(int(sc.chosen_proj_len[si]))],
+            offered_corps=[vocab.names[int(x)] for x in sc.offered_corps[si]],
+            offered_preludes=[vocab.names[int(x)] for x in sc.offered_preludes[si]],
+            offered_projects=[vocab.names[int(x)] for x in sc.offered_projects[si]],
             drafted_this_round=[
                 vocab.names[int(dp.drafted_this_round[r, j])]
                 for j in range(int(dp.drafted_len[r]))
             ],
+            prior_drafts=chain,
+            opponent_corp=names[int(sc.chosen_corp[opp_i])] if opp_i >= 0 else None,
+            opponent_preludes=[names[int(x)] for x in sc.chosen_preludes[opp_i]] if opp_i >= 0 else (),
             cards_by_name=cards,
         )
         slow_obs_d.append(encode_observation(o, vocab))
@@ -446,3 +474,168 @@ def test_opponent_private_isolation():
     assert opp["megacredits"] == 0
     assert opp["lastCardPlayed"] is None
     assert all(v == 0 for v in opp["tags"].values())
+
+
+# ---------------------------------------------------------------------------
+# Value-level parity against the live adapter (review finding on #22): the
+# builder must reproduce every feature it claims to reconstruct, not only the
+# observation's shape.
+# ---------------------------------------------------------------------------
+
+from tm_bot.env.types import DraftHistoryEntry  # noqa: E402
+from tm_bot.models.encode import classify_prompt_type  # noqa: E402
+from tm_bot.models.vocab import SLOT_TO_ID  # noqa: E402
+
+# Draft-time token slots whose content is fully determined by the warm-start
+# records of the actor (plus the opponent's public setup).
+_DRAFT_EXACT_SLOTS = (
+    "picked_corp",
+    "dealt_corps",
+    "dealt_preludes",
+    "dealt_projects",
+    "drafted_cards",
+    "current_draft_packet",
+    "history_draft_passed",
+)
+_SCALAR_FIRST_PLAYER = 7
+_SCALAR_ACTIVE_PLAYER = 8
+_SCALAR_GENERATION = 11
+
+
+def _tokens(enc: Any, vocab: CardVocab, slots: tuple[str, ...] | None = None) -> set:
+    wanted = None if slots is None else {SLOT_TO_ID[s] for s in slots}
+    out = set()
+    for slot, cid, dyn in zip(enc.card_slots.tolist(), enc.card_ids.tolist(), enc.card_dyn.tolist()):
+        if wanted is None or slot in wanted:
+            out.add((slot, vocab.names[cid], tuple(round(x, 4) for x in dyn)))
+    return out
+
+
+def _play_until_gen(client: WorkerClient, gid: str, max_gen: int, on_decision) -> None:
+    """Drive a game deterministically; call `on_decision(seat, obs, choice, ptype)` before acting."""
+    picked = {0: {"prel": 0, "proj": 0}, 1: {"prel": 0, "proj": 0}}
+    for _ in range(5000):
+        seats = client.pending(gid)
+        if not seats:
+            return
+        s = seats[0]
+        obs = client.observe(gid, s)
+        if int(obs["public"]["generation"]) > max_gen:
+            return
+        ch = client.choice(gid, s)
+        ptype = classify_prompt_type(ch, obs)
+        on_decision(s, obs, ch, ptype)
+        ids = [c.id for c in ch.candidates]
+        if ptype == "initial_project_buy":
+            idx = ids.index("done") if picked[s]["proj"] >= 2 else next(i for i, c in enumerate(ids) if c != "done")
+            picked[s]["proj"] += 1
+        elif ch.kind == "branch":
+            idx = next((i for i, c in enumerate(ch.candidates) if "pass" in c.label.lower()), 0)
+        else:
+            idx = ids.index("done") if "done" in ids and ptype != "initial_prelude" else 0
+        client.choose(gid, s, idx)
+    raise AssertionError("game did not reach the target generation")
+
+
+def test_builder_values_match_live_adapter():
+    """Setup (seat 0) observations are tensor-identical to the adapter; draft observations in gens
+    2-3 match on every reconstructable slot, the turn-order scalars and the opponent's public setup."""
+    cards = load_card_data()
+    vocab = CardVocab.from_card_data(cards)
+    state: dict[int, dict[str, Any]] = {
+        s: {"proj": [], "prel": [], "corp": None, "drafts": []} for s in (0, 1)
+    }
+    checked = {"setup": 0, "draft": 0, "draft_with_history": 0}
+
+    def on_decision(s, obs, ch, ptype):
+        st = state[s]
+        pr = obs["private"]
+        if ptype == "initial_corp":
+            st.update(c=list(pr["dealtCorporationCards"]), p=list(pr["dealtPreludeCards"]), j=list(pr["dealtProjectCards"]))
+        live_enc = encode_observation(obs, vocab)
+        if s == 0 and ptype in ("initial_corp", "initial_prelude", "initial_project_buy"):
+            if ptype == "initial_corp":
+                so, sch = build_corp_choice("tharsis", 0, st["c"], st["p"], st["j"])
+            elif ptype == "initial_prelude":
+                so, sch = build_prelude_choice("tharsis", 0, st["c"], st["p"], st["j"], picked_preludes=st["prel"])
+            else:
+                so, sch = build_project_buy_choice("tharsis", 0, st["c"], st["p"], st["j"], picked_projects=st["proj"])
+            syn_enc = encode_observation(so, vocab)
+            np.testing.assert_allclose(syn_enc.obs_scalars, live_enc.obs_scalars, err_msg=ptype)
+            assert _tokens(syn_enc, vocab) == _tokens(live_enc, vocab), ptype
+            assert [c.id for c in sch.candidates] == [c.id for c in ch.candidates]
+            checked["setup"] += 1
+        if ptype == "draft_pick":
+            gen = int(obs["public"]["generation"])
+            opp = state[1 - s]
+            this_round = [d["taken"][0] for d in st["drafts"] if d["generation"] == gen]
+            so, _ = build_draft_pick_choice(
+                "tharsis", s, gen - 1, [c.id for c in ch.candidates],
+                st["corp"], st["prel"], st["proj"],
+                offered_corps=st["c"], offered_preludes=st["p"], offered_projects=st["j"],
+                drafted_this_round=this_round,
+                prior_drafts=list(st["drafts"]),
+                opponent_corp=opp["corp"], opponent_preludes=opp["prel"],
+                cards_by_name=cards,
+            )
+            syn_enc = encode_observation(so, vocab)
+            assert _tokens(syn_enc, vocab, _DRAFT_EXACT_SLOTS) == _tokens(live_enc, vocab, _DRAFT_EXACT_SLOTS)
+            syn_opp = {(n) for _, n, _ in _tokens(syn_enc, vocab, ("opp_tableau",))}
+            live_opp = {(n) for _, n, _ in _tokens(live_enc, vocab, ("opp_tableau",))}
+            assert syn_opp and syn_opp <= live_opp
+            for i in (_SCALAR_FIRST_PLAYER, _SCALAR_ACTIVE_PLAYER, _SCALAR_GENERATION):
+                assert syn_enc.obs_scalars[i] == live_enc.obs_scalars[i], f"scalar {i} gen {gen} seat {s}"
+            checked["draft"] += 1
+            checked["draft_with_history"] += bool(st["drafts"])
+
+    def record(s, obs, ch, ptype, idx):
+        st = state[s]
+        cid = ch.candidates[idx].id
+        if ptype == "initial_corp":
+            st["corp"] = cid
+        elif ptype == "initial_prelude" and cid != "done":
+            st["prel"].append(cid)
+        elif ptype == "initial_project_buy" and cid != "done":
+            st["proj"].append(cid)
+        elif ptype == "draft_pick":
+            packet = sorted(c.id for c in ch.candidates)
+            st["drafts"].append(
+                DraftHistoryEntry(
+                    generation=int(obs["public"]["generation"]),
+                    draftRound=0,
+                    packet=packet,
+                    taken=[cid],
+                    passed=[c for c in packet if c != cid],
+                )
+            )
+
+    with WorkerClient() as client:
+        gid = client.create("warmstart-value-parity-1", "tharsis")
+        try:
+            orig_choose = client.choose
+
+            def choose_and_record(g, s, idx):
+                obs = client.observe(g, s)
+                ch = client.choice(g, s)
+                record(s, obs, ch, classify_prompt_type(ch, obs), idx)
+                return orig_choose(g, s, idx)
+
+            client.choose = choose_and_record  # type: ignore[method-assign]
+            _play_until_gen(client, gid, 3, on_decision)
+        finally:
+            client.close_game(gid)
+
+    assert checked["setup"] >= 5
+    assert checked["draft"] >= 6
+    assert checked["draft_with_history"] >= 4
+
+
+def test_test_split_is_never_evaluated_twice(tmp_path):
+    """Re-running (e.g. `--resume`) on a finished run must not touch the test split again."""
+    import json
+
+    from tm_bot.training.train_warmstart import run_warmstart_training
+
+    (tmp_path / "metrics.json").write_text(json.dumps({"test_model": {}}), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="test split"):
+        run_warmstart_training(out_dir=tmp_path, resume=True, data_dir=tmp_path / "missing")

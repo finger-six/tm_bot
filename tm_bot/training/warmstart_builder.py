@@ -120,21 +120,24 @@ def _base_public_observation(
     *,
     generation: int,
     phase: str,
-    active_seat: Seat,
     templates: Mapping[str, dict[str, Any]] | None = None,
 ) -> PublicObservation:
     norm_map = normalize_map_name(map_name)
     tpl_map = (templates if templates is not None else load_map_templates())[norm_map]
+    # Seat 0 is the gen-1 starting player (warm-start seats are resolved that way); the engine
+    # rotates the first player every generation and reports it as the active player during the
+    # simultaneous setup and drafting decisions this module reconstructs.
+    first: Seat = 0 if int(generation) % 2 == 1 else 1
     players = [
-        _default_public_player(0, is_active=(active_seat == 0)),
-        _default_public_player(1, is_active=(active_seat == 1)),
+        _default_public_player(0, is_active=(first == 0)),
+        _default_public_player(1, is_active=(first == 1)),
     ]
     return PublicObservation(
         map=norm_map,
         generation=int(generation),
         phase=phase,
-        firstPlayer=0,
-        activePlayer=active_seat,
+        firstPlayer=first,
+        activePlayer=first,
         passedPlayers=[],
         globalParameters={
             "temperature": -30,
@@ -239,7 +242,7 @@ def build_corp_choice(
     projects = sorted(str(p) for p in offered_projects)
 
     pub = _base_public_observation(
-        map_name, generation=1, phase="research", active_seat=actor, templates=templates
+        map_name, generation=1, phase="research", templates=templates
     )
     priv = PrivateObservation(
         cardsInHand=[],
@@ -290,7 +293,7 @@ def build_prelude_choice(
     picked_set = set(str(p) for p in picked_preludes)
 
     pub = _base_public_observation(
-        map_name, generation=1, phase="research", active_seat=actor, templates=templates
+        map_name, generation=1, phase="research", templates=templates
     )
     priv = PrivateObservation(
         cardsInHand=[],
@@ -343,7 +346,7 @@ def build_project_buy_choice(
     picked_set = set(str(p) for p in picked_projects)
 
     pub = _base_public_observation(
-        map_name, generation=1, phase="research", active_seat=actor, templates=templates
+        map_name, generation=1, phase="research", templates=templates
     )
     priv = PrivateObservation(
         cardsInHand=[],
@@ -391,13 +394,17 @@ def build_draft_pick_choice(
     offered_projects: Sequence[str] = (),
     drafted_this_round: Sequence[str] = (),
     prior_drafts: Sequence[DraftHistoryEntry] = (),
+    opponent_corp: str | None = None,
+    opponent_preludes: Sequence[str] = (),
     cards_by_name: Mapping[str, CardSpec] | None = None,
     templates: Mapping[str, dict[str, Any]] | None = None,
 ) -> tuple[ActorObservation, Choice]:
     """Reconstruct `(ActorObservation, Choice)` for a drafting pick.
 
-    Never reads or populates opponent private information; opponent player fields stay at
-    neutral starting defaults.
+    Never reads or populates opponent private information. The opponent's corporation and
+    preludes (`opponent_corp`, `opponent_preludes`) are public once played in generation 1 and
+    are placed in their tableau when known; every other opponent field stays at its neutral
+    starting default. `prior_drafts` are the actor's own earlier draft picks.
     """
     actor = _validate_seat(seat)
     specs = cards_by_name if cards_by_name is not None else load_card_data()
@@ -413,7 +420,7 @@ def build_draft_pick_choice(
     drafted_sorted = sorted(str(c) for c in drafted_this_round)
 
     pub = _base_public_observation(
-        map_name, generation=gen, phase="drafting", active_seat=actor, templates=templates
+        map_name, generation=gen, phase="drafting", templates=templates
     )
     _apply_committed_setup_to_actor(
         pub,
@@ -424,6 +431,13 @@ def build_draft_pick_choice(
         specs,
         include_preludes_in_tableau=True,
     )
+    if opponent_corp is not None:
+        opp_tab = [str(opponent_corp), *sorted(str(p) for p in opponent_preludes)]
+        opp = pub["players"][1 - actor]
+        opp["tableau"] = [
+            TableauCardObservation(name=nm, resources=0, isDisabled=False) for nm in opp_tab
+        ]
+        opp["tags"] = _accumulate_tags(opp_tab, specs)
 
     priv = PrivateObservation(
         cardsInHand=_make_hand_cards(proj_ch, specs),
@@ -486,7 +500,7 @@ def build_setup_outcome_observation(
     proj_ch = sorted(str(p) for p in chosen_projects)
 
     pub = _base_public_observation(
-        map_name, generation=1, phase="preludes", active_seat=actor, templates=templates
+        map_name, generation=1, phase="preludes", templates=templates
     )
     _apply_committed_setup_to_actor(
         pub,

@@ -255,6 +255,12 @@ def run_warmstart_training(
     out_path.mkdir(parents=True, exist_ok=True)
     state_path = out_path / "latest_state.pt"
     best_ckpt_dir = out_path / "best"
+    metrics_path = out_path / "metrics.json"
+    if metrics_path.exists() and "test_model" in json.loads(metrics_path.read_text(encoding="utf-8")):
+        raise RuntimeError(
+            f"The test split was already evaluated for the run in {out_path}; "
+            "use a fresh --out-dir instead of re-running or resuming a finished run."
+        )
 
     torch.manual_seed(cfg.seed)
     np_rng = np.random.default_rng(cfg.seed)
@@ -450,7 +456,7 @@ def run_warmstart_training(
                 model,
                 vocab,
                 metadata={
-                    "version": "warmstart-v1",
+                    "version": "warmstart-v2",
                     "best_epoch": best_epoch,
                     "val_score": best_score,
                     "train_config": cfg.to_dict(),
@@ -538,7 +544,7 @@ def run_warmstart_training(
         "test_model": test_metrics,
         "history": history,
     }
-    (out_path / "metrics.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+    metrics_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
     (out_path / "report.md").write_text(
         val_report + "\n\n" + test_report + "\n", encoding="utf-8"
     )

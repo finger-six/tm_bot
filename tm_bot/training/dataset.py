@@ -52,6 +52,14 @@ _SLOT_PICKED_CORP = SLOT_TO_ID["picked_corp"]
 _SLOT_DRAFTED_CARDS = SLOT_TO_ID["drafted_cards"]
 _SLOT_CURRENT_PACKET = SLOT_TO_ID["current_draft_packet"]
 _SLOT_HIST_DISCARDED = SLOT_TO_ID["history_discarded_seen"]
+_SLOT_HIST_PASSED = SLOT_TO_ID["history_draft_passed"]
+_SLOT_OPP_TABLEAU = SLOT_TO_ID["opp_tableau"]
+
+# obs_scalars indices written by the draft batch builder (see encode_observation layout).
+_SC_FIRST_PLAYER = 7
+_SC_ACTIVE_PLAYER = 8
+_SC_OPP_TAGS = 96
+_SC_HIST_DRAFTS = 182
 
 
 def resolve_warmstart_dir(data_dir: Path | str | None = None) -> Path:
@@ -101,6 +109,12 @@ class DraftPicksTable:
     chosen_card: np.ndarray  # uint16[M]
     drafted_this_round: np.ndarray  # uint16[M, 4]
     drafted_len: np.ndarray  # uint8[M]
+    # The actor's own previous draft row (same table and seat; earlier round or earlier pick),
+    # or -1. Following the chain reconstructs `history.drafts`.
+    prev_row: np.ndarray  # int32[M]
+    # Setup row of the opponent at the same table (its corporation and preludes are public
+    # after generation 1), or -1 when that perspective did not pass the gates.
+    opp_setup_idx: np.ndarray  # int32[M]
     split_indices: dict[str, np.ndarray]
 
     @property
@@ -251,6 +265,7 @@ def _load_draft_picks(
     )
     m = table.num_rows
     setup_idx = np.empty(m, dtype=np.int32)
+    opp_setup_idx = np.empty(m, dtype=np.int32)
     map_id = np.empty(m, dtype=np.uint8)
     seat = np.empty(m, dtype=np.uint8)
     split = np.empty(m, dtype=np.uint8)
@@ -277,6 +292,7 @@ def _load_draft_picks(
         tid = str(tids[i])
         s_i = int(seats[i])
         setup_idx[i] = key_to_setup_idx[(tid, s_i)]
+        opp_setup_idx[i] = key_to_setup_idx.get((tid, 1 - s_i), -1)
         map_id[i] = map_cache[maps[i]]
         seat[i] = s_i
         split[i] = _SPLIT_TO_IDX[splits[i]]
@@ -297,6 +313,7 @@ def _load_draft_picks(
     # Reconstruct prior picks within the same (table_id, seat, draft_round_id)
     drafted_this_round = np.zeros((m, 4), dtype=np.uint16)
     drafted_len = np.zeros(m, dtype=np.uint8)
+    prev_row = np.full(m, -1, dtype=np.int32)
     if m > 0:
         sort_key = (
             (setup_idx.astype(np.uint64) << 24)
@@ -336,6 +353,11 @@ def _load_draft_picks(
         drafted_this_round[order] = s_drafted
         drafted_len[order] = s_dlen
 
+        # Sorted by (setup, round, pick): the previous sorted row of the same setup is the
+        # actor's previous pick.
+        same_setup = s_setup[1:] == s_setup[:-1]
+        prev_row[order[1:][same_setup]] = order[:-1][same_setup]
+
     return DraftPicksTable(
         setup_idx=setup_idx,
         map_id=map_id,
@@ -349,6 +371,8 @@ def _load_draft_picks(
         chosen_card=chosen_card,
         drafted_this_round=drafted_this_round,
         drafted_len=drafted_len,
+        prev_row=prev_row,
+        opp_setup_idx=opp_setup_idx,
         split_indices=_split_dict(split),
     )
 
@@ -441,6 +465,8 @@ def load_warmstart_corpus(
             chosen_card=np.zeros((0,), dtype=np.uint16),
             drafted_this_round=np.zeros((0, 4), dtype=np.uint16),
             drafted_len=np.zeros((0,), dtype=np.uint8),
+            prev_row=np.zeros((0,), dtype=np.int32),
+            opp_setup_idx=np.zeros((0,), dtype=np.int32),
             split_indices=empty_split,
         )
 
@@ -874,6 +900,10 @@ class FastBatchBuilder:
         scalars[:, 13 + 0] = 0.0  # not research
         scalars[:, 13 + 2] = 1.0  # phase == drafting
         scalars[:, 21] = 0.0  # not (gen==1 and research)
+        # First player rotates each generation (seat 0 starts gen 1) and is reported as active.
+        is_first = ((gens.astype(np.int64) - 1) % 2 == seats.astype(np.int64)).astype(np.float32)
+        scalars[:, _SC_FIRST_PLAYER] = is_first
+        scalars[:, _SC_ACTIVE_PLAYER] = is_first
 
         card_cost = self.corp_buy_cost[ch_corp]
         start_mc = self.corp_starting_mc[ch_corp]
@@ -966,6 +996,34 @@ class FastBatchBuilder:
                 cand_mask[b, j] = True
                 if cid_val == tgt_cid:
                     targets[b] = j
+
+            # Own draft history: cards passed at every earlier pick
+            passed_counts: Counter[int] = Counter()
+            n_prior = 0
+            k_row = int(dp.prev_row[indices[b]])
+            while k_row >= 0:
+                n_prior += 1
+                taken = int(dp.chosen_card[k_row])
+                for j in range(int(dp.packet_len[k_row])):
+                    pc = int(dp.packet_cards[k_row, j])
+                    if pc != taken:
+                        passed_counts[pc] += 1
+                k_row = int(dp.prev_row[k_row])
+            for cid_val, cnt in passed_counts.items():
+                toks.append((_SLOT_HIST_PASSED, cid_val, float(cnt) / 3.0))
+            scalars[b, _SC_HIST_DRAFTS] = float(n_prior) / 40.0
+
+            # Opponent's public setup (corporation + preludes)
+            opp_i = int(dp.opp_setup_idx[indices[b]])
+            if opp_i >= 0:
+                opp_cards = [int(sc.chosen_corp[opp_i])] + [
+                    int(x) for x in sc.chosen_preludes[opp_i] if int(x) != PAD_ID
+                ]
+                opp_tags = np.zeros(len(TAG_NAMES), dtype=np.float32)
+                for oc in opp_cards:
+                    toks.append((_SLOT_OPP_TABLEAU, oc, 0.0))
+                    opp_tags += self.card_tag_vec[oc]
+                scalars[b, _SC_OPP_TAGS : _SC_OPP_TAGS + len(TAG_NAMES)] = opp_tags / 10.0
 
             # Initial buy discarded
             disc_counts: Counter[int] = Counter()
