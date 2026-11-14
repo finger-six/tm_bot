@@ -1,0 +1,16 @@
+{
+  "table_id": "500003",
+  "player_perspective": "1004",
+  "map": "Тарсис",
+  "draft_on": true,
+  "prelude_on": false,
+  "corporate_era_on": true,
+  "colonies_on": false,
+  "players": {
+    "1004": {"name": "Dave"},
+    "1005": {"name": "Eve"}
+  },
+  "moves": [
+    {"move_number": 1, "description": "Module: Corporate Era | Map: Tharsis"}
+  ]
+}

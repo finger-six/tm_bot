@@ -1,0 +1,1 @@
+This non-json file should be ignored by the inventory scanner.

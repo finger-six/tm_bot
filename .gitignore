@@ -7,8 +7,13 @@ game-logs-archive-*.zip
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+.pytest_cache/
 .venv/
 .conda-env
+
+# Data indexes and artifacts
+/data/
 
 # Node
 node_modules/

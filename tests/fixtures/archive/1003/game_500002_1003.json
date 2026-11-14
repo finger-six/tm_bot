@@ -1,0 +1,25 @@
+{
+  "table_id": "500002",
+  "replay_id": "500002",
+  "player_perspective": "1003",
+  "map": "Элизий",
+  "conceded": true,
+  "draft_on": false,
+  "prelude_on": true,
+  "corporate_era_on": false,
+  "colonies_on": true,
+  "beginners_corporations_on": true,
+  "players": {
+    "1003": {"name": "Carol"},
+    "1004": {"name": "Dave"},
+    "1005": {"name": "Eve"}
+  },
+  "metadata": {
+    "total_moves": 2,
+    "scraper_version": "v2025.12.27.1015"
+  },
+  "moves": [
+    {"move_number": 1, "description": "Module: Colonies | Module: Venus Next | Basic mode | Map: Elysium"},
+    {"move_number": 2, "description": "Dave concedes the game. | The end of the game: Carol wins!"}
+  ]
+}

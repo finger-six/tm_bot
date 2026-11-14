@@ -1,0 +1,25 @@
+{
+  "table_id": "500001",
+  "replay_id": "500001",
+  "player_perspective": "1001",
+  "map": "Hellas",
+  "conceded": false,
+  "draft_on": true,
+  "prelude_on": true,
+  "corporate_era_on": true,
+  "colonies_on": false,
+  "beginners_corporations_on": false,
+  "players": {
+    "1001": {"name": "Alice"},
+    "1002": {"name": "Bob"}
+  },
+  "metadata": {
+    "total_moves": 3,
+    "scraper_version": "v2025.10.07.1844"
+  },
+  "moves": [
+    {"move_number": 1, "description": "Module: Corporate Era | Map: Hellas | Alice is starting player"},
+    {"move_number": 2, "description": "Alice plays card"},
+    {"move_number": 3, "description": "The end of the game: Alice wins!"}
+  ]
+}
