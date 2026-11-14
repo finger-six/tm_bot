@@ -393,6 +393,7 @@ export interface IPlayer {
   tableau: {has(name: CardName): boolean};
   production: {asUnits(): Units};
   cardsInHand: Array<IProjectCard>;
+  preludeCardsInHand: Array<IProjectCard>;
   getWaitingFor(): PlayerInput | undefined;
   setWaitingFor(input: PlayerInput, cb?: () => void): void;
   process(input: InputResponse): void;

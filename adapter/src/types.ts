@@ -166,10 +166,20 @@ export interface ResearchBuyHistoryEntry {
   readonly discarded: ReadonlyArray<string>;
 }
 
+/** A card prompt outside setup, drafting and research that showed the actor cards not already in its hand or any tableau (e.g. Inventors' Guild, Business Network). */
+export interface CardSelectionHistoryEntry {
+  readonly generation: number;
+  readonly phase: string;
+  readonly offered: ReadonlyArray<string>;
+  readonly selected: ReadonlyArray<string>;
+  readonly unselected: ReadonlyArray<string>;
+}
+
 export interface ActorHistory {
   readonly initialBuy: InitialBuyHistory | null;
   readonly drafts: ReadonlyArray<DraftHistoryEntry>;
   readonly researchBuys: ReadonlyArray<ResearchBuyHistoryEntry>;
+  readonly cardSelections: ReadonlyArray<CardSelectionHistoryEntry>;
 }
 
 export interface ActorObservation {

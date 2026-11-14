@@ -6,7 +6,7 @@ import {
 } from '../src/index';
 
 function parseCount(argv: ReadonlyArray<string>): number {
-  const raw = argv[2];
+  const raw = argv.slice(2).find((arg) => !arg.startsWith('--'));
   if (raw === undefined) {
     return 1000;
   }
@@ -19,6 +19,7 @@ function parseCount(argv: ReadonlyArray<string>): number {
 
 function main(): void {
   const totalGames = parseCount(process.argv);
+  const observe = process.argv.includes('--observe');
   const startNs = process.hrtime.bigint();
 
   let completed = 0;
@@ -28,6 +29,7 @@ function main(): void {
   let otherErrors = 0;
   let totalGenerations = 0;
   let totalAtomicChoices = 0;
+  let totalObserveMs = 0;
 
   const perMapCompleted: Record<SupportedMap, number> = {
     'tharsis': 0,
@@ -41,11 +43,12 @@ function main(): void {
     const map = SUPPORTED_MAPS[i % SUPPORTED_MAPS.length];
     const seedKey = `fuzz-${map}-${i}`;
     try {
-      const outcome = playRandomGame({seedKey, map});
+      const outcome = playRandomGame({seedKey, map, observe});
       completed += 1;
       perMapCompleted[map] += 1;
       totalGenerations += outcome.result.generations;
       totalAtomicChoices += outcome.atomicChoices;
+      totalObserveMs += outcome.observeMs ?? 0;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (err instanceof AdapterBugError) {
@@ -82,6 +85,10 @@ function main(): void {
   );
   console.log(`Mean gens:    ${meanGen.toFixed(2)}`);
   console.log(`Mean choices: ${meanChoices.toFixed(1)}`);
+  if (observe) {
+    const meanObserve = totalAtomicChoices > 0 ? totalObserveMs / totalAtomicChoices : 0;
+    console.log(`Observe:      ${meanObserve.toFixed(4)} ms/choice (observe + serialize)`);
+  }
   console.log(`Total wall:   ${(totalMs / 1000).toFixed(2)}s (${meanMs.toFixed(2)} ms/game)`);
 
   if (failures.length > 0) {

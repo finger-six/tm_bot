@@ -1,4 +1,5 @@
 import {
+  CardName,
   Game,
   GameId,
   IGame,
@@ -20,6 +21,7 @@ import {
   ActorObservation,
   AdapterBugError,
   AdapterGame,
+  CardSelectionHistoryEntry,
   Choice,
   CreateGameOptions,
   DraftHistoryEntry,
@@ -51,6 +53,7 @@ interface MutableActorHistory {
   initialBuy: InitialBuyHistory | null;
   readonly drafts: Array<DraftHistoryEntry>;
   readonly researchBuys: Array<ResearchBuyHistoryEntry>;
+  readonly cardSelections: Array<CardSelectionHistoryEntry>;
 }
 
 function createEmptyActorHistory(): MutableActorHistory {
@@ -58,6 +61,7 @@ function createEmptyActorHistory(): MutableActorHistory {
     initialBuy: null,
     drafts: [],
     researchBuys: [],
+    cardSelections: [],
   };
 }
 
@@ -254,6 +258,7 @@ export class GameAdapter implements AdapterGame {
       }
     | {kind: 'draft'; generation: number; draftRound: number; packet: Array<string>}
     | {kind: 'research'; generation: number; offered: Array<string>}
+    | {kind: 'cardSelection'; generation: number; phase: string; offered: Array<string>}
     | null {
     const waitingBefore = player.getWaitingFor();
     if (waitingBefore === undefined) {
@@ -299,6 +304,18 @@ export class GameAdapter implements AdapterGame {
         generation: game.generation,
         offered: (waitingBefore as SelectCard).cards.map((c) => c.name).sort(compareStrings),
       };
+    }
+
+    if (waitingBefore.type === 'card') {
+      // Only prompts showing the actor otherwise-unseen cards (look-and-buy, draw-and-keep) add history;
+      // choices among its own hand or public tableau cards add no private knowledge.
+      const offered = (waitingBefore as SelectCard).cards.map((c) => c.name).sort(compareStrings);
+      const inHand = new Set<string>([...player.cardsInHand, ...player.preludeCardsInHand].map((c) => c.name));
+      const isKnown = (name: string): boolean =>
+        inHand.has(name) || game.players.some((p) => p.tableau.has(name as CardName));
+      if (offered.some((name) => !isKnown(name))) {
+        return {kind: 'cardSelection', generation: game.generation, phase: game.phase, offered};
+      }
     }
 
     return null;
@@ -378,6 +395,18 @@ export class GameAdapter implements AdapterGame {
         offered: snapshot.offered,
         bought,
         discarded,
+      });
+      return;
+    }
+
+    if (snapshot.kind === 'cardSelection' && response.type === 'card') {
+      const selected = response.cards.slice().sort(compareStrings);
+      actorHistory.cardSelections.push({
+        generation: snapshot.generation,
+        phase: snapshot.phase,
+        offered: snapshot.offered,
+        selected,
+        unselected: subtractCards(snapshot.offered, selected),
       });
     }
   }

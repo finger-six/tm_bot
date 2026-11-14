@@ -22,6 +22,7 @@ export type {
   DraftHistoryEntry,
   InitialBuyHistory,
   ResearchBuyHistoryEntry,
+  CardSelectionHistoryEntry,
   ActorHistory,
   ActorObservation,
 } from './types';

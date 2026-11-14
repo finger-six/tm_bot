@@ -125,6 +125,13 @@ function cloneHistory(history: ActorHistory): ActorHistory {
       bought: entry.bought.slice(),
       discarded: entry.discarded.slice(),
     })),
+    cardSelections: history.cardSelections.map((entry) => ({
+      generation: entry.generation,
+      phase: entry.phase,
+      offered: entry.offered.slice(),
+      selected: entry.selected.slice(),
+      unselected: entry.unselected.slice(),
+    })),
   };
 }
 

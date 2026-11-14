@@ -434,8 +434,60 @@ describe('Ticket 15: Actor observation, history, and leakage tests', () => {
     assertAllowList(game.observe(1));
   });
 
-  it('6. serializes observations without error at every decision across 400 random games (100 per map)', () => {
-    const gamesPerMap = 100;
+  it('7. records cards seen through action-phase look-and-buy prompts (Inventors\' Guild) in the actor history only', () => {
+    const path = require('node:path') as typeof import('node:path');
+    const engineRoot = path.resolve(__dirname, '../../../tools/simbench/engine/build/src');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {InventorsGuild} = require(path.join(engineRoot, 'server/cards/base/InventorsGuild.js'));
+
+    const game = createGame({seedKey: 'history-look-and-buy-1', map: 'tharsis'});
+    finishInitialResearchWithProjectBuys(game);
+    const engine = _unsafeGetEngineGame(game) as unknown as {
+      phase: string;
+      generation: number;
+      players: Array<{megaCredits: number; playedCards: {push(card: unknown): void}}>;
+    };
+    engine.players[0].playedCards.push(new InventorsGuild());
+    engine.players[0].megaCredits = 30;
+
+    // Reach seat 0's action prompt (seat 1 passes whenever it acts).
+    while (engine.phase !== 'action' || game.pending()[0] !== 0) {
+      const seat = game.pending()[0];
+      const cur = game.choice(seat);
+      if (engine.phase === 'action' && cur.kind === 'branch') {
+        const passIdx = cur.candidates.findIndex((c) => /pass/i.test(c.label));
+        game.choose(seat, passIdx !== -1 ? passIdx : 0);
+      } else {
+        chooseDoneOrZero(game, seat);
+      }
+    }
+
+    const root = game.choice(0);
+    const actionIdx = root.candidates.findIndex((c) => /action from a played card/i.test(c.label));
+    assert.ok(actionIdx >= 0, 'Expected a card-action branch');
+    game.choose(0, actionIdx);
+    const cardAction = game.choice(0);
+    const igIdx = cardAction.candidates.findIndex((c) => c.id === "Inventors' Guild");
+    assert.ok(igIdx >= 0, "Expected Inventors' Guild among card actions");
+    game.choose(0, igIdx);
+
+    const look = game.choice(0);
+    const seen = look.candidates.filter((c) => c.id !== 'done').map((c) => c.id);
+    assert.equal(seen.length, 1);
+    assert.equal(game.observe(0).history.cardSelections.length, 0);
+    assert.equal(serializeObservation(game.observe(1)).includes(seen[0]), false);
+    game.choose(0, look.candidates.findIndex((c) => c.id === 'done'));
+
+    assert.deepEqual(game.observe(0).history.cardSelections, [
+      {generation: engine.generation, phase: 'action', offered: seen, selected: [], unselected: seen},
+    ]);
+    assert.deepEqual(game.observe(1).history.cardSelections, []);
+    assert.equal(serializeObservation(game.observe(1)).includes(seen[0]), false, 'Discarded look card must stay hidden from the opponent');
+  });
+
+
+  it('6. serializes observations without error at every decision across 8 random games (2 per map; full sweep: npm run fuzz -- N --observe)', () => {
+    const gamesPerMap = 2;
     let totalCalls = 0;
     let totalObserveNs = 0n;
 
@@ -473,7 +525,7 @@ describe('Ticket 15: Actor observation, history, and leakage tests', () => {
     }
 
     const meanMs = Number(totalObserveNs) / totalCalls / 1e6;
-    console.log(`400-game observation sweep: ${totalCalls} decisions, mean observe() = ${meanMs.toFixed(4)} ms`);
+    console.log(`8-game observation sweep: ${totalCalls} decisions, mean observe() = ${meanMs.toFixed(4)} ms`);
     assert.ok(totalCalls > 0);
   });
 });

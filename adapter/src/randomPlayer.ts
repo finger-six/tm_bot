@@ -1,5 +1,6 @@
 import {createGame} from './adapter';
 import {hashSeedKey} from './config';
+import {serializeObservation} from './observe';
 import {GameResult, Seat, SupportedMap} from './types';
 
 /**
@@ -34,6 +35,8 @@ export interface RandomGameOptions {
   readonly map: SupportedMap;
   readonly driverSeed?: number;
   readonly recordChoices?: boolean;
+  /** Build and serialize the deciding actor's observation before every atomic choice. */
+  readonly observe?: boolean;
 }
 
 export interface RandomGameOutcome {
@@ -43,6 +46,8 @@ export interface RandomGameOutcome {
   readonly atomicChoices: number;
   readonly wallTimeMs: number;
   readonly choices?: ReadonlyArray<RecordedAtomicChoice>;
+  /** Total time spent in observe() + serialization, when `observe` is set. */
+  readonly observeMs?: number;
 }
 
 /**
@@ -58,6 +63,7 @@ export function playRandomGame(options: RandomGameOptions): RandomGameOutcome {
   const game = createGame({seedKey: options.seedKey, map: options.map});
   const choices: Array<RecordedAtomicChoice> | undefined = options.recordChoices ? [] : undefined;
   let atomicChoices = 0;
+  let observeNs = 0n;
 
   while (true) {
     const seats = game.pending();
@@ -65,6 +71,11 @@ export function playRandomGame(options: RandomGameOptions): RandomGameOutcome {
       break;
     }
     const seat = seats[0];
+    if (options.observe) {
+      const t0 = process.hrtime.bigint();
+      serializeObservation(game.observe(seat));
+      observeNs += process.hrtime.bigint() - t0;
+    }
     const current = game.choice(seat);
     const candidateIndex = prng.nextInt(current.candidates.length);
     game.choose(seat, candidateIndex);
@@ -89,5 +100,6 @@ export function playRandomGame(options: RandomGameOptions): RandomGameOutcome {
     atomicChoices,
     wallTimeMs,
     ...(choices !== undefined ? {choices} : {}),
+    ...(options.observe ? {observeMs: Number(observeNs) / 1e6} : {}),
   };
 }
