@@ -844,31 +844,55 @@ function isResearchPaymentWindow(game: AdapterGame, seat: Seat): boolean {
 
 describe('Ticket 16 regression: research payment window', () => {
   it('opponent mid-payment: determinized world never keeps the true research buy (no conjured cards)', () => {
-    let hits = 0;
-    for (let gi = 0; gi < 12 && hits < 3; gi++) {
-      const g = createGame({seedKey: `T-${gi}`, map: SUPPORTED_MAPS[gi % SUPPORTED_MAPS.length]});
-      const rng = makePrng(500 + gi);
-      let steps = 0;
-      while (g.result() === null && steps < 4000 && hits < 3) {
-        for (const actor of g.pending()) {
-          const opp: Seat = actor === 0 ? 1 : 0;
-          if (!isResearchPaymentWindow(g, opp)) continue;
-          hits += 1;
-          const c = g.clone();
-          const pool = c.unseenPool(actor);
-          c.determinize(actor, sampleWorldFromObservation(c.observe(actor), pool, makePrng(7 + steps)));
-          assert.notEqual(_unsafeGetEngineGame(c).players[opp].getWaitingFor()?.type, 'payment',
-            'opponent payment closure (holding true cards) must be rewound');
-          assert.deepEqual(projectCensusDuplicates(c), [], `duplicates right after determinize (T-${gi} step ${steps})`);
-          playToCompletion(c, makePrng(99));
-          assert.deepEqual(projectCensusDuplicates(c), [], `duplicates after rollout (T-${gi} step ${steps})`);
-        }
-        const s = g.pending()[0];
-        g.choose(s, chooseSeeded(rng, g.choice(s).candidates.length));
-        steps += 1;
-      }
+    // Under Ticket 29, simultaneous research SelectCard prompts are submitted together, so
+    // an opponent can only be in SelectPayment while actor is pending if both seats enter
+    // SelectPayment simultaneously (e.g. both able to pay with heat). Exercise that path directly.
+    const g = createGame({seedKey: 'T-opp-mid-pay', map: 'tharsis'});
+    finishInitialResearch(g);
+    advanceUntil(g, (gm) => _unsafeGetEngineGame(gm).phase === 'action', makePrng(501));
+    const eng = _unsafeGetEngineGame(g) as unknown as {
+      players: Array<{megaCredits: number; heat: number; canUseHeatAsMegaCredits: boolean}>;
+    };
+    for (const p of eng.players) {
+      p.megaCredits = 30;
+      p.heat = 6;
+      p.canUseHeatAsMegaCredits = true;
     }
-    assert.ok(hits > 0, 'expected to hit an opponent research payment window');
+    (g as unknown as {refreshCheckpoint(e: unknown): void}).refreshCheckpoint(eng);
+    while (!(_unsafeGetEngineGame(g).phase === 'research' && _unsafeGetEngineGame(g).generation >= 2)) {
+      const s = g.pending()[0];
+      const ch = g.choice(s);
+      const passIdx = ch.candidates.findIndex((c) => /pass/i.test(c.label));
+      const endIdx = ch.candidates.findIndex((c) => /end turn/i.test(c.label));
+      const doneIdx = ch.candidates.findIndex((c) => c.id === 'done');
+      const idx = passIdx >= 0 ? passIdx : endIdx >= 0 ? endIdx : doneIdx >= 0 ? doneIdx : 0;
+      g.choose(s, idx);
+    }
+    for (const seat of [0, 1] as const) {
+      g.choose(seat, 0); // buy 1 card
+      const doneIdx = g.choice(seat).candidates.findIndex((c) => c.id === 'done');
+      g.choose(seat, doneIdx);
+    }
+    assert.deepEqual(g.pending(), [0, 1]);
+
+    let hits = 0;
+    for (const actor of g.pending()) {
+      const opp: Seat = actor === 0 ? 1 : 0;
+      if (!isResearchPaymentWindow(g, opp)) continue;
+      hits += 1;
+      const c = g.clone();
+      const pool = c.unseenPool(actor);
+      c.determinize(actor, sampleWorldFromObservation(c.observe(actor), pool, makePrng(7 + actor)));
+      assert.notEqual(
+        _unsafeGetEngineGame(c).players[opp].getWaitingFor()?.type,
+        'payment',
+        'opponent payment closure (holding true cards) must be rewound',
+      );
+      assert.deepEqual(projectCensusDuplicates(c), [], `duplicates right after determinize (seat ${actor})`);
+      playToCompletion(c, makePrng(99 + actor));
+      assert.deepEqual(projectCensusDuplicates(c), [], `duplicates after rollout (seat ${actor})`);
+    }
+    assert.equal(hits, 2, 'expected both seats to witness opponent research payment window');
   });
 
   it('actor mid-payment: own pending buy is not unseen, and samples conserve cards', () => {
@@ -1412,9 +1436,12 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
       't28-l4-draft',
       'tharsis',
     );
-    // Have opponent (seat 0) pick first so needsToDraft === false and restoreDraft() runs on seat 1 determinize
-    gDraft.choose(0, 0);
-    assert.equal(_unsafeGetEngineGame(gDraft).players[0].needsToDraft, false);
+    const pkt0 = gDraft.choice(0).candidates[0].id;
+    // Under Ticket 29, seat 0 picking first holds seat 0 in deferred[] (engine needsToDraft stays true).
+    const gDeferred = gDraft.clone();
+    gDeferred.choose(0, 0);
+    assert.equal(_unsafeGetEngineGame(gDeferred).players[0].needsToDraft, true);
+    assert.deepEqual(gDeferred.pending(), [1]);
 
     const warnings: Array<string> = [];
     const origWarn = console.warn;
@@ -1422,14 +1449,14 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
       warnings.push(args.map((a) => String(a)).join(' '));
     };
     try {
-      const obs = gDraft.observe(1);
-      const pool = gDraft.unseenPool(1);
+      const obs = gDeferred.observe(1);
+      const pool = gDeferred.unseenPool(1);
       const baseWorld = sampleWorldFromObservation(obs, pool, makePrng(7001));
       const origCurrentSeed = (_unsafeGetEngineGame(gDraft) as unknown as {rng: {current: number}}).rng.current;
 
-      const c1 = gDraft.clone();
+      const c1 = gDeferred.clone();
       c1.determinize(1, {...baseWorld, seed: 101});
-      const c2 = gDraft.clone();
+      const c2 = gDeferred.clone();
       c2.determinize(1, {...baseWorld, seed: 202});
 
       const s1 = (_unsafeGetEngineGame(c1) as unknown as {rng: {current: number}}).rng.current;
@@ -1437,6 +1464,14 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
 
       assert.notEqual(s1, origCurrentSeed, 'determinize must reseed engine RNG away from true RNG');
       assert.notEqual(s2, s1, 'different world.seed values must yield different engine RNG states');
+
+      // Also exercise the defensive restoreDraft() branch when opp.needsToDraft === false directly on engine
+      const cDirect = gDraft.clone();
+      _unsafeGetEngineGame(cDirect).players[0].process({type: 'card', cards: [pkt0 as never]});
+      assert.equal(_unsafeGetEngineGame(cDirect).players[0].needsToDraft, false);
+      cDirect.determinize(1, {...baseWorld, seed: 303});
+      assert.equal(_unsafeGetEngineGame(cDirect).players[0].needsToDraft, true);
+
       assert.equal(
         warnings.filter((w) => w.includes('Overwriting waitingFor')).length,
         0,
@@ -1618,18 +1653,48 @@ describe('Ticket 28: determinize hardening (L1-L4)', () => {
 
 
 describe('Ticket 28 regression: hidden picked corporation affordability', () => {
-  it('only offers opponent corporations that can pay for the publicly counted initial buy, and rejects others', () => {
-    // t28-truth-2 / hellas at decision 24: seat 0 has submitted a 9-card initial buy (27 M€) while
-    // its corporation is still hidden from seat 1. A sampled PhoboLog (23 M€) made the engine log
-    // "Illegal state: Adjusting -27 megacredits".
+  it('hides seat 0 initial buy behind deferral and still enforces affordability if engine already committed seat 0', () => {
+    // t28-truth-2 / hellas at decision 24: seat 0 has finished answering its initial setup
+    // (including a 9-card project buy), while seat 1 is still deciding. Under Ticket #29, seat 0's
+    // initial buy is held in deferred[0] and NOT submitted to the engine until seat 1 also finishes.
     const g = createGame({seedKey: 't28-truth-2', map: 'hellas'});
     const mainRng = makePrng(9000 + 2 * 17);
     for (let d = 0; d < 24; d++) {
       const s = g.pending()[0];
       g.choose(s, chooseSeeded(mainRng, g.choice(s).candidates.length));
     }
-    assert.ok(g.pending().includes(1));
-    const pool = g.unseenPool(1);
+    assert.deepEqual(g.pending(), [1]);
+    const deferredPool = g.unseenPool(1);
+    assert.equal(deferredPool.opponentInitialBuyComplete, false);
+    assert.equal(deferredPool.opponentHasHiddenPickedCorp, false);
+    assert.equal(deferredPool.opponentHandSize, 0);
+
+    // Also keep exercising determinize's defensive affordability filter on a direct-engine clone
+    // where seat 0's 9-card initial buy has already been submitted to the engine.
+    const cDirect = createGame({seedKey: 't28-truth-2', map: 'hellas'});
+    const engDirect = _unsafeGetEngineGame(cDirect) as unknown as {
+      players: Array<{
+        dealtCorporationCards: ReadonlyArray<{name: string; startingMegaCredits: number}>;
+        dealtPreludeCards: ReadonlyArray<{name: string}>;
+        dealtProjectCards: ReadonlyArray<{name: string}>;
+        process(input: unknown): void;
+      }>;
+    };
+    const p0 = engDirect.players[0];
+    const richCorp = p0.dealtCorporationCards.find((c) => c.startingMegaCredits >= 27);
+    assert.ok(richCorp !== undefined);
+    p0.process({
+      type: 'initialCards',
+      responses: [
+        {type: 'card', cards: [richCorp.name]},
+        {type: 'card', cards: p0.dealtPreludeCards.slice(0, 2).map((c) => c.name)},
+        {type: 'card', cards: p0.dealtProjectCards.slice(0, 9).map((c) => c.name)},
+      ],
+    });
+    (cDirect as unknown as {refreshCheckpoint(e: unknown): void}).refreshCheckpoint(engDirect);
+
+    assert.ok(cDirect.pending().includes(1));
+    const pool = cDirect.unseenPool(1);
     assert.equal(pool.opponentHasHiddenPickedCorp, true);
     assert.equal(pool.opponentHandSize, 9);
     const candidates = new Set(pool.opponentPickedCorporationCandidates);
@@ -1638,8 +1703,8 @@ describe('Ticket 28 regression: hidden picked corporation affordability', () => 
     assert.ok(!candidates.has('PhoboLog'));
     assert.ok(pool.corporations.includes('PhoboLog'));
 
-    const base = sampleWorldFromObservation(g.observe(1), pool, makePrng(77));
-    const bad = g.clone();
+    const base = sampleWorldFromObservation(cDirect.observe(1), pool, makePrng(77));
+    const bad = cDirect.clone();
     assert.throws(
       () => bad.determinize(1, {...base, opponentPickedCorporation: 'PhoboLog'}),
       /opponentPickedCorporation/,
@@ -1650,7 +1715,7 @@ describe('Ticket 28 regression: hidden picked corporation affordability', () => 
     console.warn = (m: unknown) => { warnings.push(String(m)); };
     try {
       for (const corp of candidates) {
-        const c = g.clone();
+        const c = cDirect.clone();
         c.determinize(1, {...base, opponentPickedCorporation: corp});
         playToCompletion(c, makePrng(4242));
       }

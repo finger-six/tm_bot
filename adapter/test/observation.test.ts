@@ -318,11 +318,16 @@ describe('Ticket 15: Actor observation, history, and leakage tests', () => {
     assert.deepEqual(game.observe(0).history.drafts, expectedDrafts0);
     assert.equal(expectedDrafts0.length, 3);
 
-    // Seat 0 buys 0 or 1 cards in research buy
+    // Seat 0 buys 0 cards in research buy: deferred until seat 1 also answers
     const resChoice = game.choice(0);
     const offered = resChoice.candidates.filter((c) => c.id !== 'done').map((c) => c.id).sort();
     const doneIdx = resChoice.candidates.findIndex((c) => c.id === 'done');
     game.choose(0, doneIdx);
+    assert.equal(game.observe(0).history.researchBuys.length, 0, 'Deferred research buy must not commit to history yet');
+
+    const resChoice1 = game.choice(1);
+    const doneIdx1 = resChoice1.candidates.findIndex((c) => c.id === 'done');
+    game.choose(1, doneIdx1);
 
     const obs0AfterRes = game.observe(0);
     assert.equal(obs0AfterRes.history.researchBuys.length, 1);
@@ -527,6 +532,148 @@ describe('Ticket 15: Actor observation, history, and leakage tests', () => {
     const meanMs = Number(totalObserveNs) / totalCalls / 1e6;
     console.log(`8-game observation sweep: ${totalCalls} decisions, mean observe() = ${meanMs.toFixed(4)} ms`);
     assert.ok(totalCalls > 0);
+  });
+
+  it('8. hides opponent simultaneous initial setup and research buy answers until both seats answer (symmetric)', () => {
+    const completeInitialBuy = (game: AdapterGame, seat: Seat, buyCount = 2): void => {
+      game.choose(seat, 0); // corp
+      game.choose(seat, 0); // prelude 1
+      game.choose(seat, 0); // prelude 2
+      const prelDone = game.choice(seat).candidates.findIndex((c) => c.id === 'done');
+      assert.ok(prelDone >= 0);
+      game.choose(seat, prelDone);
+      for (let i = 0; i < buyCount; i++) {
+        const cur = game.choice(seat);
+        if (cur.candidates[0].id === 'done') {
+          break;
+        }
+        game.choose(seat, 0);
+      }
+      const projDone = game.choice(seat).candidates.findIndex((c) => c.id === 'done');
+      assert.ok(projDone >= 0);
+      game.choose(seat, projDone);
+    };
+
+    // --- Part A: Initial setup (seat 0 answers first vs seat 1 answers first) ---
+    const initGameA = createGame({seedKey: 'leak-init-simultaneous-1', map: 'tharsis'});
+    const initGameB = createGame({seedKey: 'leak-init-simultaneous-1', map: 'tharsis'});
+    assert.deepEqual(initGameA.pending(), [0, 1]);
+
+    const obs1InitBefore = serializeObservation(initGameA.observe(1));
+    const obs0InitBefore = serializeObservation(initGameB.observe(0));
+
+    completeInitialBuy(initGameA, 0, 3);
+    assert.deepEqual(initGameA.pending(), [1]);
+    assert.equal(
+      serializeObservation(initGameA.observe(1)),
+      obs1InitBefore,
+      'seat 1 observation during initial setup must be byte-identical after seat 0 answers',
+    );
+
+    completeInitialBuy(initGameB, 1, 3);
+    assert.deepEqual(initGameB.pending(), [0]);
+    assert.equal(
+      serializeObservation(initGameB.observe(0)),
+      obs0InitBefore,
+      'seat 0 observation during initial setup must be byte-identical after seat 1 answers',
+    );
+
+    // --- Part B: Gen >= 2 research buy (seat 0 answers first vs seat 1 answers first) ---
+    const resBase = createGame({seedKey: 'leak-research-simultaneous-1', map: 'elysium'});
+    finishInitialResearchWithProjectBuys(resBase);
+    advanceUntilPhase(resBase, 'research');
+    const resEngine = _unsafeGetEngineGame(resBase) as unknown as {
+      phase: string;
+      generation: number;
+      players: Array<{
+        megaCredits: number;
+        heat: number;
+        canUseHeatAsMegaCredits: boolean;
+      }>;
+    };
+    assert.equal(resEngine.phase, 'research');
+    assert.ok(resEngine.generation >= 2);
+    assert.ok(resEngine.players[0].megaCredits >= 6 && resEngine.players[1].megaCredits >= 6);
+
+    const resA = resBase.clone();
+    const resB = resBase.clone();
+    assert.deepEqual(resA.pending(), [0, 1]);
+
+    const obs1ResBefore = serializeObservation(resA.observe(1));
+    const obs0ResBefore = serializeObservation(resB.observe(0));
+
+    // Seat 0 buys 2 cards in Gen 2 research
+    resA.choose(0, 0);
+    resA.choose(0, 0);
+    resA.choose(0, resA.choice(0).candidates.findIndex((c) => c.id === 'done'));
+    assert.deepEqual(resA.pending(), [1]);
+    assert.equal(
+      serializeObservation(resA.observe(1)),
+      obs1ResBefore,
+      'seat 1 observation during Gen>=2 research buy must be byte-identical after seat 0 answers',
+    );
+
+    // Symmetrically, seat 1 buys 2 cards in Gen 2 research
+    resB.choose(1, 0);
+    resB.choose(1, 0);
+    resB.choose(1, resB.choice(1).candidates.findIndex((c) => c.id === 'done'));
+    assert.deepEqual(resB.pending(), [0]);
+    assert.equal(
+      serializeObservation(resB.observe(0)),
+      obs0ResBefore,
+      'seat 0 observation during Gen>=2 research buy must be byte-identical after seat 1 answers',
+    );
+
+    // --- Part C: Simultaneous research payment (when both seats bought cards and enter SelectPayment) ---
+    const payBase = createGame({seedKey: 'leak-research-payment-1', map: 'elysium'});
+    finishInitialResearchWithProjectBuys(payBase);
+    advanceUntilPhase(payBase, 'action');
+    const payBaseEngine = _unsafeGetEngineGame(payBase) as unknown as {
+      players: Array<{
+        megaCredits: number;
+        heat: number;
+        canUseHeatAsMegaCredits: boolean;
+      }>;
+    };
+    for (const p of payBaseEngine.players) {
+      p.megaCredits = 30;
+      p.heat = 6;
+      p.canUseHeatAsMegaCredits = true;
+    }
+    (payBase as unknown as {refreshCheckpoint(e: unknown): void}).refreshCheckpoint(payBaseEngine);
+    advanceUntilPhase(payBase, 'research');
+    assert.deepEqual(payBase.pending(), [0, 1]);
+
+    payBase.choose(0, 0);
+    payBase.choose(0, 0);
+    payBase.choose(0, payBase.choice(0).candidates.findIndex((c) => c.id === 'done'));
+    payBase.choose(1, 0);
+    payBase.choose(1, 0);
+    payBase.choose(1, payBase.choice(1).candidates.findIndex((c) => c.id === 'done'));
+    assert.deepEqual(payBase.pending(), [0, 1]);
+    assert.equal(payBase.choice(0).kind, 'payment');
+    assert.equal(payBase.choice(1).kind, 'payment');
+
+    const payA = payBase.clone();
+    const payB = payBase.clone();
+    const obs1PayBefore = serializeObservation(payA.observe(1));
+    const obs0PayBefore = serializeObservation(payB.observe(0));
+
+    payA.choose(0, 0);
+    assert.deepEqual(payA.pending(), [1]);
+    assert.equal(
+      serializeObservation(payA.observe(1)),
+      obs1PayBefore,
+      'seat 1 observation during simultaneous research payment must be byte-identical after seat 0 pays',
+    );
+
+    payB.choose(1, 0);
+    assert.deepEqual(payB.pending(), [0]);
+    assert.equal(
+      serializeObservation(payB.observe(0)),
+      obs0PayBefore,
+      'seat 0 observation during simultaneous research payment must be byte-identical after seat 1 pays',
+    );
   });
 });
 

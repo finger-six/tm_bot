@@ -119,6 +119,7 @@ describe('Slice 2: Legality examples (payment canonicalization, research buy, oc
     };
 
     p0.clearWaitingFor();
+    engine.players[1].clearWaitingFor();
     p0.playedCards.push(new GeothermalPower(), new SolarPower());
     p0.megaCredits = 20;
     p0.steel = 2;
@@ -220,6 +221,7 @@ describe('Slice 2: Legality examples (payment canonicalization, research buy, oc
     };
 
     p0.clearWaitingFor();
+    engine.players[1].clearWaitingFor();
     p0.megaCredits = 20;
     p0.steel = 0;
     p0.titanium = 0;
@@ -438,6 +440,49 @@ describe('Slice 3b: Simultaneous submissions are applied in canonical seat order
     const normalized = (g: typeof reversed) =>
       JSON.stringify(_unsafeGetEngineGame(g).serialize(), (k, v) => (k === 'timestamp' || k === 'createdTimeMs' || k === 'name' || k === 'timer' || k === 'lastSaveId' ? undefined : v));
     assert.equal(normalized(reversed), normalized(forward));
+  });
+
+  it('yields byte-identical results, engine states, and observations across seat-0-first, seat-1-first, and interleaved arrival orders on all maps', () => {
+    const {serializeObservation} = require('../src/index') as typeof import('../src/index');
+    const normalized = (g: ReturnType<typeof createGame>) =>
+      JSON.stringify(_unsafeGetEngineGame(g).serialize(), (k, v) => (k === 'timestamp' || k === 'createdTimeMs' || k === 'name' || k === 'timer' || k === 'lastSaveId' ? undefined : v));
+
+    for (let i = 0; i < SUPPORTED_MAPS.length; i++) {
+      const map = SUPPORTED_MAPS[i];
+      const seedKey = `canonical-arrival-${map}-${i}`;
+      const reference = playRandomGame({seedKey, map, driverSeed: 100 + i, recordChoices: true});
+      const perSeat: [number[], number[]] = [[], []];
+      for (const step of reference.choices ?? []) {
+        perSeat[step.seat].push(step.candidateIndex);
+      }
+
+      const replayWithPolicy = (pickSeat: (seats: ReadonlyArray<0 | 1>, tick: number) => 0 | 1) => {
+        const g = createGame({seedKey, map});
+        const cursor = [0, 0];
+        let tick = 0;
+        while (true) {
+          const seats = g.pending();
+          if (seats.length === 0) break;
+          const seat = seats.length === 1 ? seats[0] : pickSeat(seats, tick);
+          g.choose(seat, perSeat[seat][cursor[seat]++]);
+          tick += 1;
+        }
+        return g;
+      };
+
+      const gSeat0First = replayWithPolicy((seats) => seats[0]);
+      const gSeat1First = replayWithPolicy((seats) => seats[seats.length - 1]);
+      const gInterleaved = replayWithPolicy((seats, tick) => (tick % 2 === 0 ? seats[0] : seats[seats.length - 1]));
+
+      assert.deepEqual(gSeat1First.result(), reference.result);
+      assert.deepEqual(gInterleaved.result(), reference.result);
+      assert.equal(normalized(gSeat1First), normalized(gSeat0First));
+      assert.equal(normalized(gInterleaved), normalized(gSeat0First));
+      assert.equal(serializeObservation(gSeat1First.observe(0)), serializeObservation(gSeat0First.observe(0)));
+      assert.equal(serializeObservation(gSeat1First.observe(1)), serializeObservation(gSeat0First.observe(1)));
+      assert.equal(serializeObservation(gInterleaved.observe(0)), serializeObservation(gSeat0First.observe(0)));
+      assert.equal(serializeObservation(gInterleaved.observe(1)), serializeObservation(gSeat0First.observe(1)));
+    }
   });
 });
 

@@ -317,24 +317,32 @@ export class GameAdapter implements AdapterGame {
 
     this.activeSteppers[seat] = undefined;
 
-    // A lower seat still owes an answer to the same simultaneous phase: hold this response.
-    if (this.lowerSeatPending(seat)) {
-      this.deferred[seat] = {record, response: outcome.response};
+    // Hold every answer to a simultaneous prompt until all seats that owe a non-optional
+    // answer have answered, then clear deferred[] and submit in canonical seat order.
+    this.deferred[seat] = {record, response: outcome.response};
+    if (this.otherSeatPending(seat)) {
       return;
     }
-    this.submit(seat, record, outcome.response);
-    for (let other = seat + 1; other < this.deferred.length; other++) {
-      const held = this.deferred[other];
-      if (held !== undefined && !this.lowerSeatPending(other as Seat)) {
-        this.deferred[other] = undefined;
-        this.submit(other as Seat, held.record, held.response);
+
+    const toSubmit: Array<{seat: Seat; submission: DeferredSubmission}> = [];
+    for (let i = 0; i < this.deferred.length; i++) {
+      const held = this.deferred[i];
+      if (held !== undefined) {
+        this.deferred[i] = undefined;
+        toSubmit.push({seat: i as Seat, submission: held});
       }
+    }
+    for (const item of toSubmit) {
+      this.submit(item.seat, item.submission.record, item.submission.response);
     }
   }
 
-  private lowerSeatPending(seat: Seat): boolean {
+  private otherSeatPending(seat: Seat): boolean {
     const game = this[ENGINE_TO_ADAPTER_SYMBOL];
-    for (let i = 0; i < seat; i++) {
+    for (let i = 0; i < game.players.length; i++) {
+      if (i === seat) {
+        continue;
+      }
       const waiting = game.players[i].getWaitingFor();
       if (waiting !== undefined && !waiting.optional && this.deferred[i] === undefined) {
         return true;
