@@ -442,6 +442,31 @@ describe('Slice 3b: Simultaneous submissions are applied in canonical seat order
     assert.equal(normalized(reversed), normalized(forward));
   });
 
+  it('keeps a held answer held when an earlier seat\'s submit fails during the flush', () => {
+    const game = createGame({seedKey: 'flush-failure-held', map: 'tharsis'});
+    const engine = _unsafeGetEngineGame(game);
+    const answerUntilHeld = (seat: 0 | 1) => {
+      while (game.pending().includes(seat)) {
+        const cur = game.choice(seat);
+        const doneIdx = cur.candidates.findIndex((c) => c.id === 'done');
+        game.choose(seat, cur.kind === 'multi_card' && doneIdx !== -1 ? doneIdx : 0);
+      }
+    };
+
+    // Seat 1 answers the simultaneous initial selection first: its answer is held.
+    answerUntilHeld(1);
+    assert.deepEqual(game.pending(), [0]);
+
+    // Seat 0's flush submit is rejected by the engine.
+    (engine.players[0] as unknown as {process: () => void}).process = () => {
+      throw new Error('forced rejection');
+    };
+    assert.throws(() => answerUntilHeld(0), AdapterBugError);
+
+    // Seat 1's answer was never submitted, but it must stay held: seat 1 is not asked again.
+    assert.ok(!game.pending().includes(1), `seat 1 re-offered after failed flush: pending=${JSON.stringify(game.pending())}`);
+  });
+
   it('yields byte-identical results, engine states, and observations across seat-0-first, seat-1-first, and interleaved arrival orders on all maps', () => {
     const {serializeObservation} = require('../src/index') as typeof import('../src/index');
     const normalized = (g: ReturnType<typeof createGame>) =>

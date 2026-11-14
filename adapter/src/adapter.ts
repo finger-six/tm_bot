@@ -318,22 +318,19 @@ export class GameAdapter implements AdapterGame {
     this.activeSteppers[seat] = undefined;
 
     // Hold every answer to a simultaneous prompt until all seats that owe a non-optional
-    // answer have answered, then clear deferred[] and submit in canonical seat order.
+    // answer have answered, then submit in canonical seat order. Each slot is released only
+    // as it is submitted, so a failed submit leaves later seats' answers held.
     this.deferred[seat] = {record, response: outcome.response};
     if (this.otherSeatPending(seat)) {
       return;
     }
 
-    const toSubmit: Array<{seat: Seat; submission: DeferredSubmission}> = [];
     for (let i = 0; i < this.deferred.length; i++) {
       const held = this.deferred[i];
       if (held !== undefined) {
         this.deferred[i] = undefined;
-        toSubmit.push({seat: i as Seat, submission: held});
+        this.submit(i as Seat, held.record, held.response);
       }
-    }
-    for (const item of toSubmit) {
-      this.submit(item.seat, item.submission.record, item.submission.response);
     }
   }
 
