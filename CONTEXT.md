@@ -24,6 +24,17 @@ Two-player Terraforming Mars with drafting and Prelude as the only expansion, pl
 A map whose rules are verified against the project's accepted fidelity bar, and so is eligible for training and evaluation games. Currently Tharsis, Elysium, Hellas, and Vastitas Borealis (Nova variant).
 _Avoid_: Available map, playable map.
 
+**Actor observation**:
+Everything an agent may use for one player's decision: public state, that player's own private cards, and that player's own history of seen and passed cards. Never the opponent's hand, deck order or RNG state.
+_Avoid_: State (ambiguous with the engine's authoritative state).
+
+**Decision**:
+One engine prompt waiting on a player, answered by one complete response, built from a sequence of atomic choices.
+_Avoid_: Move, turn (a turn contains several decisions).
+
+**Candidate**:
+One legal option for an atomic choice within a decision, enumerated by the adapter from the actor's own prompt.
+
 **Jev-inspired agent**:
 An independently trained local Terraforming Mars agent inspired by structured decisions and probability outputs; it is a comparison agent, not a reproduction of TypeSafe AI's proprietary Jev model.
 
