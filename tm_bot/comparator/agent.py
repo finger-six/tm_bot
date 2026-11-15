@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import random
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 import torch
@@ -161,3 +161,27 @@ class ComparatorAgent:
             seed=seed,
             version=resolved_version,
         )
+
+
+# Evaluation plays the trained stochastic policy. Greedy argmax play can loop
+# forever: two greedy comparators kept taking the same standard project with its
+# parameter maxed, never raised temperature, and every dev game hit the step cap.
+# Each seat's agent is reset with its seat seed, so evaluation stays reproducible.
+EVAL_ACTION_TEMPERATURE = 1.0
+
+
+def comparator_eval_factory(
+    model: ComparatorNetwork,
+    vocab: CardVocab,
+    *,
+    device: str | torch.device = "cpu",
+    version: str = "comparator-v1",
+) -> Callable[[], ComparatorAgent]:
+    """Fresh evaluation agent per game sharing `model`, sampling its policy."""
+    return lambda: ComparatorAgent(
+        model,
+        vocab,
+        device=device,
+        temperature=EVAL_ACTION_TEMPERATURE,
+        version=version,
+    )

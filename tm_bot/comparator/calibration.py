@@ -15,7 +15,7 @@ import torch
 from tm_bot.agents import B1Agent, load_card_data
 from tm_bot.agents.protocol import Agent
 from tm_bot.agents.runner import play_games
-from tm_bot.comparator.agent import ComparatorAgent
+from tm_bot.comparator.agent import ComparatorAgent, comparator_eval_factory
 from tm_bot.comparator.model import load_comparator_checkpoint
 from tm_bot.env.types import SUPPORTED_MAPS, ActorObservation, Choice
 from tm_bot.eval.pairing import build_paired_specs
@@ -334,19 +334,14 @@ def collect_dev_calibration(
     temperature = float(getattr(model, "temperature", 1.0))
     recorders: list[WinProbRecorder] = []
 
+    play = comparator_eval_factory(
+        model, vocab, device=device, version=f"dev-{Path(checkpoint).name}"
+    )
+
     def candidate_factory() -> Agent:
         recorder = WinProbRecorder()
         recorders.append(recorder)
-        return WinProbRecordingAgent(
-            ComparatorAgent(
-                model,
-                vocab,
-                device=device,
-                temperature=0.0,
-                version=f"dev-{Path(checkpoint).name}",
-            ),
-            recorder,
-        )
+        return WinProbRecordingAgent(play(), recorder)
 
     if opponent_checkpoint is None:
         card_data = load_card_data()
@@ -357,11 +352,10 @@ def collect_dev_calibration(
             opponent_checkpoint, map_location=device
         )
         opp_model.eval()
-        opponent_factory = lambda: ComparatorAgent(
+        opponent_factory = comparator_eval_factory(
             opp_model,
             opp_vocab,
             device=device,
-            temperature=0.0,
             version=f"dev-{Path(opponent_checkpoint).name}",
         )
         opponent_name = str(Path(opponent_checkpoint).name)

@@ -269,7 +269,7 @@ class SelfPlayRunner:
     @classmethod
     def _create_comparator(cls, config: RunConfig, *, device: str) -> SelfPlayRunner:
         """Build the independently designed comparator engine and PPO learner."""
-        from tm_bot.comparator.agent import ComparatorAgent
+        from tm_bot.comparator.agent import comparator_eval_factory
         from tm_bot.comparator.model import load_comparator_checkpoint
         from tm_bot.comparator.ppo import PPOLearner
         from tm_bot.comparator.selfplay import ComparatorSelfPlayEngine
@@ -307,11 +307,10 @@ class SelfPlayRunner:
                 checkpoint, map_location=device
             )
             cmp_model.eval()
-            return lambda: ComparatorAgent(
+            return comparator_eval_factory(
                 cmp_model,
                 cmp_vocab,
                 device=device,
-                temperature=0.0,
                 version=f"dev-{Path(checkpoint).name}",
             )
 
@@ -769,14 +768,15 @@ class SelfPlayRunner:
                     details={"elapsed_s": elapsed, "budget_s": self.config.wall_clock_budget_s},
                 )
 
-            if batch.samples or batch.ppo_samples:
-                if self.config.agent_kind == "comparator" and batch.ppo_samples is not None:
-                    self.buffer.extend(batch.ppo_samples)
-                elif batch.samples:
-                    self.buffer.extend(batch.samples)
+            # PPO is on-policy and trains only on this cycle's rollout, so comparator
+            # rollouts are never kept (or persisted) after their update.
+            is_comparator = self.config.agent_kind == "comparator"
+            if batch.samples and not is_comparator:
+                self.buffer.extend(batch.samples)
+            has_training_data = bool(batch.ppo_samples) if is_comparator else len(self.buffer) > 0
             learner_stats: LearnerStats | None = None
-            if self.learner is not None and len(self.buffer) > 0 and not self._stop.stopped:
-                if self.config.agent_kind == "comparator":
+            if self.learner is not None and has_training_data and not self._stop.stopped:
+                if is_comparator:
                     learner_stats = self.learner.train(  # type: ignore[call-arg]
                         self.buffer, samples=batch.ppo_samples
                     )

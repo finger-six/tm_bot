@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
 
 from tm_bot.agents.card_data import load_card_data
-from tm_bot.comparator.agent import ComparatorAgent
+from tm_bot.agents.protocol import GameRunResult
+from tm_bot.comparator.agent import ComparatorAgent, comparator_eval_factory
 from tm_bot.comparator.calibration import (
     calibration_metrics,
     fit_temperature,
@@ -30,11 +33,18 @@ from tm_bot.comparator.ppo import (
     compute_surrogate_loss,
 )
 from tm_bot.comparator.ppo import _policy_terms as ppo_policy_terms
+from tm_bot.comparator.selfplay import ComparatorSelfPlayEngine
+from tm_bot.env.types import GameResult
 from tm_bot.models.encode import collate_encoded_batch, encode_choice, encode_observation
 from tm_bot.models.network import TMModelConfig, TMNetwork
 from tm_bot.models.vocab import CardVocab
 from tm_bot.runs.buffer import normalize_policy_target
-from tm_bot.runs.config import RunConfig
+from tm_bot.runs.config import ResourceLimits, RunConfig
+from tm_bot.runs.deveval import DevResult
+from tm_bot.runs.learner import LearnerStats
+from tm_bot.runs.orchestrator import SelfPlayRunner
+from tm_bot.runs.recorder import GameRecorder
+from tm_bot.runs.selfplay import GameSummary, SelfPlayBatch
 from tm_bot.training.warmstart_builder import build_corp_choice
 
 _CARDS = load_card_data()
@@ -305,3 +315,177 @@ def test_agent_kind_is_validated() -> None:
         RunConfig(run_name="bad", agent_kind="other")
     assert RunConfig(run_name="main").agent_kind == "main"
     assert RunConfig(run_name="cmp", agent_kind="comparator").agent_kind == "comparator"
+
+
+def test_evaluation_comparator_plays_its_sampled_policy_reproducibly() -> None:
+    """Greedy argmax play can loop forever (two greedy comparators kept buying
+    Aquifer with oceans maxed and never raised temperature, so dev games hit the
+    step cap). Evaluation therefore plays the trained stochastic policy, seeded
+    per seat so the same seeds reproduce the same games."""
+    model = _tiny_comparator()
+    observation, choice = _obs_choice()
+    factory = comparator_eval_factory(model, _VOCAB, device="cpu", version="eval-test")
+
+    def picks(seed: int) -> list[int]:
+        agent = factory()
+        agent.reset(seed)
+        return [agent.act(observation, choice) for _ in range(40)]  # type: ignore[arg-type]
+
+    first = picks(7)
+    assert picks(7) == first
+    assert len(set(first)) > 1, "evaluation agent must sample, not take the argmax"
+    assert factory().version == "eval-test"
+
+
+class _RolloutEngine:
+    """Comparator self-play stand-in: every cycle yields a fresh PPO rollout."""
+
+    def __init__(self, model: ComparatorNetwork) -> None:
+        self.model = model
+        self.seed_cursor = 0
+        self.opponents = SimpleNamespace(pool=())
+
+    def set_opponent_pool(self, checkpoints) -> None:
+        self.opponents.pool = tuple(Path(p) for p in checkpoints)
+
+    def play_batch(self, num_games: int, *, stop_when=None) -> SelfPlayBatch:
+        games = []
+        for _ in range(num_games):
+            games.append(
+                GameSummary(
+                    seed_key=f"train-{self.seed_cursor:04d}",
+                    map_name="tharsis",
+                    ok=True,
+                    generations=12,
+                    decisions=120,
+                    scores=(60, 50),
+                    winner=0,
+                    tie=False,
+                )
+            )
+            self.seed_cursor += 1
+        return SelfPlayBatch(
+            games=games,
+            samples=[],
+            training_seats=[0] * num_games,
+            opponent_kinds=["latest"] * num_games,
+            decisions=120 * num_games,
+            ppo_samples=_samples(self.model),
+        )
+
+
+class _RecordingPPOLearner:
+    def __init__(self) -> None:
+        self.step = 0
+        self.rollout_sizes: list[int] = []
+
+    def train(self, buffer, *, updates=None, samples=None) -> LearnerStats:
+        assert samples is not None, "PPO must train on the fresh rollout"
+        self.step += 1
+        self.rollout_sizes.append(len(samples))
+        return LearnerStats(updates=1, policy_loss=1.0, value_loss=0.5, total_loss=1.5)
+
+
+def _dev_result(_checkpoint: Path, _opponent: Path | None) -> DevResult:
+    return DevResult(
+        games=8,
+        completed=8,
+        failures=0,
+        win_rate=0.5,
+        win_rate_ci_95=(0.3, 0.7),
+        mean_vp_margin=0.0,
+        report={},
+    )
+
+
+def test_comparator_run_trains_on_fresh_rollouts_and_keeps_none(tmp_path: Path) -> None:
+    """PPO is on-policy: old rollouts are never trained on again, so a run must not
+    hold them in memory or rewrite them into state.pt every cycle (it reached 1.1 GB)."""
+    config = RunConfig(
+        run_name="cmp-run",
+        output_root=tmp_path,
+        agent_kind="comparator",
+        workers=1,
+        games_per_cycle=2,
+        updates_per_cycle=1,
+        learner_batch_size=4,
+        checkpoint_interval_s=1e-6,
+        dev_games_per_opponent=8,
+        keep_last_checkpoints=2,
+        limits=ResourceLimits(disk_gb=50.0),
+    )
+    model = _tiny_comparator(seed=1)
+    model.temperature = 0.8  # loaded comparator checkpoints carry their calibration
+    learner = _RecordingPPOLearner()
+    runner = SelfPlayRunner(
+        config,
+        engine=_RolloutEngine(model),
+        learner=learner,
+        evaluator=_dev_result,
+        model=model,  # type: ignore[arg-type]
+        vocab=_VOCAB,
+    )
+    summary = runner.run(max_cycles=3)
+    assert summary.cycles == 3
+    assert learner.rollout_sizes == [8, 8, 8]
+    assert len(runner.buffer) == 0
+    state = torch.load(runner.manager.state_tensors_path, map_location="cpu", weights_only=False)
+    assert "buffer" not in state
+
+    # Resume restores the comparator weights from its own checkpoint format.
+    resumed_model = _tiny_comparator(seed=99)
+    resumed = SelfPlayRunner(
+        config,
+        engine=_RolloutEngine(resumed_model),
+        learner=_RecordingPPOLearner(),
+        evaluator=_dev_result,
+        model=resumed_model,  # type: ignore[arg-type]
+        vocab=_VOCAB,
+    )
+    resumed.run(max_cycles=3, resume=True)
+    for key, value in model.state_dict().items():
+        assert torch.equal(value, resumed_model.state_dict()[key]), key
+    assert resumed_model.temperature == pytest.approx(0.8)
+
+
+def test_assemble_batch_targets_follow_each_training_seats_outcome() -> None:
+    """Seat 0 wins both games; the learner sat in seat 0 (win) then seat 1 (loss).
+    Value targets are the seat's utility; GAE returns stay in win-probability space
+    and end exactly on the outcome (1 for the win, 0 for the loss)."""
+    config = RunConfig(run_name="cmp-assemble", agent_kind="comparator")
+    engine = ComparatorSelfPlayEngine(config, model=_tiny_comparator(), vocab=_VOCAB)
+    base_obs, choice = _obs_choice()
+    recorders = []
+    outcomes = []
+    for game, seat in enumerate((0, 1)):
+        recorder = GameRecorder(f"train-{game:04d}", "tharsis", capture_seat=seat)
+        observation = copy.deepcopy(base_obs)
+        observation["actor"] = seat  # type: ignore[index]
+        for step in range(3):
+            recorder.record(
+                observation, choice, step % len(choice.candidates), [0.5, 0.3, 0.2],
+                was_searched=False,
+            )
+        recorders.append(recorder)
+        outcomes.append(
+            GameRunResult(
+                seed_key=f"train-{game:04d}",
+                map="tharsis",
+                result=GameResult(scores=(70, 50), winner=0, tie=False, generations=12),
+                generations=12,
+                decisions=6,
+                agent_versions=(None, None),
+                ok=True,
+            )
+        )
+    batch = engine.assemble_batch(outcomes, recorders, [0, 1], ["latest", "latest"])
+    samples = batch.ppo_samples
+    assert samples is not None and len(samples) == 6
+    win, loss = samples[:3], samples[3:]
+    assert {s.seat for s in win} == {0} and {s.seat for s in loss} == {1}
+    assert all(s.value_target == 1.0 for s in win)
+    assert all(s.value_target == -1.0 for s in loss)
+    assert all(0.0 <= s.return_ <= 1.0 for s in samples)
+    assert win[-1].return_ == pytest.approx(1.0)
+    assert loss[-1].return_ == pytest.approx(0.0)
+    assert [s.action for s in win] == [0, 1, 2]
