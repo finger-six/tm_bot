@@ -1285,3 +1285,118 @@ def test_periodic_checkpoint_skips_a_model_that_did_not_train(tmp_path: Path) ->
     assert runner.steps == 0
     assert len(runner.manager.list_checkpoints()) == 1
     assert [r.step for r in runner.logger.checkpoints] == [0]
+
+
+class _ClockedEngine(_FakeEngine):
+    """Each self-play batch advances the shared fake clock by `batch_s`."""
+
+    def __init__(self, now: list[float], batch_s: float) -> None:
+        super().__init__()
+        self.now = now
+        self.batch_s = batch_s
+
+    def play_batch(self, num_games: int, *, stop_when=None) -> SelfPlayBatch:
+        self.now[0] += self.batch_s
+        return super().play_batch(num_games, stop_when=stop_when)
+
+
+def _clocked_dev(now: list[float], eval_s: float):
+    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+        now[0] += eval_s
+        return _fake_dev(candidate, opponent)
+
+    return evaluator
+
+
+def test_budget_and_checkpoint_interval_run_on_the_training_clock(tmp_path: Path) -> None:
+    # Self-play cycles take 100 s; every dev pairing takes 1,000 s of wall clock.
+    now = [0.0]
+    config = _run_config(
+        tmp_path,
+        "training-clock",
+        wall_clock_budget_s=550.0,
+        checkpoint_interval_s=200.0,
+        keep_last_checkpoints=10,
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_ClockedEngine(now, 100.0),
+        learner=_FakeLearner(),
+        evaluator=_clocked_dev(now, 1_000.0),
+        model=_tiny_model(seed=12),
+        vocab=_VOCAB,
+        clock=lambda: now[0],
+    )
+    summary = runner.run()
+    assert summary.stop.kind is StopKind.BUDGET
+    # Dev eval is off the clock: six 100 s cycles fit the 550 s training budget.
+    assert summary.cycles == 6
+    assert summary.training_s == pytest.approx(600.0)
+    checkpoints = runner.logger.checkpoints
+    # Checkpoints every 200 s of training time: after cycles 2, 4 and 6.
+    assert [c.cycle for c in checkpoints] == [2, 4, 6]
+    assert [c.training_s for c in checkpoints] == pytest.approx([200.0, 400.0, 600.0])
+    # The first checkpoint has no previous best, so it plays only the vs-B1 pairing.
+    assert summary.dev_eval_s == pytest.approx(1_000.0 + 2_000.0 + 2_000.0)
+    assert summary.elapsed_s == pytest.approx(summary.training_s + summary.dev_eval_s)
+    cycles = runner.logger.cycles
+    assert cycles[-1].training_s == pytest.approx(600.0)
+    assert cycles[-1].dev_eval_s == pytest.approx(3_000.0)
+    written = json.loads((config.run_dir / "run_summary.json").read_text(encoding="utf-8"))
+    assert written["training_s"] == pytest.approx(600.0)
+    assert written["dev_eval_s"] == pytest.approx(5_000.0)
+    monitor_summary = runner.logger.summary()
+    assert monitor_summary["training_s"] == pytest.approx(600.0)
+    assert monitor_summary["dev_eval_s"] == pytest.approx(5_000.0)
+
+
+def test_entropy_window_runs_on_the_training_clock(tmp_path: Path) -> None:
+    now = [0.0]
+    config = _run_config(
+        tmp_path,
+        "entropy-clock",
+        checkpoint_interval_s=100.0,
+        entropy_collapse_window_s=250.0,
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_ClockedEngine(now, 100.0),
+        learner=_FakeLearner(),
+        evaluator=_clocked_dev(now, 1_000.0),
+        model=_tiny_model(seed=13),
+        vocab=_VOCAB,
+        clock=lambda: now[0],
+    )
+    runner.run(max_cycles=2)
+    # Two 100 s cycles: entropy was last checked at 200 s of training time, inside the
+    # 250 s window, although the wall clock is past 1,000 s after the first dev eval.
+    assert runner.stopping.entropy_checked_at_s == pytest.approx(200.0)
+
+
+def test_resume_keeps_the_training_and_dev_eval_clocks(tmp_path: Path) -> None:
+    now = [0.0]
+    config = _run_config(tmp_path, "clock-resume", checkpoint_interval_s=100.0)
+
+    def make_runner() -> SelfPlayRunner:
+        return SelfPlayRunner(
+            config,
+            engine=_ClockedEngine(now, 100.0),
+            learner=_FakeLearner(),
+            evaluator=_clocked_dev(now, 1_000.0),
+            model=_tiny_model(seed=14),
+            vocab=_VOCAB,
+            clock=lambda: now[0],
+        )
+
+    first = make_runner()
+    first.run(max_cycles=1)
+    assert first.training_s() == pytest.approx(100.0)
+    assert first.dev_eval_s == pytest.approx(1_000.0)
+    now[0] += 50_000.0  # downtime between sessions is on neither clock
+    resumed = make_runner()
+    resumed.run(max_cycles=2, resume=True)
+    assert resumed.training_s() == pytest.approx(200.0)
+    assert resumed.dev_eval_s == pytest.approx(3_000.0)
+    state = json.loads((config.run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["dev_eval_s"] == pytest.approx(3_000.0)
+    assert state["training_s"] == pytest.approx(200.0)

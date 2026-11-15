@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
         default="main",
         help="main = AlphaZero search agent; comparator = direct PPO scorer.",
     )
-    parser.add_argument("--budget-hours", type=float, default=24.0, help="Wall-clock budget.")
+    parser.add_argument("--budget-hours", type=float, default=24.0, help="Training-time budget (wall clock minus in-run dev eval).")
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--sims", type=int, default=64, help="Simulations per searched decision.")

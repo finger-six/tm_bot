@@ -123,7 +123,19 @@ test in [`tests/test_runs.py`](../tests/test_runs.py):
 | `plateau` | no new best for 12 checkpoints | stop |
 | `max_steps` | optional learner step cap | stop |
 | `resource_limit` | RAM/VRAM ceiling or disk cap hit | stop, keep state for resume |
-| `budget` | wall-clock budget reached | stop; also polled inside the self-play batch loop, which returns partial games as `DeadlineReached` and excludes them from training |
+| `budget` | training-time budget reached (see [Training clock](#training-clock)) | stop; also polled inside the self-play batch loop, which returns partial games as `DeadlineReached` and excludes them from training |
+
+### Training clock
+
+The budget (`--budget-hours`, `wall_clock_budget_s`), the checkpoint interval
+and the 2 h entropy-collapse window run on the **training clock**: wall clock
+minus the time spent in in-run dev evaluation (#26 decision). Self-play and
+learner time count; dev games do not, so the main agent and the comparator get
+the same training budget even though their dev evaluations cost very different
+wall time. Cycle and checkpoint records, `monitor/summary.json`,
+`run_summary.json` and `state.json` report all three clocks: `elapsed_s` (total
+wall clock), `training_s` and `dev_eval_s`. The summary also gives throughput per
+wall hour and per training hour.
 
 A regression case is `regression/<seed>__<map>__<error>.json` containing the
 seed key, map, error, decision count, and the full ordered action history.
@@ -153,7 +165,7 @@ for information and never compared to the network probe.
 ## Resume
 
 `state.json` stores the cycle, learner step, self-play game count, best dev win
-rate, elapsed wall clock, seed cursor, opponent pool, determinism-check counter,
+rate, elapsed wall clock, training time and dev-eval time, seed cursor, opponent pool, determinism-check counter,
 entropy probe baseline, and stopping-rule counters. `state.pt` stores the
 model/optimizer and the replay buffer (plus the fixed entropy probe). `--resume`
 restores the model from the last good checkpoint (falling back to the newest

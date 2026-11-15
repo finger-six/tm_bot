@@ -81,6 +81,10 @@ class CycleMetrics:
     determinism_ok: bool | None = None
     throughput_games_per_hour: float | None = None
     stop_reason: str | None = None
+    # `elapsed_s` is total wall clock; the budget runs on `training_s`, which
+    # excludes the `dev_eval_s` spent on in-run dev evaluation (#26).
+    training_s: float | None = None
+    dev_eval_s: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -110,6 +114,8 @@ class CheckpointMetrics:
     dev_mean_vp_margin_vs_b1: float | None
     new_best: bool
     best_dev_win_rate_vs_b1: float | None
+    training_s: float | None = None
+    dev_eval_s: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -317,6 +323,13 @@ class MonitorLogger:
         throughput = (
             total_selfplay_games / (elapsed / 3600.0) if elapsed > 0.0 else None
         )
+        records = [*self._cycles, *self._checkpoints]
+        training = max(
+            (float(r.training_s) for r in records if r.training_s is not None), default=None
+        )
+        dev_eval = max(
+            (float(r.dev_eval_s) for r in records if r.dev_eval_s is not None), default=None
+        )
         shape_flag_count = sum(int(c.shape_flag_count) for c in self._cycles)
         shape_examples = [flag for c in self._cycles for flag in c.shape_flags][:20]
         determ = [r.to_dict() for r in self._determinism]
@@ -333,7 +346,12 @@ class MonitorLogger:
             "checkpoints": len(self._checkpoints),
             "selfplay_games": total_selfplay_games,
             "elapsed_s": elapsed,
+            "training_s": training,
+            "dev_eval_s": dev_eval,
             "throughput_games_per_hour": throughput,
+            "throughput_games_per_training_hour": (
+                total_selfplay_games / (training / 3600.0) if training else None
+            ),
             "decisions": sum(int(c.decisions) for c in self._cycles),
             "searched_decisions": sum(int(c.searched_decisions) for c in self._cycles),
             "rejections": sum(int(c.rejections) for c in self._cycles),

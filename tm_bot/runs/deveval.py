@@ -167,6 +167,8 @@ def build_checkpoint_metrics(
     vs_previous_best: DevResult | None,
     new_best: bool,
     best_dev_win_rate: float | None,
+    training_s: float | None = None,
+    dev_eval_s: float | None = None,
 ) -> CheckpointMetrics:
     return CheckpointMetrics(
         cycle=cycle,
@@ -186,4 +188,6 @@ def build_checkpoint_metrics(
         dev_mean_vp_margin_vs_b1=vs_b1.mean_vp_margin,
         new_best=bool(new_best),
         best_dev_win_rate_vs_b1=best_dev_win_rate,
+        training_s=None if training_s is None else float(training_s),
+        dev_eval_s=None if dev_eval_s is None else float(dev_eval_s),
     )

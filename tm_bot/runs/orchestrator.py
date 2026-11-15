@@ -93,6 +93,8 @@ class RunSummary:
     selfplay_games: int
     steps: int
     elapsed_s: float
+    training_s: float
+    dev_eval_s: float
     best_dev_win_rate: float | None
     best_checkpoint: Path | None
     last_checkpoint: Path | None
@@ -108,6 +110,8 @@ class RunSummary:
             "selfplay_games": self.selfplay_games,
             "steps": self.steps,
             "elapsed_s": self.elapsed_s,
+            "training_s": self.training_s,
+            "dev_eval_s": self.dev_eval_s,
             "best_dev_win_rate": self.best_dev_win_rate,
             "best_checkpoint": str(self.best_checkpoint) if self.best_checkpoint else None,
             "last_checkpoint": str(self.last_checkpoint) if self.last_checkpoint else None,
@@ -185,9 +189,11 @@ class SelfPlayRunner:
         self.steps = 0
         self.best_dev_win_rate: float | None = None
         self.last_checkpoint: Path | None = None
-        self.last_checkpoint_elapsed_s = 0.0
+        self.last_checkpoint_training_s = 0.0
         self.last_checkpoint_step: int | None = None
         self._elapsed_base = 0.0
+        # Wall clock spent in in-run dev evaluation; it is off the training clock (#26).
+        self.dev_eval_s = 0.0
         self._t_start = self.clock()
         self._determinism_checks_done = 0
         self._stop = StopDecision(stopped=False)
@@ -347,10 +353,18 @@ class SelfPlayRunner:
 
     # --- time ----------------------------------------------------------
     def elapsed_s(self) -> float:
+        """Total wall clock of the run, including in-run dev evaluation."""
         return self._elapsed_base + (self.clock() - self._t_start)
 
+    def training_s(self) -> float:
+        """Training clock: wall clock minus in-run dev evaluation (#26).
+
+        The budget, checkpoint interval, and entropy-collapse window run on it.
+        """
+        return self.elapsed_s() - self.dev_eval_s
+
     def _deadline_reached(self) -> bool:
-        return self.elapsed_s() >= self.config.wall_clock_budget_s
+        return self.training_s() >= self.config.wall_clock_budget_s
 
     # --- resume --------------------------------------------------------
     def _restore(self) -> bool:
@@ -377,7 +391,8 @@ class SelfPlayRunner:
         best = state.get("best_dev_win_rate")
         self.best_dev_win_rate = None if best is None else float(best)
         self._elapsed_base = float(state.get("elapsed_s", 0.0))
-        self.last_checkpoint_elapsed_s = float(state.get("last_checkpoint_elapsed_s", 0.0))
+        self.dev_eval_s = float(state.get("dev_eval_s", 0.0))
+        self.last_checkpoint_training_s = float(state.get("last_checkpoint_training_s", 0.0))
         step = state.get("last_checkpoint_step")
         self.last_checkpoint_step = None if step is None else int(step)
         self.last_checkpoint = checkpoint
@@ -393,7 +408,7 @@ class SelfPlayRunner:
         entropy_baseline = state.get("entropy_baseline")
         if entropy_baseline is not None:
             self.stopping.set_entropy_baseline(
-                float(entropy_baseline), elapsed_s=self._elapsed_base
+                float(entropy_baseline), elapsed_s=self._elapsed_base - self.dev_eval_s
             )
         stopping = state.get("stopping") or {}
         if stopping.get("best_dev_win_rate") is not None:
@@ -413,7 +428,9 @@ class SelfPlayRunner:
             "selfplay_games": self.selfplay_games,
             "best_dev_win_rate": self.best_dev_win_rate,
             "elapsed_s": self.elapsed_s(),
-            "last_checkpoint_elapsed_s": self.last_checkpoint_elapsed_s,
+            "training_s": self.training_s(),
+            "dev_eval_s": self.dev_eval_s,
+            "last_checkpoint_training_s": self.last_checkpoint_training_s,
             "last_checkpoint_step": self.last_checkpoint_step,
             "last_checkpoint": (
                 _rel(self.last_checkpoint, self.manager.run_dir)
@@ -461,7 +478,7 @@ class SelfPlayRunner:
             )
             if self.stopping.entropy_baseline is None and probe_entropy is not None:
                 self.stopping.set_entropy_baseline(
-                    probe_entropy, elapsed_s=self.elapsed_s()
+                    probe_entropy, elapsed_s=self.training_s()
                 )
         return calibration, probe_entropy
 
@@ -503,9 +520,12 @@ class SelfPlayRunner:
         rejections = sum(
             1 for g in games if not g.ok and g.error_type == "AdapterBugError"
         )
+        wall = self.elapsed_s()
         record = CycleMetrics(
             cycle=self.cycle,
-            elapsed_s=float(elapsed),
+            elapsed_s=float(wall),
+            training_s=float(elapsed),
+            dev_eval_s=float(self.dev_eval_s),
             wall_clock_s=float(cycle_wall_s),
             selfplay_games=len(games),
             total_selfplay_games=self.selfplay_games,
@@ -550,7 +570,7 @@ class SelfPlayRunner:
             determinism_checked=determinism is not None,
             determinism_ok=None if determinism is None else determinism.ok,
             throughput_games_per_hour=(
-                self.selfplay_games / (elapsed / 3600.0) if elapsed > 0.0 else None
+                self.selfplay_games / (wall / 3600.0) if wall > 0.0 else None
             ),
             stop_reason=(self._stop.kind.value if self._stop.stopped else None),
         )
@@ -643,18 +663,20 @@ class SelfPlayRunner:
                 details={"elapsed_s": elapsed},
             )
             return
-        self.last_checkpoint_elapsed_s = elapsed
+        self.last_checkpoint_training_s = elapsed
         self.last_checkpoint_step = self.steps
         # Make the new checkpoint resumable before spending time on dev games.
         self._save_state()
 
         if self.evaluator is not None:
+            t_eval = self.clock()
             vs_b1 = self.evaluator(self.last_checkpoint, None)
             vs_best = (
                 self.evaluator(self.last_checkpoint, previous_best)
                 if previous_best is not None
                 else None
             )
+            self.dev_eval_s += self.clock() - t_eval
             win_rate = vs_b1.win_rate
             new_best = is_new_best(
                 win_rate,
@@ -686,7 +708,7 @@ class SelfPlayRunner:
                 self.best_dev_win_rate = win_rate
             record = build_checkpoint_metrics(
                 cycle=self.cycle,
-                elapsed_s=elapsed,
+                elapsed_s=self.elapsed_s(),
                 step=self.steps,
                 games=self.selfplay_games,
                 checkpoint=self.last_checkpoint,
@@ -694,6 +716,8 @@ class SelfPlayRunner:
                 vs_previous_best=vs_best,
                 new_best=bool(new_best),
                 best_dev_win_rate=self.best_dev_win_rate,
+                training_s=elapsed,
+                dev_eval_s=self.dev_eval_s,
             )
             self.logger.log_checkpoint(record)
             decision = self.stopping.observe_checkpoint(record)
@@ -737,7 +761,7 @@ class SelfPlayRunner:
                 setter(self.manager.list_checkpoints()[-self.config.opponent_pool_size :])
 
         while True:
-            elapsed = self.elapsed_s()
+            elapsed = self.training_s()
             budget = self.stopping.check_budget(elapsed, self.config.wall_clock_budget_s)
             if budget.stopped:
                 self._stop = budget
@@ -758,7 +782,7 @@ class SelfPlayRunner:
                 batch.opponent_kinds = [batch.opponent_kinds[i] for i in keep]
             self.cycle += 1
             self.selfplay_games += len(batch.games)
-            elapsed = self.elapsed_s()
+            elapsed = self.training_s()
 
             calibration, probe_entropy = self._measure_pre_update(batch)
             self._handle_failures(batch, elapsed)
@@ -777,7 +801,7 @@ class SelfPlayRunner:
                 self._stop = StopDecision(
                     stopped=True,
                     kind=StopKind.BUDGET,
-                    reason="wall-clock deadline reached inside the self-play batch",
+                    reason="training-time deadline reached inside the self-play batch",
                     details={"elapsed_s": elapsed, "budget_s": self.config.wall_clock_budget_s},
                 )
 
@@ -866,7 +890,7 @@ class SelfPlayRunner:
                 and (self.last_checkpoint is None or self.last_checkpoint_step != self.steps)
                 and (
                     (self._stop.stopped and self._stop.kind not in _HARD_STOPS)
-                    or elapsed - self.last_checkpoint_elapsed_s
+                    or elapsed - self.last_checkpoint_training_s
                     >= self.config.checkpoint_interval_s
                     or (max_cycles is not None and self.cycle >= max_cycles)
                 )
@@ -880,7 +904,7 @@ class SelfPlayRunner:
         return self._finalize()
 
     def _finalize(self) -> RunSummary:
-        elapsed = self.elapsed_s()
+        elapsed = self.training_s()
         hard_stop = self._stop.stopped and self._stop.kind in _HARD_STOPS
         # The last checkpoint already holds the model when no update ran since it.
         unchanged = self.last_checkpoint is not None and self.last_checkpoint_step == self.steps
@@ -942,7 +966,9 @@ class SelfPlayRunner:
             cycles=self.cycle,
             selfplay_games=self.selfplay_games,
             steps=self.steps,
-            elapsed_s=elapsed,
+            elapsed_s=self.elapsed_s(),
+            training_s=self.training_s(),
+            dev_eval_s=self.dev_eval_s,
             best_dev_win_rate=self.best_dev_win_rate,
             best_checkpoint=self.manager.best_checkpoint(),
             last_checkpoint=self.last_checkpoint,

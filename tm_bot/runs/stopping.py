@@ -266,7 +266,7 @@ class StoppingMonitor:
         if elapsed_s >= budget_s:
             return _stop(
                 StopKind.BUDGET,
-                f"wall-clock budget exhausted ({elapsed_s:.1f}s >= {budget_s:.1f}s)",
+                f"training-time budget exhausted ({elapsed_s:.1f}s >= {budget_s:.1f}s)",
                 elapsed_s=float(elapsed_s),
                 budget_s=float(budget_s),
             )

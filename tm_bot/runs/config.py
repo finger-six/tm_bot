@@ -35,7 +35,8 @@ class ResourceLimits:
 class RunConfig:
     """Configuration for one self-play run.
 
-    Defaults match the #10 budget decision: 16 workers, 24 h wall clock, K = 4
+    Defaults match the #10 budget decision: 16 workers, 24 h of training time
+    (`wall_clock_budget_s`: wall clock minus in-run dev evaluation, #26), K = 4
     worlds, 64 simulations per searched decision, a 200k-decision replay buffer,
     30-minute checkpoints evaluated on 100 `dev-*` games against B1 and 100
     against the previous best.
