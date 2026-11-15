@@ -1217,3 +1217,46 @@ def test_orchestrator_deadline_stop(tmp_path: Path) -> None:
     assert summary.stop.kind is StopKind.BUDGET
     assert summary.selfplay_games == 0
     assert runner.logger.cycles[-1].failures == 0
+
+
+def test_run_without_dev_eval_does_not_duplicate_the_final_checkpoint(tmp_path: Path) -> None:
+    config = _run_config(tmp_path, "no-dup-no-eval", dev_eval_enabled=False)
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=None,
+        model=_tiny_model(seed=8),
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=2)
+    steps = [
+        torch.load(p / "checkpoint.pt", map_location="cpu", weights_only=False)["metadata"]["step"]
+        for p in runner.manager.list_checkpoints()
+    ]
+    assert steps == sorted(set(steps))
+
+
+def test_first_checkpoint_without_previous_best_logs_no_previous_best_rate(
+    tmp_path: Path,
+) -> None:
+    calls: list[Path | None] = []
+
+    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+        calls.append(opponent)
+        return _fake_dev(candidate, opponent)
+
+    config = _run_config(tmp_path, "no-prev-best")
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=evaluator,
+        model=_tiny_model(seed=9),
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=1)
+    first = runner.logger.checkpoints[0]
+    assert calls[0] is None
+    assert first.dev_win_rate_vs_previous_best is None
+    assert first.dev_win_rate_vs_previous_best_ci_95 is None

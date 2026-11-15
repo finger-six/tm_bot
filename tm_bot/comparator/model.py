@@ -10,7 +10,6 @@ an MLP conditioned on the pooled observation and the choice context.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields
-import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -380,19 +379,3 @@ def comparator_checkpoint_architecture(path: str | Path) -> str:
     ckpt_path = target / "checkpoint.pt" if target.is_dir() else target
     payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     return str(payload.get("config", {}).get("architecture", ""))
-
-
-def parameter_count_report(model: ComparatorNetwork) -> dict[str, Any]:
-    """Small helper used by docs/tests to report model size."""
-    return {
-        "parameter_count": model.count_parameters(),
-        "trainable_parameter_count": model.count_parameters(trainable_only=True),
-        "config": model.config.to_dict(),
-    }
-
-
-def write_parameter_config(model: ComparatorNetwork, path: str | Path) -> Path:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(parameter_count_report(model), indent=2), encoding="utf-8")
-    return target

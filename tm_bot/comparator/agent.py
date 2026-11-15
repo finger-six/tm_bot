@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import random
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
 import numpy as np
 import torch
@@ -84,31 +84,6 @@ class ComparatorAgent:
         self._last_predicted_logit = logit
         win_prob = float(torch.sigmoid(torch.tensor(logit / self.calibration_temperature)).item())
         return probs, win_prob
-
-    @torch.inference_mode()
-    def predict_batch(
-        self,
-        observations: Sequence[ActorObservation],
-        choices: Sequence[Choice],
-        *,
-        compute_value: bool = True,
-    ) -> tuple[list[np.ndarray], np.ndarray]:
-        """Batched inference returning `(list_of_prob_arrays, calibrated_win_probs)`."""
-        enc_obs = [encode_observation(o, self.vocab) for o in observations]
-        enc_ch = [encode_choice(c, o, self.vocab) for o, c in zip(observations, choices)]
-        batch = collate_encoded_batch(enc_obs, enc_ch)
-        tensors = {k: v.to(self.device) for k, v in batch.items()}
-        out = self.model(tensors, compute_policy=True, compute_value=compute_value)
-        probs_tensor = out["policy_probs"].detach().cpu().numpy()
-        if compute_value:
-            logits = out["value_logit"].detach().cpu().numpy()
-            values = 1.0 / (1.0 + np.exp(-logits / self.calibration_temperature))
-        else:
-            values = np.zeros((len(observations),), dtype=np.float32)
-        probs_list = [
-            probs_tensor[i, : len(c.candidates)].copy() for i, c in enumerate(choices)
-        ]
-        return probs_list, values
 
     def act(self, observation: ActorObservation, choice: Choice) -> int:
         n = len(choice.candidates)

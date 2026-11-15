@@ -159,6 +159,12 @@ class RunConfig:
             )
         if self.ppo_gamma <= 0.0:
             raise ValueError(f"ppo_gamma must be > 0, got {self.ppo_gamma}")
+        if self.agent_kind == "comparator" and self.action_temperature != 1.0:
+            # PPO recomputes behaviour log-probs at temperature 1 (on-policy).
+            raise ValueError(
+                "comparator runs require action_temperature == 1.0, got "
+                f"{self.action_temperature}"
+            )
         probs = (
             self.opponent_latest_prob,
             self.opponent_pool_prob,

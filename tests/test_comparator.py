@@ -315,6 +315,13 @@ def test_temperature_scaling_and_calibration_report(tmp_path: Path) -> None:
         assert (tmp_path / name).exists()
 
 
+def test_comparator_requires_on_policy_action_temperature() -> None:
+    # PPO old log-probs are recomputed at temperature 1, so the behaviour policy must be T = 1.
+    with pytest.raises(ValueError, match="action_temperature"):
+        RunConfig(run_name="cmp", agent_kind="comparator", action_temperature=0.5)
+    assert RunConfig(run_name="main", action_temperature=0.5).action_temperature == 0.5
+
+
 def test_agent_kind_is_validated() -> None:
     with pytest.raises(ValueError, match="agent_kind"):
         RunConfig(run_name="bad", agent_kind="other")

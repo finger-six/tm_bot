@@ -164,7 +164,7 @@ def build_checkpoint_metrics(
     games: int,
     checkpoint: Path,
     vs_b1: DevResult,
-    vs_previous_best: DevResult,
+    vs_previous_best: DevResult | None,
     new_best: bool,
     best_dev_win_rate: float | None,
 ) -> CheckpointMetrics:
@@ -177,8 +177,12 @@ def build_checkpoint_metrics(
         dev_games=int(vs_b1.games),
         dev_win_rate_vs_b1=vs_b1.win_rate,
         dev_win_rate_vs_b1_ci_95=vs_b1.win_rate_ci_95,
-        dev_win_rate_vs_previous_best=vs_previous_best.win_rate,
-        dev_win_rate_vs_previous_best_ci_95=vs_previous_best.win_rate_ci_95,
+        dev_win_rate_vs_previous_best=(
+            None if vs_previous_best is None else vs_previous_best.win_rate
+        ),
+        dev_win_rate_vs_previous_best_ci_95=(
+            None if vs_previous_best is None else vs_previous_best.win_rate_ci_95
+        ),
         dev_mean_vp_margin_vs_b1=vs_b1.mean_vp_margin,
         new_best=bool(new_best),
         best_dev_win_rate_vs_b1=best_dev_win_rate,

@@ -653,13 +653,13 @@ class SelfPlayRunner:
             vs_best = (
                 self.evaluator(self.last_checkpoint, previous_best)
                 if previous_best is not None
-                else vs_b1
+                else None
             )
             win_rate = vs_b1.win_rate
             new_best = is_new_best(
                 win_rate,
                 self.best_dev_win_rate,
-                vs_best.win_rate_ci_95 if previous_best is not None else None,
+                None if vs_best is None else vs_best.win_rate_ci_95,
             )
             if new_best:
                 try:
@@ -880,10 +880,12 @@ class SelfPlayRunner:
     def _finalize(self) -> RunSummary:
         elapsed = self.elapsed_s()
         hard_stop = self._stop.stopped and self._stop.kind in _HARD_STOPS
+        # The last checkpoint already holds the model when no update ran since it.
+        unchanged = self.last_checkpoint is not None and self.last_checkpoint_step == self.steps
         if self.model is not None and self.vocab is not None and hard_stop:
             # A broken run must not spend more compute on dev games; save the
             # rolled-back state so the run can be resumed after the bug is fixed.
-            if self._stop.kind != StopKind.RESOURCE_LIMIT:
+            if self._stop.kind != StopKind.RESOURCE_LIMIT and not unchanged:
                 try:
                     self.last_checkpoint = self.manager.save(
                         step=self.steps,
@@ -896,6 +898,7 @@ class SelfPlayRunner:
                             "temperature": getattr(self.model, "temperature", None),
                         },
                     )
+                    self.last_checkpoint_step = self.steps
                 except RunResourceError:
                     self._stop = StopDecision(
                         stopped=True,
@@ -907,10 +910,9 @@ class SelfPlayRunner:
                         details=self._stop.details,
                     )
         elif self.model is not None and self.vocab is not None and self.evaluator is not None:
-            # Checkpoint the final model unless the last checkpoint already holds it.
-            if self.last_checkpoint is None or self.last_checkpoint_step != self.steps:
+            if not unchanged:
                 self._checkpoint_and_evaluate(elapsed)
-        elif self.model is not None and self.vocab is not None:
+        elif self.model is not None and self.vocab is not None and not unchanged:
             try:
                 self.last_checkpoint = self.manager.save(
                     step=self.steps,
@@ -922,6 +924,7 @@ class SelfPlayRunner:
                         "temperature": getattr(self.model, "temperature", None),
                     },
                 )
+                self.last_checkpoint_step = self.steps
             except RunResourceError as exc:
                 self._stop = StopDecision(
                     stopped=True,

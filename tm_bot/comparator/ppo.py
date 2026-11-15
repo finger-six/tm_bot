@@ -65,21 +65,6 @@ class PPOBuffer:
         for sample in samples:
             self.add(sample)
 
-    def sample_batch(
-        self,
-        batch_size: int,
-        *,
-        rng: np.random.Generator | None = None,
-    ) -> list[PPOSample]:
-        if batch_size < 1:
-            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
-        if not self._items:
-            raise ValueError("cannot sample from an empty PPO buffer")
-        generator = rng or np.random.default_rng(0)
-        items = list(self._items)
-        indices = generator.integers(0, len(items), size=batch_size)
-        return [items[int(i)] for i in indices]
-
     def state_dict(self) -> dict[str, list]:
         return {
             "observation": [s.observation for s in self._items],
