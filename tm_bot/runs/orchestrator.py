@@ -186,6 +186,7 @@ class SelfPlayRunner:
         self.best_dev_win_rate: float | None = None
         self.last_checkpoint: Path | None = None
         self.last_checkpoint_elapsed_s = 0.0
+        self.last_checkpoint_step: int | None = None
         self._elapsed_base = 0.0
         self._t_start = self.clock()
         self._determinism_checks_done = 0
@@ -377,6 +378,8 @@ class SelfPlayRunner:
         self.best_dev_win_rate = None if best is None else float(best)
         self._elapsed_base = float(state.get("elapsed_s", 0.0))
         self.last_checkpoint_elapsed_s = float(state.get("last_checkpoint_elapsed_s", 0.0))
+        step = state.get("last_checkpoint_step")
+        self.last_checkpoint_step = None if step is None else int(step)
         self.last_checkpoint = checkpoint
         if self.learner is not None and hasattr(self.learner, "step"):
             self.learner.step = self.steps  # type: ignore[attr-defined]
@@ -411,6 +414,7 @@ class SelfPlayRunner:
             "best_dev_win_rate": self.best_dev_win_rate,
             "elapsed_s": self.elapsed_s(),
             "last_checkpoint_elapsed_s": self.last_checkpoint_elapsed_s,
+            "last_checkpoint_step": self.last_checkpoint_step,
             "last_checkpoint": (
                 _rel(self.last_checkpoint, self.manager.run_dir)
                 if self.last_checkpoint is not None
@@ -640,6 +644,7 @@ class SelfPlayRunner:
             )
             return
         self.last_checkpoint_elapsed_s = elapsed
+        self.last_checkpoint_step = self.steps
         # Make the new checkpoint resumable before spending time on dev games.
         self._save_state()
 
@@ -902,7 +907,8 @@ class SelfPlayRunner:
                         details=self._stop.details,
                     )
         elif self.model is not None and self.vocab is not None and self.evaluator is not None:
-            if elapsed - self.last_checkpoint_elapsed_s > 60.0 or self.last_checkpoint is None:
+            # Checkpoint the final model unless the last checkpoint already holds it.
+            if self.last_checkpoint is None or self.last_checkpoint_step != self.steps:
                 self._checkpoint_and_evaluate(elapsed)
         elif self.model is not None and self.vocab is not None:
             try:

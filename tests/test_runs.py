@@ -850,6 +850,26 @@ def test_tied_vs_b1_checkpoint_that_beats_previous_best_becomes_best(tmp_path: P
     assert torch.load(best, map_location="cpu", weights_only=False)["metadata"]["cycle"] == records[-1].cycle
 
 
+def test_soft_stop_does_not_recheckpoint_an_unchanged_model(tmp_path: Path) -> None:
+    # Each clock read advances 100 s, so the dev eval of the last periodic
+    # checkpoint ends > 60 s after it started; no training happens afterwards.
+    ticks = iter(float(i) * 100.0 for i in range(10_000))
+    config = _run_config(tmp_path, "no-dup-final", checkpoint_interval_s=1e9)
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=_fake_dev,
+        model=_tiny_model(seed=7),
+        vocab=_VOCAB,
+        clock=lambda: next(ticks),
+    )
+    runner.run(max_cycles=2)
+    steps = [r.step for r in runner.logger.checkpoints]
+    assert steps == sorted(set(steps))
+    assert len(runner.manager.list_checkpoints()) == len(steps)
+
+
 def test_first_checkpoint_uses_recorded_warmstart_as_previous_best(tmp_path: Path) -> None:
     warmstart = str(tmp_path / "warmstart")
     calls: list[tuple[Path, Path | None]] = []
