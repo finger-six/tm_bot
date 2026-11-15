@@ -1,0 +1,190 @@
+"""Run configuration, resource limits, and search hyperparameters for self-play."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field, fields
+import json
+from pathlib import Path
+from typing import Any, Mapping
+
+from tm_bot.agents.runner import DEFAULT_MAX_DECISIONS
+from tm_bot.env.types import SUPPORTED_MAPS
+from tm_bot.search.config import SearchConfig
+
+DEFAULT_RUNS_DIR = Path("runs")
+WARMSTART_CHECKPOINT_ENV = "TM_SEARCH_CHECKPOINT"
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceLimits:
+    """Per-run resource ceilings from the local experiment budget (#10)."""
+
+    workers_ram_gb: float = 6.0
+    learner_ram_gb: float = 10.0
+    vram_gb: float = 12.0
+    disk_gb: float = 50.0
+
+    def __post_init__(self) -> None:
+        for f in fields(self):
+            value = getattr(self, f.name)
+            if value <= 0.0:
+                raise ValueError(f"{f.name} must be > 0, got {value}")
+
+
+@dataclass(frozen=True, slots=True)
+class RunConfig:
+    """Configuration for one self-play run.
+
+    Defaults match the #10 budget decision: 16 workers, 24 h wall clock, K = 4
+    worlds, 64 simulations per searched decision, a 200k-decision replay buffer,
+    30-minute checkpoints evaluated on 100 `dev-*` games against B1 and 100
+    against the previous best.
+    """
+
+    run_name: str
+    output_root: Path = DEFAULT_RUNS_DIR
+    workers: int = 16
+    batch_size: int = 32
+    wall_clock_budget_s: float = 24.0 * 3600.0
+    max_decisions_per_game: int = DEFAULT_MAX_DECISIONS
+
+    # Search hyperparameters (shared by self-play and dev evaluation).
+    num_simulations: int = 64
+    num_worlds: int = 4
+    c_puct: float = 1.5
+    temperature: float = 0.0
+    action_temperature: float = 1.0
+    wave_size: int = 4
+
+    # Seed namespaces. Training never leaves `train-*`; checkpoint selection is
+    # `dev-*`; `eval-*` is never touched by a run.
+    train_seed_start: int = 0
+    dev_seed_start: int = 0
+    dev_games_per_opponent: int = 100
+
+    # Self-play and learning.
+    games_per_cycle: int = 32
+    updates_per_cycle: int = 16
+    learner_batch_size: int = 256
+    buffer_capacity: int = 200_000
+    learning_rate: float = 5e-4
+    weight_decay: float = 2e-4
+    grad_clip: float = 1.0
+    w_policy: float = 1.0
+    w_value: float = 1.0
+    use_amp: bool = True
+    seed: int = 42
+
+    # Opponent sampling (latest / frozen pool / B1).
+    opponent_latest_prob: float = 0.60
+    opponent_pool_prob: float = 0.30
+    opponent_b1_prob: float = 0.10
+    opponent_pool_size: int = 10
+
+    # Checkpointing and evaluation.
+    checkpoint_interval_s: float = 30.0 * 60.0
+    keep_last_checkpoints: int = 10
+    warmstart_checkpoint: str | None = None
+    device: str | None = None
+
+    # Stopping rules.
+    collapse_win_rate_drop: float = 0.15
+    collapse_checkpoints: int = 3
+    entropy_collapse_fraction: float = 0.10
+    entropy_collapse_window_s: float = 2.0 * 3600.0
+    plateau_checkpoints: int = 12
+    step_cap: int | None = None
+
+    # Monitoring.
+    determinism_check_every_games: int = 1_000
+    shape_min_generations: int = 6
+    shape_max_generations: int = 25
+
+    limits: ResourceLimits = field(default_factory=ResourceLimits)
+    maps: tuple[str, ...] = SUPPORTED_MAPS
+
+    def __post_init__(self) -> None:
+        if not self.run_name or any(c in self.run_name for c in '<>:"/\\|?*'):
+            raise ValueError(f"Invalid run_name {self.run_name!r}")
+        if self.workers < 1:
+            raise ValueError(f"workers must be >= 1, got {self.workers}")
+        if self.batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
+        if self.wall_clock_budget_s <= 0.0:
+            raise ValueError("wall_clock_budget_s must be > 0")
+        if self.num_simulations < 1:
+            raise ValueError("num_simulations must be >= 1")
+        if self.num_worlds < 1:
+            raise ValueError("num_worlds must be >= 1")
+        if not self.maps:
+            raise ValueError("maps must be non-empty")
+        if self.train_seed_start < 0 or self.dev_seed_start < 0:
+            raise ValueError("seed starts must be >= 0")
+        if self.dev_games_per_opponent < 1:
+            raise ValueError("dev_games_per_opponent must be >= 1")
+        if self.games_per_cycle < 1:
+            raise ValueError("games_per_cycle must be >= 1")
+        if self.updates_per_cycle < 0:
+            raise ValueError("updates_per_cycle must be >= 0")
+        if self.learner_batch_size < 1:
+            raise ValueError("learner_batch_size must be >= 1")
+        if self.buffer_capacity < 1:
+            raise ValueError("buffer_capacity must be >= 1")
+        if self.keep_last_checkpoints < 1:
+            raise ValueError("keep_last_checkpoints must be >= 1")
+        if self.checkpoint_interval_s <= 0.0:
+            raise ValueError("checkpoint_interval_s must be > 0")
+        if self.determinism_check_every_games < 1:
+            raise ValueError("determinism_check_every_games must be >= 1")
+        if self.shape_min_generations >= self.shape_max_generations:
+            raise ValueError("shape_min_generations must be < shape_max_generations")
+        probs = (
+            self.opponent_latest_prob,
+            self.opponent_pool_prob,
+            self.opponent_b1_prob,
+        )
+        if any(p < 0.0 for p in probs):
+            raise ValueError(f"opponent probabilities must be >= 0, got {probs}")
+        if abs(sum(probs) - 1.0) > 1e-9:
+            raise ValueError(f"opponent probabilities must sum to 1, got {sum(probs)}")
+
+    @property
+    def run_dir(self) -> Path:
+        return Path(self.output_root) / self.run_name
+
+    def search_config(self) -> SearchConfig:
+        """Search hyperparameters used by both self-play seats and dev evaluation."""
+        return SearchConfig(
+            num_simulations=self.num_simulations,
+            num_worlds=self.num_worlds,
+            c_puct=self.c_puct,
+            temperature=self.temperature,
+            action_temperature=self.action_temperature,
+            wave_size=self.wave_size,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["output_root"] = str(self.output_root)
+        payload["maps"] = list(self.maps)
+        return payload
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> RunConfig:
+        valid = {f.name for f in fields(cls)}
+        data = {k: v for k, v in payload.items() if k in valid}
+        if "output_root" in data:
+            data["output_root"] = Path(data["output_root"])
+        if "maps" in data:
+            data["maps"] = tuple(data["maps"])
+        limits = data.get("limits")
+        if isinstance(limits, Mapping):
+            data["limits"] = ResourceLimits(**limits)
+        return cls(**data)
+
+    @classmethod
+    def load(cls, path: str | Path) -> RunConfig:
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))

@@ -145,6 +145,10 @@ class ISMCTSAgent:
         )
         self.last_decision_was_searched: bool = False
         self.last_decision_latency_ms: float = 0.0
+        # Candidate distribution behind the last decision: root visit distribution at searched
+        # decisions, policy-head probabilities at policy decisions, one-hot when forced. Used as
+        # the self-play policy target and for entropy monitoring (#24).
+        self.last_decision_policy: np.ndarray | None = None
 
     @property
     def model(self) -> TMNetwork:
@@ -162,6 +166,7 @@ class ISMCTSAgent:
         self._decision_counter = 0
         self.last_decision_was_searched = False
         self.last_decision_latency_ms = 0.0
+        self.last_decision_policy = None
 
     def __deepcopy__(self, memo: dict[int, Any]) -> ISMCTSAgent:
         cls = self.__class__
@@ -175,6 +180,7 @@ class ISMCTSAgent:
         clone.version = self.version
         clone.last_decision_was_searched = False
         clone.last_decision_latency_ms = 0.0
+        clone.last_decision_policy = None
         return clone
 
     def search_batch_key(self) -> tuple[int, int, str]:
@@ -261,6 +267,9 @@ class ISMCTSAgent:
             outputs[idx] = 0
             agents[idx].last_decision_was_searched = False
             agents[idx].last_decision_latency_ms = part_ms / max(1, n_reqs)
+            one_hot = np.zeros((len(choices[idx].candidates),), dtype=np.float64)
+            one_hot[0] = 1.0
+            agents[idx].last_decision_policy = one_hot
 
         gpu_indices = policy_indices + search_indices
         if not gpu_indices:
@@ -294,6 +303,7 @@ class ISMCTSAgent:
             )
             ag.last_decision_was_searched = False
             ag.last_decision_latency_ms = per_init_ms
+            ag.last_decision_policy = _normalize_priors(probs_list[pos], n_cand)
 
         if not search_indices:
             return outputs
@@ -648,6 +658,13 @@ class ISMCTSAgent:
                 outputs[st.req_idx] = chosen
                 st.agent.last_decision_was_searched = not st.sampling_failed
                 st.agent.last_decision_latency_ms = st.elapsed_ms
+                visits = np.asarray(root.N, dtype=np.float64)
+                total_visits = float(visits.sum())
+                st.agent.last_decision_policy = (
+                    visits / total_visits
+                    if total_visits > 0.0
+                    else np.asarray(root.priors, dtype=np.float64).copy()
+                )
 
         finally:
             close_pairs = [
