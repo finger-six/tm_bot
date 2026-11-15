@@ -15,6 +15,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--run-name", required=True, help="Output directory name under runs/.")
     parser.add_argument("--out-root", type=Path, default=Path("runs"))
+    parser.add_argument(
+        "--agent-kind",
+        choices=("main", "comparator"),
+        default="main",
+        help="main = AlphaZero search agent; comparator = direct PPO scorer.",
+    )
     parser.add_argument("--budget-hours", type=float, default=24.0, help="Wall-clock budget.")
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -37,6 +43,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--warmstart", type=str, default=None)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--no-amp", action="store_true")
+    parser.add_argument("--ppo-clip", type=float, default=0.2)
+    parser.add_argument("--ppo-gamma", type=float, default=1.0)
+    parser.add_argument("--ppo-gae-lambda", type=float, default=0.95)
+    parser.add_argument("--ppo-value-coef", type=float, default=0.5)
+    parser.add_argument("--ppo-entropy-coef", type=float, default=0.01)
+    parser.add_argument("--ppo-rollout-decisions", type=int, default=16 * 2_048)
     parser.add_argument("--disk-gb", type=float, default=50.0)
     parser.add_argument("--vram-gb", type=float, default=12.0)
     parser.add_argument("--seed", type=int, default=42)
@@ -47,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     config = RunConfig(
         run_name=args.run_name,
         output_root=args.out_root,
+        agent_kind=args.agent_kind,
         workers=args.workers,
         batch_size=args.batch_size,
         wall_clock_budget_s=args.budget_hours * 3600.0,
@@ -70,6 +83,12 @@ def main(argv: list[str] | None = None) -> int:
         device=args.device,
         use_amp=not args.no_amp,
         seed=args.seed,
+        ppo_clip=args.ppo_clip,
+        ppo_gamma=args.ppo_gamma,
+        ppo_gae_lambda=args.ppo_gae_lambda,
+        ppo_value_coef=args.ppo_value_coef,
+        ppo_entropy_coef=args.ppo_entropy_coef,
+        ppo_rollout_decisions=args.ppo_rollout_decisions,
         limits=ResourceLimits(disk_gb=args.disk_gb, vram_gb=args.vram_gb),
     )
     runner = SelfPlayRunner.create(config)

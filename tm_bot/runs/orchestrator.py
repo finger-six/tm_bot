@@ -165,7 +165,12 @@ class SelfPlayRunner:
             plateau_checkpoints=config.plateau_checkpoints,
             step_cap=config.step_cap,
         )
-        self.buffer = ReplayBuffer(config.buffer_capacity)
+        if config.agent_kind == "comparator":
+            from tm_bot.comparator.ppo import PPOBuffer
+
+            self.buffer: Any = PPOBuffer(config.buffer_capacity)
+        else:
+            self.buffer = ReplayBuffer(config.buffer_capacity)
         self.optimizer: torch.optim.Optimizer | None = None
         self.entropy_probe: list[DecisionSample] | None = None
 
@@ -187,6 +192,10 @@ class SelfPlayRunner:
         from tm_bot.models.network import load_checkpoint
         from tm_bot.search.agent import DEFAULT_WARMSTART_CHECKPOINT
 
+        if config.agent_kind == "comparator" and not config.warmstart_checkpoint:
+            raise ValueError(
+                "comparator runs require --warmstart <comparator warm-start checkpoint>"
+            )
         warmstart = config.warmstart_checkpoint or str(DEFAULT_WARMSTART_CHECKPOINT)
         config = replace(config, warmstart_checkpoint=str(warmstart))
 
@@ -199,6 +208,9 @@ class SelfPlayRunner:
                 )
             except Exception:
                 pass
+
+        if config.agent_kind == "comparator":
+            return cls._create_comparator(config, device=device)
 
         model, vocab, _meta = load_checkpoint(config.warmstart_checkpoint, map_location=device)
         model.eval()
@@ -246,6 +258,79 @@ class SelfPlayRunner:
                 num_workers=config.workers,
                 batch_size=config.batch_size,
                 agent_a_name="candidate",
+                agent_b_name="b1" if opponent is None else "previous_best",
+            )
+
+        runner.evaluator = evaluator
+        if not config.dev_eval_enabled:
+            runner.evaluator = None
+        return runner
+
+    @classmethod
+    def _create_comparator(cls, config: RunConfig, *, device: str) -> SelfPlayRunner:
+        """Build the independently designed comparator engine and PPO learner."""
+        from tm_bot.comparator.agent import ComparatorAgent
+        from tm_bot.comparator.model import load_comparator_checkpoint
+        from tm_bot.comparator.ppo import PPOLearner
+        from tm_bot.comparator.selfplay import ComparatorSelfPlayEngine
+
+        model, vocab, _meta = load_comparator_checkpoint(
+            config.warmstart_checkpoint, map_location=device
+        )
+        model.eval()
+        learner = PPOLearner(config, model, device=device)
+        engine = ComparatorSelfPlayEngine(
+            config,
+            model=model,
+            vocab=vocab,
+            device=device,
+            rng=np.random.default_rng(config.seed),
+        )
+        runner = cls(
+            config,
+            engine=engine,
+            learner=learner,
+            manager=CheckpointManager(
+                config.run_dir,
+                keep_last=config.keep_last_checkpoints,
+                disk_limit_gb=config.limits.disk_gb,
+            ),
+            model=model,  # type: ignore[arg-type]
+            vocab=vocab,
+            device=device,
+            clock=time.monotonic,
+        )
+        runner.optimizer = learner.optimizer
+
+        def comparator_factory(checkpoint: Path):
+            cmp_model, cmp_vocab, _ = load_comparator_checkpoint(
+                checkpoint, map_location=device
+            )
+            cmp_model.eval()
+            return lambda: ComparatorAgent(
+                cmp_model,
+                cmp_vocab,
+                device=device,
+                temperature=0.0,
+                version=f"dev-{Path(checkpoint).name}",
+            )
+
+        def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+            candidate_factory = comparator_factory(candidate)
+            opponent_factory = (
+                b1_agent_factory()
+                if opponent is None
+                else comparator_factory(opponent)
+            )
+            return evaluate_dev_pairing(
+                candidate_factory=candidate_factory,
+                opponent_factory=opponent_factory,
+                num_games=config.dev_games_per_opponent,
+                maps=config.maps,
+                seed_start=config.dev_seed_start,
+                num_workers=config.workers,
+                batch_size=config.batch_size,
+                agent_a_name="comparator",
                 agent_b_name="b1" if opponent is None else "previous_best",
             )
 
@@ -354,12 +439,13 @@ class SelfPlayRunner:
         """Calibration + fixed-probe entropy on frozen, pre-update weights."""
         calibration: dict[str, Any] | None = None
         probe_entropy: float | None = None
-        if self.model is not None and batch.samples:
+        training_samples = batch.training_samples
+        if self.model is not None and training_samples:
             calibration = compute_value_calibration(
-                self.model, batch.samples, device=self.device
+                self.model, training_samples, device=self.device  # type: ignore[arg-type]
             )
             if self.entropy_probe is None:
-                self.entropy_probe = select_entropy_probe(batch.samples)
+                self.entropy_probe = select_entropy_probe(training_samples)
         if self.model is not None and self.entropy_probe:
             probe_entropy = probe_policy_entropy(
                 self.model, self.entropy_probe, device=self.device
@@ -530,12 +616,14 @@ class SelfPlayRunner:
                 vocab=self.vocab,
                 metadata={
                     "version": f"selfplay-{self.config.run_name}",
+                    "agent_kind": self.config.agent_kind,
                     "cycle": self.cycle,
                     "step": self.steps,
                     "selfplay_games": self.selfplay_games,
                     "num_simulations": self.config.num_simulations,
                     "num_worlds": self.config.num_worlds,
                     "warmstart_checkpoint": self.config.warmstart_checkpoint,
+                    "temperature": getattr(self.model, "temperature", None),
                 },
             )
         except RunResourceError as exc:
@@ -572,6 +660,7 @@ class SelfPlayRunner:
                             "step": self.steps,
                             "selfplay_games": self.selfplay_games,
                             "dev_win_rate_vs_b1": win_rate,
+                            "temperature": getattr(self.model, "temperature", None),
                         },
                     )
                 except RunResourceError as exc:
@@ -680,11 +769,19 @@ class SelfPlayRunner:
                     details={"elapsed_s": elapsed, "budget_s": self.config.wall_clock_budget_s},
                 )
 
-            if batch.samples:
-                self.buffer.extend(batch.samples)
+            if batch.samples or batch.ppo_samples:
+                if self.config.agent_kind == "comparator" and batch.ppo_samples is not None:
+                    self.buffer.extend(batch.ppo_samples)
+                elif batch.samples:
+                    self.buffer.extend(batch.samples)
             learner_stats: LearnerStats | None = None
             if self.learner is not None and len(self.buffer) > 0 and not self._stop.stopped:
-                learner_stats = self.learner.train(self.buffer)
+                if self.config.agent_kind == "comparator":
+                    learner_stats = self.learner.train(  # type: ignore[call-arg]
+                        self.buffer, samples=batch.ppo_samples
+                    )
+                else:
+                    learner_stats = self.learner.train(self.buffer)
                 self.steps = int(getattr(self.learner, "step", self.steps))
                 if (
                     learner_stats.nonfinite_loss is not None
@@ -783,6 +880,7 @@ class SelfPlayRunner:
                             "cycle": self.cycle,
                             "step": self.steps,
                             "stop": self._stop.to_dict(),
+                            "temperature": getattr(self.model, "temperature", None),
                         },
                     )
                 except RunResourceError:
@@ -804,7 +902,11 @@ class SelfPlayRunner:
                     step=self.steps,
                     model=self.model,
                     vocab=self.vocab,
-                    metadata={"cycle": self.cycle, "step": self.steps},
+                    metadata={
+                        "cycle": self.cycle,
+                        "step": self.steps,
+                        "temperature": getattr(self.model, "temperature", None),
+                    },
                 )
             except RunResourceError as exc:
                 self._stop = StopDecision(

@@ -233,8 +233,20 @@ class CheckpointManager:
         return self.best_checkpoint()
 
     def restore_model(self, model: TMNetwork, checkpoint: Path) -> None:
-        loaded, _vocab, _meta = load_checkpoint(checkpoint, map_location="cpu")
-        model.load_state_dict(loaded.state_dict())
+        from tm_bot.comparator.model import (
+            comparator_checkpoint_architecture,
+            load_comparator_checkpoint,
+        )
+
+        if comparator_checkpoint_architecture(checkpoint).startswith("comparator_"):
+            loaded, _vocab, _meta = load_comparator_checkpoint(
+                checkpoint, map_location="cpu"
+            )
+            model.load_state_dict(loaded.state_dict())
+            model.temperature = float(getattr(loaded, "temperature", 1.0))
+        else:
+            loaded, _vocab, _meta = load_checkpoint(checkpoint, map_location="cpu")
+            model.load_state_dict(loaded.state_dict())
         model.eval()
 
     def load_training_state(

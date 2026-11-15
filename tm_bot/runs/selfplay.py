@@ -210,12 +210,22 @@ class SelfPlayBatch:
     searched_decisions: int = 0
     latencies_ms: list[float] = field(default_factory=list)
     seed_keys: list[str] = field(default_factory=list)
+    # Comparator runs fill PPO rollouts instead of AlphaZero decision samples.
+    ppo_samples: list[Any] | None = None
+
+    @property
+    def training_samples(self) -> list[Any]:
+        """Rows the learner trains on (PPO rollouts for the comparator, else AlphaZero rows)."""
+        if self.ppo_samples is not None:
+            return list(self.ppo_samples)
+        return list(self.samples)
 
     @property
     def entropy(self) -> float | None:
-        if not self.samples:
+        items = self.training_samples
+        if not items:
             return None
-        return float(np.mean([policy_entropy(s.policy_target) for s in self.samples]))
+        return float(np.mean([policy_entropy(s.policy_target) for s in items]))
 
     @property
     def failures(self) -> list[GameSummary]:

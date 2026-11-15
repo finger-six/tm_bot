@@ -43,6 +43,7 @@ class RunConfig:
 
     run_name: str
     output_root: Path = DEFAULT_RUNS_DIR
+    agent_kind: str = "main"
     workers: int = 16
     batch_size: int = 32
     wall_clock_budget_s: float = 24.0 * 3600.0
@@ -74,6 +75,14 @@ class RunConfig:
     w_value: float = 1.0
     use_amp: bool = True
     seed: int = 42
+
+    # PPO hyperparameters for the comparator agent kind (ignored by the main agent).
+    ppo_clip: float = 0.2
+    ppo_gamma: float = 1.0
+    ppo_gae_lambda: float = 0.95
+    ppo_value_coef: float = 0.5
+    ppo_entropy_coef: float = 0.01
+    ppo_rollout_decisions: int = 16 * 2_048
 
     # Opponent sampling (latest / frozen pool / B1).
     opponent_latest_prob: float = 0.60
@@ -107,6 +116,10 @@ class RunConfig:
     def __post_init__(self) -> None:
         if not self.run_name or any(c in self.run_name for c in '<>:"/\\|?*'):
             raise ValueError(f"Invalid run_name {self.run_name!r}")
+        if self.agent_kind not in ("main", "comparator"):
+            raise ValueError(
+                f"agent_kind must be 'main' or 'comparator', got {self.agent_kind!r}"
+            )
         if self.workers < 1:
             raise ValueError(f"workers must be >= 1, got {self.workers}")
         if self.batch_size < 1:
@@ -139,6 +152,16 @@ class RunConfig:
             raise ValueError("determinism_check_every_games must be >= 1")
         if self.shape_min_generations >= self.shape_max_generations:
             raise ValueError("shape_min_generations must be < shape_max_generations")
+        if not (0.0 <= self.ppo_clip < 1.0):
+            raise ValueError(f"ppo_clip must be in [0, 1), got {self.ppo_clip}")
+        if not (0.0 <= self.ppo_gae_lambda <= 1.0):
+            raise ValueError(
+                f"ppo_gae_lambda must be in [0, 1], got {self.ppo_gae_lambda}"
+            )
+        if self.ppo_gamma <= 0.0:
+            raise ValueError(f"ppo_gamma must be > 0, got {self.ppo_gamma}")
+        if self.ppo_rollout_decisions < 1:
+            raise ValueError("ppo_rollout_decisions must be >= 1")
         probs = (
             self.opponent_latest_prob,
             self.opponent_pool_prob,
