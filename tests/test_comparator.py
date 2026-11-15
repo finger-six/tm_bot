@@ -104,6 +104,22 @@ def _obs_choice():
     )
 
 
+def _assert_encoded_observation_equal(actual, expected) -> None:
+    assert np.array_equal(actual.obs_scalars, expected.obs_scalars)
+    assert np.array_equal(actual.card_ids, expected.card_ids)
+    assert np.array_equal(actual.card_slots, expected.card_slots)
+    assert np.array_equal(actual.card_dyn, expected.card_dyn)
+    assert np.array_equal(actual.space_feats, expected.space_feats)
+
+
+def _assert_encoded_choice_equal(actual, expected) -> None:
+    assert actual.prompt_type_id == expected.prompt_type_id
+    assert np.array_equal(actual.choice_ctx, expected.choice_ctx)
+    assert np.array_equal(actual.cand_card_ids, expected.cand_card_ids)
+    assert np.array_equal(actual.cand_feats, expected.cand_feats)
+    assert np.array_equal(actual.picked_card_ids, expected.picked_card_ids)
+
+
 def _batch():
     observation, choice = _obs_choice()
     return observation, choice, collate_encoded_batch(
@@ -492,7 +508,9 @@ def test_assemble_batch_targets_follow_each_training_seats_outcome() -> None:
     recorders = []
     outcomes = []
     for game, seat in enumerate((0, 1)):
-        recorder = GameRecorder(f"train-{game:04d}", "tharsis", capture_seat=seat)
+        recorder = GameRecorder(
+            f"train-{game:04d}", "tharsis", capture_seat=seat, vocab=_VOCAB
+        )
         observation = copy.deepcopy(base_obs)
         observation["actor"] = seat  # type: ignore[index]
         for step in range(3):
@@ -523,6 +541,76 @@ def test_assemble_batch_targets_follow_each_training_seats_outcome() -> None:
     assert win[-1].return_ == pytest.approx(1.0)
     assert loss[-1].return_ == pytest.approx(0.0)
     assert [s.action for s in win] == [0, 1, 2]
+
+
+def test_ppo_rows_match_encode_at_assembly_rows() -> None:
+    """PPO rows assembled from encoded records equal the old encode-at-assembly rows."""
+    config = RunConfig(run_name="cmp-encoded", agent_kind="comparator")
+    model = _tiny_comparator()
+    engine = ComparatorSelfPlayEngine(config, model=model, vocab=_VOCAB)
+    base_obs, choice = _obs_choice()
+    recorder = GameRecorder("train-0000", "tharsis", capture_seat=0, vocab=_VOCAB)
+    cases = []
+    for step in range(3):
+        observation = copy.deepcopy(base_obs)
+        observation["actor"] = 0  # type: ignore[index]
+        index = step % len(choice.candidates)
+        recorder.record(
+            observation, choice, index, [0.5, 0.3, 0.2], was_searched=False
+        )
+        cases.append((observation, choice, index))
+    outcome = GameRunResult(
+        seed_key="train-0000",
+        map="tharsis",
+        result=GameResult(scores=(70, 50), winner=0, tie=False, generations=12),
+        generations=12,
+        decisions=6,
+        agent_versions=(None, None),
+        ok=True,
+    )
+    batch = engine.assemble_batch([outcome], [recorder], [0], ["latest"])
+    samples = batch.ppo_samples
+    assert samples is not None and len(samples) == 3
+
+    # Old path: encode the raw observation/choice pairs at assembly time.
+    encoded_obs = [encode_observation(obs, _VOCAB) for obs, _, _ in cases]  # type: ignore[arg-type]
+    encoded_choice = [
+        encode_choice(ch, obs, _VOCAB)  # type: ignore[arg-type]
+        for obs, ch, _ in cases
+    ]
+    tensors = collate_encoded_batch(encoded_obs, encoded_choice)
+    model.eval()
+    with torch.inference_mode():
+        out = model(tensors, compute_policy=True, compute_value=True)
+        log_probs = torch.log_softmax(out["policy_logits"].float(), dim=-1)
+        actions = torch.tensor([index for _, _, index in cases], dtype=torch.long)
+        expected_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
+        expected_values = out["win_prob"].float()
+    expected_advantages, expected_returns = compute_gae(
+        expected_values.numpy(),
+        1.0,
+        gamma=config.ppo_gamma,
+        gae_lambda=config.ppo_gae_lambda,
+    )
+    for i, (sample, (obs, _, index)) in enumerate(zip(samples, cases)):
+        _assert_encoded_observation_equal(
+            sample.observation,
+            encode_observation(obs, _VOCAB),  # type: ignore[arg-type]
+        )
+        _assert_encoded_choice_equal(
+            sample.choice,
+            encode_choice(choice, obs, _VOCAB),  # type: ignore[arg-type]
+        )
+        assert sample.action == index
+        assert sample.old_log_prob == pytest.approx(float(expected_log_probs[i]))
+        assert sample.behavior_value == pytest.approx(float(expected_values[i]))
+        assert sample.advantage == pytest.approx(float(expected_advantages[i]))
+        assert sample.return_ == pytest.approx(float(expected_returns[i]))
+        assert np.array_equal(
+            sample.policy_target, normalize_policy_target([0.5, 0.3, 0.2], 3)
+        )
+        assert sample.value_target == 1.0
+        assert sample.seat == 0
 
 
 def test_eval_cli_spec_loads_a_cached_sampling_comparator(tmp_path: Path) -> None:

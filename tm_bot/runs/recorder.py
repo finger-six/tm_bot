@@ -10,19 +10,31 @@ import numpy as np
 
 from tm_bot.agents.protocol import Agent, SearchAgent
 from tm_bot.env.types import ActorObservation, Choice, Seat
+from tm_bot.models.encode import (
+    EncodedChoice,
+    EncodedObservation,
+    encode_choice,
+    encode_observation,
+)
+from tm_bot.models.vocab import CardVocab
 
 
-@dataclass
+@dataclass(slots=True)
 class DecisionRecord:
-    """One decision seen by an agent during a game, with its candidate distribution."""
+    """One training-seat decision, stored encoded rather than as a raw observation.
 
-    observation: ActorObservation
-    choice: Choice
+    Keeping `ActorObservation` dicts here cost ~423 KB per record; the encoded
+    arrays cost ~10 KB, which is what the replay buffer and PPO rollout consume.
+    """
+
+    observation: EncodedObservation
+    choice: EncodedChoice
     candidate_index: int
     policy: np.ndarray
     was_searched: bool
     seat: Seat
     generation: int
+    num_candidates: int
 
 
 @dataclass
@@ -32,6 +44,7 @@ class GameRecorder:
     seed_key: str
     map_name: str
     capture_seat: Seat | None = None
+    vocab: CardVocab | None = None
     decisions: list[DecisionRecord] = field(default_factory=list)
     actions: list[tuple[int, int]] = field(default_factory=list)
 
@@ -45,10 +58,13 @@ class GameRecorder:
         was_searched: bool,
     ) -> None:
         seat = int(observation["actor"])  # type: ignore[index]
-        generation = int(observation["public"]["generation"])  # type: ignore[index]
         self.actions.append((seat, int(candidate_index)))
         if self.capture_seat is None or seat != self.capture_seat:
             return
+        if self.vocab is None:
+            raise RuntimeError(
+                "a recording GameRecorder needs a vocab to encode training-seat decisions"
+            )
         n = len(choice.candidates)
         if n <= 1 or policy is None:
             arr = np.zeros((n,), dtype=np.float64)
@@ -60,13 +76,14 @@ class GameRecorder:
             arr = arr / total if total > 0.0 else np.full((n,), 1.0 / n)
         self.decisions.append(
             DecisionRecord(
-                observation=observation,
-                choice=choice,
+                observation=encode_observation(observation, self.vocab),
+                choice=encode_choice(choice, observation, self.vocab),
                 candidate_index=int(candidate_index),
                 policy=arr,
                 was_searched=was_searched,
                 seat=seat,  # type: ignore[arg-type]
-                generation=generation,
+                generation=int(observation["public"]["generation"]),  # type: ignore[index]
+                num_candidates=n,
             )
         )
 

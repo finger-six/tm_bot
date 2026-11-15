@@ -58,8 +58,11 @@ fresh run) the pool share falls back to the latest network.
 
 `RecordingSearchAgent` ([`recorder.py`](../tm_bot/runs/recorder.py)) wraps both
 seats and records the ordered `(seat, candidate)` action history; it records
-`(observation, choice, candidate distribution)` rows **only for the training
-seat**. The runner still passes only `(observation, choice[, sampler])` to
+the encoded observation/choice and candidate distribution **only for the
+training seat**. Encoding happens at record time, so a cycle does not retain
+the raw decoded `ActorObservation` dicts and `Choice` objects (which cost
+~423 KB per decision instead of ~10 KB encoded).
+The runner still passes only `(observation, choice[, sampler])` to
 agents, so a training row can only contain what that seat legitimately saw.
 The training input is the acting seat's encoded `ActorObservation`; opponent
 private cards, deck order, and RNG never enter it (the adapter's actor

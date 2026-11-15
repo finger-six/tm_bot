@@ -16,10 +16,20 @@ from tm_bot.agents import B0Agent, play_game, play_games
 from tm_bot.agents.card_data import load_card_data
 from tm_bot.env.types import Candidate, Choice
 from tm_bot.eval.seeds import SeedKey
-from tm_bot.models.encode import encode_choice, encode_observation
+from tm_bot.models.encode import (
+    EncodedChoice,
+    EncodedObservation,
+    encode_choice,
+    encode_observation,
+)
 from tm_bot.models.network import TMModelConfig, TMNetwork, save_checkpoint
 from tm_bot.models.vocab import CardVocab
-from tm_bot.runs.buffer import DecisionSample, ReplayBuffer, collate_samples
+from tm_bot.runs.buffer import (
+    DecisionSample,
+    ReplayBuffer,
+    collate_samples,
+    normalize_policy_target,
+)
 from tm_bot.runs.checkpoints import CheckpointManager
 from tm_bot.runs.config import ResourceLimits, RunConfig
 from tm_bot.runs.deveval import (
@@ -190,6 +200,26 @@ def _encoded_sample(*, value: float = 1.0) -> DecisionSample:
     )
 
 
+def _assert_encoded_observation_equal(
+    actual: EncodedObservation, expected: EncodedObservation
+) -> None:
+    assert np.array_equal(actual.obs_scalars, expected.obs_scalars)
+    assert np.array_equal(actual.card_ids, expected.card_ids)
+    assert np.array_equal(actual.card_slots, expected.card_slots)
+    assert np.array_equal(actual.card_dyn, expected.card_dyn)
+    assert np.array_equal(actual.space_feats, expected.space_feats)
+
+
+def _assert_encoded_choice_equal(
+    actual: EncodedChoice, expected: EncodedChoice
+) -> None:
+    assert actual.prompt_type_id == expected.prompt_type_id
+    assert np.array_equal(actual.choice_ctx, expected.choice_ctx)
+    assert np.array_equal(actual.cand_card_ids, expected.cand_card_ids)
+    assert np.array_equal(actual.cand_feats, expected.cand_feats)
+    assert np.array_equal(actual.picked_card_ids, expected.picked_card_ids)
+
+
 # --- 1. stopping rules -------------------------------------------------
 def test_budget_rule_stops_at_wall_clock_limit() -> None:
     monitor = StoppingMonitor()
@@ -351,6 +381,7 @@ def test_training_seeds_never_fall_in_dev_or_eval_namespaces() -> None:
             learner_factory=lambda seed: B0Agent(seed=seed),
             sampler=OpponentSampler(rng=np.random.default_rng(0)),
             opponent_factory=lambda choice, seed: B0Agent(seed=seed),
+            vocab=_VOCAB,
         )
 
 
@@ -363,6 +394,7 @@ def test_selfplay_specs_use_train_seeds_and_one_capture_seat() -> None:
         learner_factory=lambda seed: B0Agent(seed=seed),
         sampler=sampler,
         opponent_factory=lambda choice, seed: B0Agent(seed=seed),
+        vocab=_VOCAB,
     )
     assert all(spec.seed_key.startswith("train-") for spec in specs)
     assert seats == [0, 1, 0]
@@ -401,30 +433,33 @@ def test_opponent_private_cards_never_enter_the_acting_seat_encoding() -> None:
 
 
 def test_recorder_captures_only_the_training_seat() -> None:
-    recorder = GameRecorder("train-0000", "tharsis", capture_seat=0)
+    recorder = GameRecorder("train-0000", "tharsis", capture_seat=0, vocab=_VOCAB)
     learner = RecordingAgent(B0Agent(seed=1), recorder, capture_seat=0)
     opponent = RecordingAgent(B0Agent(seed=2), recorder, capture_seat=None)
     learner.act(_obs(actor=0), _choice(seat=0))  # type: ignore[arg-type]
     opponent.act(_obs(actor=1), _choice(seat=1))  # type: ignore[arg-type]
     assert len(recorder.actions) == 2
     assert len(recorder.decisions) == 1
-    assert int(recorder.decisions[0].observation["actor"]) == 0
+    assert recorder.decisions[0].seat == 0
 
     from tm_bot.runs.recorder import DecisionRecord
     from tm_bot.runs.selfplay import SelfPlayEngine
 
     config = RunConfig(run_name="leak", output_root=Path("unused"), workers=1)
     engine = SelfPlayEngine(config, model=_tiny_model(), vocab=_VOCAB)
-    bad = GameRecorder("train-0001", "tharsis", capture_seat=0)
+    bad = GameRecorder("train-0001", "tharsis", capture_seat=0, vocab=_VOCAB)
+    bad_obs = _obs(actor=1)
+    bad_choice = _choice(seat=1)
     bad.decisions.append(
         DecisionRecord(
-            observation=_obs(actor=1),  # type: ignore[arg-type]
-            choice=_choice(seat=1),
+            observation=encode_observation(bad_obs, _VOCAB),  # type: ignore[arg-type]
+            choice=encode_choice(bad_choice, bad_obs, _VOCAB),  # type: ignore[arg-type]
             candidate_index=0,
             policy=np.array([1.0, 0.0]),
             was_searched=False,
             seat=1,
             generation=2,
+            num_candidates=2,
         )
     )
     outcome = SimpleNamespace(
@@ -440,6 +475,77 @@ def test_recorder_captures_only_the_training_seat() -> None:
     )
     with pytest.raises(RuntimeError, match="does not match training seat"):
         engine.assemble_batch([outcome], [bad], [0])
+
+
+def test_recorder_retains_encoded_decisions_not_raw_observations() -> None:
+    recorder = GameRecorder("train-0000", "tharsis", capture_seat=0, vocab=_VOCAB)
+    agent = RecordingAgent(B0Agent(seed=1), recorder, capture_seat=0)
+    observation = _obs(actor=0)
+    choice = _choice(seat=0)
+    agent.act(observation, choice)  # type: ignore[arg-type]
+
+    assert len(recorder.decisions) == 1
+    record = recorder.decisions[0]
+    assert isinstance(record.observation, EncodedObservation)
+    assert isinstance(record.choice, EncodedChoice)
+    assert record.seat == 0
+    assert record.num_candidates == len(choice.candidates)
+    assert record.generation == int(observation["public"]["generation"])
+    stored = [getattr(record, f.name) for f in dataclasses.fields(record)]
+    assert not any(isinstance(value, dict) for value in stored)
+    assert not any(isinstance(value, Choice) for value in stored)
+
+
+def test_decision_samples_match_encode_at_assembly_rows() -> None:
+    """Rows assembled from encoded records equal the old encode-at-assembly rows."""
+    from tm_bot.runs.selfplay import SelfPlayEngine
+
+    config = RunConfig(run_name="encoded", output_root=Path("unused"), workers=1)
+    engine = SelfPlayEngine(config, model=_tiny_model(), vocab=_VOCAB)
+    recorder = GameRecorder("train-0000", "tharsis", capture_seat=0, vocab=_VOCAB)
+    cases = [
+        (_obs(actor=0), _choice(seat=0), [0.5, 0.5], True),
+        (_obs(actor=0), _choice(seat=0), [0.25, 0.75], False),
+        (_obs(actor=0), _choice(seat=0), None, False),
+    ]
+    for observation, choice, policy, was_searched in cases:
+        recorder.record(
+            observation,  # type: ignore[arg-type]
+            choice,
+            0,
+            policy,
+            was_searched=was_searched,
+        )
+    outcome = SimpleNamespace(
+        decisions=3,
+        ok=True,
+        result=SimpleNamespace(scores=(60, 50), winner=0, tie=False, generations=12),
+        generations=12,
+        error_type=None,
+        error=None,
+        decision_latencies_ms=((), ()),
+        seed_key="train-0000",
+        map="tharsis",
+    )
+    batch = engine.assemble_batch([outcome], [recorder], [0])
+    assert len(batch.samples) == 3
+    for sample, (observation, choice, policy, was_searched) in zip(batch.samples, cases):
+        _assert_encoded_observation_equal(
+            sample.observation,
+            encode_observation(observation, _VOCAB),  # type: ignore[arg-type]
+        )
+        _assert_encoded_choice_equal(
+            sample.choice,
+            encode_choice(choice, observation, _VOCAB),  # type: ignore[arg-type]
+        )
+        expected_policy = policy if policy is not None else [1.0, 0.0]
+        assert np.array_equal(
+            sample.policy_target, normalize_policy_target(expected_policy, 2)
+        )
+        assert sample.value_target == 1.0
+        assert sample.seat == 0
+        assert sample.was_searched is was_searched
+        assert sample.generation == 2
 
 
 # --- 3. resume ---------------------------------------------------------

@@ -20,7 +20,6 @@ from tm_bot.eval.seeds import (
     make_seed_key,
     validate_namespace,
 )
-from tm_bot.models.encode import encode_choice, encode_observation
 from tm_bot.models.network import TMNetwork
 from tm_bot.models.vocab import CardVocab
 from tm_bot.runs.buffer import DecisionSample, normalize_policy_target
@@ -111,13 +110,15 @@ def build_selfplay_specs(
     learner_factory: Any,
     sampler: OpponentSampler,
     opponent_factory: Any,
+    vocab: CardVocab,
     seed_start: int = 0,
 ) -> tuple[list[GameSpec], list[GameRecorder], list[int], list[str]]:
     """Build one-game-per-seed specs with a training seat and a sampled opponent.
 
     `learner_factory(seed)` and `opponent_factory(choice, seed)` must return
     `Agent`s; the recorder's `capture_seat` is the training seat, so only that
-    seat's `(observation, choice)` pairs become training rows. Returns
+    seat's `(observation, choice)` pairs become encoded training rows. `vocab`
+    belongs to the caller's model and is shared by every recorder. Returns
     `(specs, recorders, training_seats, opponent_kinds)`.
     """
     if not maps:
@@ -141,6 +142,7 @@ def build_selfplay_specs(
             seed_key=seed_key.key,
             map_name=map_name,
             capture_seat=training_seat,  # type: ignore[arg-type]
+            vocab=vocab,
         )
         captured_learner = capture_agent(learner, recorder, capture_seat=training_seat)  # type: ignore[arg-type]
         captured_opp = capture_agent(opp_agent, recorder, capture_seat=None)
@@ -329,6 +331,7 @@ class SelfPlayEngine:
             learner_factory=self._learner_factory,
             sampler=self.opponents,
             opponent_factory=self._opponent_factory,
+            vocab=self.vocab,
             seed_start=self.seed_cursor,
         )
         outcomes = play_games(
@@ -363,18 +366,18 @@ class SelfPlayEngine:
                 continue
             value_target = utility_for_seat(summary, seat)
             for rec in recorder.decisions:
-                if int(rec.observation["actor"]) != seat:
+                if int(rec.seat) != seat:
                     raise RuntimeError(
-                        f"recorded observation actor {rec.observation['actor']} "
+                        f"recorded actor {rec.seat} "
                         f"does not match training seat {seat}"
                     )
-                n = len(rec.choice.candidates)
+                n = rec.num_candidates
                 if n < 1:
                     continue
                 samples.append(
                     DecisionSample(
-                        observation=encode_observation(rec.observation, self.vocab),
-                        choice=encode_choice(rec.choice, rec.observation, self.vocab),
+                        observation=rec.observation,
+                        choice=rec.choice,
                         policy_target=normalize_policy_target(rec.policy, n),
                         value_target=float(value_target),
                         seat=int(seat),

@@ -16,7 +16,7 @@ from tm_bot.agents.runner import play_games
 from tm_bot.comparator.agent import ComparatorAgent
 from tm_bot.comparator.model import ComparatorNetwork, load_comparator_checkpoint
 from tm_bot.comparator.ppo import PPOSample, compute_gae
-from tm_bot.models.encode import collate_encoded_batch, encode_choice, encode_observation
+from tm_bot.models.encode import collate_encoded_batch
 from tm_bot.models.vocab import CardVocab
 from tm_bot.runs.buffer import normalize_policy_target
 from tm_bot.runs.config import RunConfig
@@ -129,6 +129,7 @@ class ComparatorSelfPlayEngine:
             learner_factory=self._learner_factory,
             sampler=self.opponents,
             opponent_factory=self._opponent_factory,
+            vocab=self.vocab,
             seed_start=self.seed_cursor,
         )
         outcomes = play_games(
@@ -144,14 +145,13 @@ class ComparatorSelfPlayEngine:
     def _behavior_stats(
         self, records: Sequence[Any]
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Recompute behavior log-probs and raw win probabilities for recorded decisions."""
+        """Recompute behavior log-probs and raw win probabilities from stored encodings."""
         if not records:
             return np.zeros((0,), dtype=np.float64), np.zeros((0,), dtype=np.float64)
-        enc_obs = [encode_observation(r.observation, self.vocab) for r in records]
-        enc_choice = [
-            encode_choice(r.choice, r.observation, self.vocab) for r in records
-        ]
-        batch = collate_encoded_batch(enc_obs, enc_choice)
+        batch = collate_encoded_batch(
+            [r.observation for r in records],
+            [r.choice for r in records],
+        )
         tensors = {k: v.to(self.device) for k, v in batch.items()}
         self.model.eval()
         out = self.model(tensors, compute_policy=True, compute_value=True)
@@ -185,7 +185,7 @@ class ComparatorSelfPlayEngine:
             if not recorder.decisions:
                 continue
             utility = utility_for_seat(summary, seat)
-            records = [r for r in recorder.decisions if int(r.observation["actor"]) == seat]
+            records = [r for r in recorder.decisions if int(r.seat) == seat]
             if len(records) != len(recorder.decisions):
                 raise RuntimeError(
                     "recorded comparator observations do not all belong to the training seat"
@@ -202,13 +202,13 @@ class ComparatorSelfPlayEngine:
             for rec, old_logp, value, advantage, ret in zip(
                 records, old_log_probs, behavior_values, advantages, returns
             ):
-                n = len(rec.choice.candidates)
+                n = rec.num_candidates
                 if n < 1:
                     continue
                 ppo_samples.append(
                     PPOSample(
-                        observation=encode_observation(rec.observation, self.vocab),
-                        choice=encode_choice(rec.choice, rec.observation, self.vocab),
+                        observation=rec.observation,
+                        choice=rec.choice,
                         policy_target=normalize_policy_target(rec.policy, n),
                         value_target=float(utility),
                         seat=int(seat),
