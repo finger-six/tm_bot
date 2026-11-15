@@ -71,7 +71,8 @@ uniform from the last 10 frozen comparator checkpoints, 10% B1. The training
 seat samples from the masked policy at temperature 1 (`RunConfig` rejects any
 other `action_temperature` for comparator runs, because PPO recomputes the
 behavior log-probabilities at temperature 1, and the PPO update runs with
-dropout off so its ratio compares the same deterministic policy); comparator opponents
+dropout off so its ratio compares the same deterministic policy; dropout
+therefore acts only during the warm start); comparator opponents
 (latest and pool) still act greedily. That differs from evaluation play (see
 [Evaluation policy](#evaluation-policy)) and is a known limitation.
 
@@ -253,7 +254,8 @@ use one because the spec fixes fitting to validation data.
 - The reproducibility test covers the evaluation agent's seeded `act` calls,
   not a full `play_games` replay.
 - The development run trained with dropout (0.05) active in the PPO update, so
-  its ratios were slightly off-policy (~2% on a probe batch); fixed afterwards.
+  its ratios were slightly off-policy (log-prob gaps up to ~2% on a small probe
+  model); fixed afterwards.
 - `eval-*` seeds were never read or written; all reported games are `dev-*`.
 - Adapter bug #32, which cut the first development run short, is fixed on `main`.
 

@@ -1269,6 +1269,8 @@ class _NoUpdateLearner(_FakeLearner):
 
 
 def test_periodic_checkpoint_skips_a_model_that_did_not_train(tmp_path: Path) -> None:
+    # Each clock read advances 100 s, so every cycle is past the checkpoint interval.
+    ticks = iter(float(i) * 100.0 for i in range(10_000))
     config = _run_config(tmp_path, "no-dup-periodic")
     runner = SelfPlayRunner(
         config,
@@ -1277,6 +1279,7 @@ def test_periodic_checkpoint_skips_a_model_that_did_not_train(tmp_path: Path) ->
         evaluator=_fake_dev,
         model=_tiny_model(seed=10),
         vocab=_VOCAB,
+        clock=lambda: next(ticks),
     )
     runner.run(max_cycles=3)
     assert runner.steps == 0
