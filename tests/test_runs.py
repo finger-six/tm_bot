@@ -1235,6 +1235,7 @@ def test_run_without_dev_eval_does_not_duplicate_the_final_checkpoint(tmp_path: 
         for p in runner.manager.list_checkpoints()
     ]
     assert steps == sorted(set(steps))
+    assert steps and steps[-1] == runner.steps
 
 
 def test_first_checkpoint_without_previous_best_logs_no_previous_best_rate(
@@ -1260,3 +1261,24 @@ def test_first_checkpoint_without_previous_best_logs_no_previous_best_rate(
     assert calls[0] is None
     assert first.dev_win_rate_vs_previous_best is None
     assert first.dev_win_rate_vs_previous_best_ci_95 is None
+
+
+class _NoUpdateLearner(_FakeLearner):
+    def train(self, buffer, *, updates=None) -> LearnerStats:
+        return LearnerStats(updates=0)
+
+
+def test_periodic_checkpoint_skips_a_model_that_did_not_train(tmp_path: Path) -> None:
+    config = _run_config(tmp_path, "no-dup-periodic")
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_NoUpdateLearner(),
+        evaluator=_fake_dev,
+        model=_tiny_model(seed=10),
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=3)
+    assert runner.steps == 0
+    assert len(runner.manager.list_checkpoints()) == 1
+    assert [r.step for r in runner.logger.checkpoints] == [0]

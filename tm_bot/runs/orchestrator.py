@@ -859,9 +859,11 @@ class SelfPlayRunner:
             if step_decision.stopped and not self._stop.stopped:
                 self._stop = step_decision
 
+            # A model that has not trained since the last checkpoint is already saved.
             due = (
                 self.model is not None
                 and self.vocab is not None
+                and (self.last_checkpoint is None or self.last_checkpoint_step != self.steps)
                 and (
                     (self._stop.stopped and self._stop.kind not in _HARD_STOPS)
                     or elapsed - self.last_checkpoint_elapsed_s

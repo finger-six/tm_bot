@@ -309,7 +309,9 @@ class PPOLearner:
 
         amp_enabled = bool(self.config.use_amp and self.device.type == "cuda")
         amp_dtype = torch.bfloat16 if amp_enabled else torch.float32
-        self.model.train()
+        # Dropout off: PPO's ratio compares against the deterministic policy the agent acted
+        # with (`_behavior_stats` runs in eval mode), so the update must evaluate it too.
+        self.model.eval()
         batch_size = min(self.config.learner_batch_size, len(source))
         for _ in range(n_updates):
             indices = self.rng.integers(0, len(source), size=batch_size)
@@ -368,7 +370,9 @@ class PPOLearner:
         batch, ppo = collate_ppo_samples(samples)
         batch = {k: v.to(self.device, non_blocking=True) for k, v in batch.items()}
         ppo = {k: v.to(self.device, non_blocking=True) for k, v in ppo.items()}
-        self.model.train()
+        # Dropout off: PPO's ratio compares against the deterministic policy the agent acted
+        # with (`_behavior_stats` runs in eval mode), so the update must evaluate it too.
+        self.model.eval()
         for _ in range(steps):
             self.optimizer.zero_grad(set_to_none=True)
             loss, parts = _policy_terms(

@@ -56,7 +56,7 @@ _CARDS = load_card_data()
 _VOCAB = CardVocab.from_card_data(_CARDS)
 
 
-def _tiny_comparator(*, seed: int = 0) -> ComparatorNetwork:
+def _tiny_comparator(*, seed: int = 0, dropout: float = 0.0) -> ComparatorNetwork:
     cfg = ComparatorConfig(
         vocab_size=_VOCAB.size,
         d_model=64,
@@ -69,7 +69,7 @@ def _tiny_comparator(*, seed: int = 0) -> ComparatorNetwork:
         choice_hidden=64,
         cand_hidden=64,
         value_hidden=64,
-        dropout=0.0,
+        dropout=dropout,
     )
     torch.manual_seed(seed)
     return ComparatorNetwork(cfg, torch.from_numpy(_VOCAB.static_features.copy()))
@@ -223,6 +223,28 @@ def test_ppo_update_reduces_surrogate_loss_on_fixed_batch() -> None:
     assert stats.updates == 5
     final = compute_surrogate_loss(model, samples, clip=0.2, device="cpu")
     assert final < initial - 1e-4
+
+
+def test_ppo_update_is_on_policy_before_the_first_step() -> None:
+    # Behaviour log-probs come from the deterministic (eval-mode) policy the agent acts with,
+    # so with unchanged weights the PPO ratio must be exactly 1 even with dropout configured.
+    model = _tiny_comparator(seed=4, dropout=0.3)
+    model.eval()
+    samples = _samples(model)
+    config = RunConfig(
+        run_name="ppo-ratio",
+        output_root=Path("unused"),
+        agent_kind="comparator",
+        learner_batch_size=len(samples),
+        learning_rate=0.0,
+        weight_decay=0.0,
+        grad_clip=0.0,
+        use_amp=False,
+    )
+    learner = PPOLearner(config, model, device="cpu")
+    stats = learner.train(PPOBuffer(capacity=16), samples=samples, updates=1)
+    assert stats.updates == 1
+    assert stats.mean_ratio == pytest.approx(1.0, abs=1e-6)
 
 
 @pytest.mark.parametrize(("win_target", "lo", "hi"), [(0.0, 0.0, 0.8), (1.0, 0.8, 1.0)])
