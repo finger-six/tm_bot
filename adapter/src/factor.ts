@@ -112,10 +112,10 @@ export function hasLegalContinuation(input: PlayerInput, player: IPlayer): boole
       const opts = getPaymentOptionsForSelectPayment(sp, player);
       return enumerateCanonicalPayments(sp.amount, opts, sp.reserveUnits, player).length > 0;
     }
-    case 'card': {
-      const sc = input as SelectCard<ICard>;
-      return getEnabledCards(sc).length >= sc.config.min;
-    }
+    case 'card':
+      // A SelectCard is always answerable: when fewer cards were dealt than the prompt's
+      // minimum (exhausted deck), the adapter submits every enabled card it has.
+      return true;
     case 'projectCard': {
       const pc = input as SelectProjectCardToPlay | SelectStandardProjectToPlay;
       return getPlayableProjectCandidates(pc, player).length > 0;
@@ -267,10 +267,10 @@ function buildFrame(input: PlayerInput, player: IPlayer, maxCardOverride?: numbe
       const orderedCards = getEnabledCards(sc);
       const maxCap = maxCardOverride !== undefined ? Math.min(sc.config.max, maxCardOverride) : sc.config.max;
       const effectiveMax = Math.min(maxCap, orderedCards.length);
+      // The engine can deal fewer cards than the prompt's minimum (e.g. a draft round draws
+      // nothing once the project deck is exhausted). The selection is then forced: take
+      // whatever is available. The submit path lowers the engine minimum to match.
       const effectiveMin = Math.min(sc.config.min, effectiveMax);
-      if (orderedCards.length < sc.config.min) {
-        throw new Error(`SelectCard requires at least ${sc.config.min} cards, only ${orderedCards.length} enabled`);
-      }
       if (effectiveMin === 1 && effectiveMax === 1) {
         return {kind: 'single_card', input: sc, orderedCards};
       }

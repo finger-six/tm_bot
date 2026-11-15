@@ -2,6 +2,7 @@ import {
   CardName,
   Game,
   GameId,
+  ICard,
   IGame,
   IPlayer,
   InputResponse,
@@ -123,6 +124,36 @@ function cloneActorHistory(src: MutableActorHistory): MutableActorHistory {
 
 function deepCloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/**
+ * Submit a response, allowing for SelectCard prompts whose declared minimum exceeds the
+ * cards the engine actually dealt (an exhausted project deck can deal zero cards to a draft
+ * round or a draw-and-keep effect). The engine has no response it accepts in that state; its
+ * continuation handles a short selection, so lower the minimum to the number of cards
+ * submitted for that one prompt. Clone replay uses the same path, so a checkpoint saved before
+ * such a prompt replays identically.
+ */
+function processEngineResponse(engineGame: IGame, seat: Seat, response: InputResponse): void {
+  const player = engineGame.players[seat];
+  const waiting = player.getWaitingFor();
+  if (
+    response.type === 'card' &&
+    waiting !== undefined &&
+    waiting.type === 'card' &&
+    response.cards.length < (waiting as SelectCard<ICard>).config.min
+  ) {
+    const prompt = waiting as SelectCard<ICard>;
+    const min = prompt.config.min;
+    prompt.config.min = response.cards.length;
+    try {
+      player.process(response);
+    } finally {
+      prompt.config.min = min;
+    }
+    return;
+  }
+  player.process(response);
 }
 
 function isSafeRootCheckpoint(game: IGame): boolean {
@@ -356,7 +387,7 @@ export class GameAdapter implements AdapterGame {
     const historySnapshot = this.snapshotHistoryContext(player, game);
 
     try {
-      player.process(response);
+      processEngineResponse(game, seat, response);
     } catch (err) {
       const failureHistory = [...this.history, record];
       throw new AdapterBugError({
@@ -607,7 +638,7 @@ export class GameAdapter implements AdapterGame {
 
     for (let i = 0; i < this.suffixSubmissions.length; i++) {
       const sub = this.suffixSubmissions[i];
-      clonedEngine.players[sub.seat].process(deepCloneJson(sub.response));
+      processEngineResponse(clonedEngine, sub.seat, deepCloneJson(sub.response));
       const suffixCount = i + 1;
       while (
         detCursor < this.determinizations.length &&

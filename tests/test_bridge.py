@@ -109,6 +109,45 @@ def test_full_random_game_matches_node_only_run() -> None:
         client.close_game(game_id)
 
 
+def test_empty_project_deck_regression_case_completes() -> None:
+    case_path = (
+        REPO_ROOT
+        / "adapter"
+        / "test"
+        / "fixtures"
+        / "train-0027__vastitas_borealis_nova__AdapterBugError.json"
+    )
+    case = json.loads(case_path.read_text(encoding="utf-8"))
+    rng = random.Random(32)
+
+    with WorkerClient() as client:
+        game_id = client.create(seed_key=case["seed_key"], map=case["map_name"])
+        for seat, candidate_index in case["actions"]:
+            assert seat in client.pending(game_id)
+            client.choose(game_id, seat, candidate_index)
+
+        # Issue #32: the exhausted project deck dealt seat 1 a 0-card draft prompt.
+        pending = client.pending(game_id)
+        assert pending == [0, 1]
+        empty = client.choice(game_id, 1)
+        assert empty.kind == "multi_card"
+        assert [candidate.id for candidate in empty.candidates] == ["done"]
+
+        decisions = 0
+        while pending:
+            seat = pending[0]
+            choice = client.choice(game_id, seat)
+            client.choose(game_id, seat, rng.randrange(len(choice.candidates)))
+            decisions += 1
+            assert decisions <= 20_000
+            pending = client.pending(game_id)
+
+        result = client.result(game_id)
+        assert result is not None
+        assert result.generations >= 73
+        client.close_game(game_id)
+
+
 def test_batched_requests_play_several_games_concurrently_on_one_worker() -> None:
     specs = [
         {"seedKey": f"batch-concurrent-{i}", "map": SUPPORTED_MAPS[i]}
