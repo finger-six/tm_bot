@@ -29,6 +29,7 @@ from tm_bot.comparator.ppo import (
     compute_gae,
     compute_surrogate_loss,
 )
+from tm_bot.comparator.ppo import _policy_terms as ppo_policy_terms
 from tm_bot.models.encode import collate_encoded_batch, encode_choice, encode_observation
 from tm_bot.models.network import TMModelConfig, TMNetwork
 from tm_bot.models.vocab import CardVocab
@@ -125,7 +126,7 @@ def _samples(model: ComparatorNetwork, n: int = 8) -> list[PPOSample]:
                 old_log_prob=float(torch.log(probs[action].clamp_min(1e-12)).item()),
                 behavior_value=float(probs[action].item()),
                 advantage=float(advantages[i]),
-                return_=float(advantages[i]),
+                return_=1.0 if advantages[i] > 0 else 0.0,
             )
         )
     return samples
@@ -207,6 +208,56 @@ def test_ppo_update_reduces_surrogate_loss_on_fixed_batch() -> None:
     assert stats.updates == 5
     final = compute_surrogate_loss(model, samples, clip=0.2, device="cpu")
     assert final < initial - 1e-4
+
+
+@pytest.mark.parametrize(("win_target", "lo", "hi"), [(0.0, 0.0, 0.8), (1.0, 0.8, 1.0)])
+def test_gae_value_targets_stay_in_win_probability_space(
+    win_target: float, lo: float, hi: float
+) -> None:
+    # Win-probability head predicts 0.8 everywhere. A lost game must pull every value target
+    # down (never above the prediction), a won game must pull every target up, and the
+    # terminal target equals the outcome in [0, 1] (issue #25 review: targets were biased up).
+    values = [0.8] * 50
+    advantages, returns = compute_gae(values, win_target)
+    assert returns[-1] == pytest.approx(win_target)
+    assert np.all(returns >= lo - 1e-6) and np.all(returns <= hi + 1e-6)
+    if win_target == 0.0:
+        assert np.all(advantages < 0.0)
+    else:
+        assert np.all(advantages > 0.0)
+
+
+def test_gae_rejects_utility_space_outcomes() -> None:
+    # The terminal outcome must be a win probability (loss 0, tie 0.5, win 1), the same space as
+    # the win-probability head's bootstrap values; a -1/+1 utility would bias every target.
+    with pytest.raises(ValueError):
+        compute_gae([0.8, 0.8], -1.0)
+
+
+def test_ppo_value_loss_targets_returns_directly() -> None:
+    model = _tiny_comparator()
+    samples = _samples(model)
+    batch, ppo = collate_ppo_samples(samples)
+    with torch.inference_mode():
+        _, parts = ppo_policy_terms(model, batch, ppo, clip=0.2, value_coef=1.0, entropy_coef=0.0)
+        out = model(batch, compute_policy=False, compute_value=True)
+    expected = torch.nn.functional.binary_cross_entropy_with_logits(
+        out["value_logit"].float(), ppo["returns"].float()
+    )
+    assert float(parts["value_loss"]) == pytest.approx(float(expected), rel=1e-5)
+
+
+def test_ppo_train_with_empty_rollout_does_not_reuse_stale_buffer() -> None:
+    config = RunConfig(
+        run_name="t", agent_kind="comparator", updates_per_cycle=3, learner_batch_size=4
+    )
+    model = _tiny_comparator()
+    buffer = PPOBuffer(capacity=16)
+    buffer.extend(_samples(model))
+    before = [p.detach().clone() for p in model.parameters()]
+    stats = PPOLearner(config, model, device="cpu").train(buffer, samples=[])
+    assert stats.updates == 0
+    assert all(torch.equal(a, b) for a, b in zip(before, model.parameters()))
 
 
 def test_gae_and_ppo_buffer_roundtrip() -> None:

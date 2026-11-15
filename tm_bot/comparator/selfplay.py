@@ -191,9 +191,11 @@ class ComparatorSelfPlayEngine:
                     "recorded comparator observations do not all belong to the training seat"
                 )
             old_log_probs, behavior_values = self._behavior_stats(records)
+            # The bootstrap values are win probabilities, so the outcome enters GAE as a win
+            # probability too (loss 0, tie 0.5, win 1), not as the -1/+1 utility.
             advantages, returns = compute_gae(
                 behavior_values,
-                utility,
+                (float(utility) + 1.0) * 0.5,
                 gamma=self.config.ppo_gamma,
                 gae_lambda=self.config.ppo_gae_lambda,
             )

@@ -73,11 +73,17 @@ seat samples from the masked policy (`temperature=1`); opponents act greedily.
 Each recorded training-seat decision stores the selected action, its behavior
 log-probability, the behavior value, and the terminal utility. GAE
 ([`ppo.py:compute_gae`](../tm_bot/comparator/ppo.py)) computes advantages over
-the game with `gamma=1.0` and `lambda=0.95`; the learner
+the game with `gamma=1.0` and `lambda=0.95` in win-probability space: the
+bootstrap values are the win-probability head's outputs, so the terminal outcome
+enters as loss 0 / tie 0.5 / win 1 and the returns are the head's BCE targets.
+Advantages are standardized per minibatch. The learner
 ([`PPOLearner`](../tm_bot/comparator/ppo.py)) applies the clipped PPO surrogate
-(epsilon 0.2), a value-critic BCE loss against the discounted return, and an
-entropy bonus. Spec defaults are a 16 x 2,048-decision rollout
-(`ppo_rollout_decisions`), 200k-decision ring buffer, AdamW, lr 5e-4, batch 256.
+(epsilon 0.2), the value-critic BCE loss, and an entropy bonus; an empty rollout
+(e.g. every game cut by the deadline) performs no update rather than reusing stale
+buffer rows. A rollout is measured in games (`games_per_cycle`), not decisions:
+the spec's 16 x 2,048 = 32,768-decision rollout corresponds to roughly 90 games
+at ~360 training-seat decisions per game. 200k-decision ring buffer, AdamW,
+lr 5e-4, batch 256.
 The development run used 16 games/cycle, 32 minibatch updates/cycle, batch 256,
 lr 3e-4, and bfloat16 AMP.
 

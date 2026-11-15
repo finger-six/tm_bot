@@ -82,7 +82,6 @@ class RunConfig:
     ppo_gae_lambda: float = 0.95
     ppo_value_coef: float = 0.5
     ppo_entropy_coef: float = 0.01
-    ppo_rollout_decisions: int = 16 * 2_048
 
     # Opponent sampling (latest / frozen pool / B1).
     opponent_latest_prob: float = 0.60
@@ -160,8 +159,6 @@ class RunConfig:
             )
         if self.ppo_gamma <= 0.0:
             raise ValueError(f"ppo_gamma must be > 0, got {self.ppo_gamma}")
-        if self.ppo_rollout_decisions < 1:
-            raise ValueError("ppo_rollout_decisions must be >= 1")
         probs = (
             self.opponent_latest_prob,
             self.opponent_pool_prob,

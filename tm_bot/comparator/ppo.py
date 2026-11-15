@@ -143,12 +143,18 @@ def collate_ppo_samples(
 
 def compute_gae(
     values: Sequence[float],
-    utility: float,
+    win_target: float,
     *,
     gamma: float = 1.0,
     gae_lambda: float = 0.95,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """GAE for one episode with zero intermediate rewards and `utility` at the end."""
+    """GAE for one episode with zero intermediate rewards and `win_target` at the end.
+
+    `values` are the win-probability head's predictions, so the terminal outcome must be in
+    the same space: loss 0, tie 0.5, win 1. The returns are then win-probability targets.
+    """
+    if not 0.0 <= float(win_target) <= 1.0:
+        raise ValueError(f"win_target must be in [0, 1] (got {win_target}); pass (utility+1)/2")
     n = len(values)
     if n == 0:
         return np.zeros((0,), dtype=np.float32), np.zeros((0,), dtype=np.float32)
@@ -158,7 +164,7 @@ def compute_gae(
     next_advantage = 0.0
     for t in reversed(range(n)):
         terminal = t == n - 1
-        reward = float(utility) if terminal else 0.0
+        reward = float(win_target) if terminal else 0.0
         nonterminal = 0.0 if terminal else 1.0
         delta = reward + gamma * next_value * nonterminal - float(values[t])
         next_advantage = delta + gamma * gae_lambda * nonterminal * next_advantage
@@ -166,6 +172,13 @@ def compute_gae(
         returns[t] = next_advantage + float(values[t])
         next_value = float(values[t])
     return advantages, returns
+
+
+def _normalize_advantages(advantages: torch.Tensor) -> torch.Tensor:
+    """Standardize advantages per batch so the step size does not depend on the win/loss mix."""
+    if advantages.numel() < 2:
+        return advantages
+    return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
 
 def _policy_terms(
@@ -185,7 +198,7 @@ def _policy_terms(
     actions = ppo["actions"].to(logits.device).long()
     new_log_probs = safe_log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
     old_log_probs = ppo["old_log_probs"].to(logits.device).float()
-    advantages = ppo["advantages"].to(logits.device).float()
+    advantages = _normalize_advantages(ppo["advantages"].to(logits.device).float())
     ratio = torch.exp(new_log_probs - old_log_probs)
     unclipped = ratio * advantages
     clipped = torch.clamp(ratio, 1.0 - clip, 1.0 + clip) * advantages
@@ -193,7 +206,7 @@ def _policy_terms(
 
     value_logit = out["value_logit"].float()
     returns = ppo["returns"].to(value_logit.device).float()
-    value_targets = (returns + 1.0) * 0.5
+    value_targets = returns.clamp(0.0, 1.0)
     value_loss = F.binary_cross_entropy_with_logits(value_logit, value_targets)
 
     probs = out["policy_probs"].float()
@@ -230,7 +243,7 @@ def compute_surrogate_loss(
         actions = ppo["actions"].long()
         new_log_probs = safe.gather(1, actions.unsqueeze(1)).squeeze(1)
         ratio = torch.exp(new_log_probs - ppo["old_log_probs"].float())
-        advantages = ppo["advantages"].float()
+        advantages = _normalize_advantages(ppo["advantages"].float())
         loss = -torch.minimum(
             ratio * advantages,
             torch.clamp(ratio, 1.0 - clip, 1.0 + clip) * advantages,
@@ -252,6 +265,7 @@ class PPOStats:
     nonfinite_params: bool = False
     per_step_policy: list[float] = field(default_factory=list)
     per_step_value: list[float] = field(default_factory=list)
+    per_step_total: list[float] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -302,7 +316,9 @@ class PPOLearner:
         """Run `updates` clipped-surrogate steps on a fresh rollout (or buffer sample)."""
         n_updates = self.config.updates_per_cycle if updates is None else updates
         stats = PPOStats()
-        source = list(samples) if samples else list(buffer.samples)
+        # An explicit empty rollout (e.g. every game hit the deadline) must not fall back to the
+        # buffer: its log-probs and advantages come from older weights.
+        source = list(samples) if samples is not None else list(buffer.samples)
         if n_updates <= 0 or not source:
             return stats
 
@@ -343,13 +359,12 @@ class PPOLearner:
             stats.updates += 1
             stats.per_step_policy.append(float(parts["policy_loss"].item()))
             stats.per_step_value.append(float(parts["value_loss"].item()))
+            stats.per_step_total.append(loss_value)
 
         if stats.updates:
             stats.policy_loss = float(np.mean(stats.per_step_policy))
             stats.value_loss = float(np.mean(stats.per_step_value))
-            stats.total_loss = float(
-                stats.policy_loss + self.config.ppo_value_coef * stats.value_loss
-            )
+            stats.total_loss = float(np.mean(stats.per_step_total))
             stats.entropy = float(parts["entropy"].item())
             stats.mean_ratio = float(parts["mean_ratio"].item())
         self.model.eval()
@@ -394,11 +409,10 @@ class PPOLearner:
             stats.updates += 1
             stats.per_step_policy.append(float(parts["policy_loss"].item()))
             stats.per_step_value.append(float(parts["value_loss"].item()))
+            stats.per_step_total.append(loss_value)
         if stats.updates:
             stats.policy_loss = float(np.mean(stats.per_step_policy))
             stats.value_loss = float(np.mean(stats.per_step_value))
-            stats.total_loss = float(
-                stats.policy_loss + self.config.ppo_value_coef * stats.value_loss
-            )
+            stats.total_loss = float(np.mean(stats.per_step_total))
         self.model.eval()
         return stats
