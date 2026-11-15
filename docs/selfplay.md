@@ -198,12 +198,12 @@ stop. Per-cycle metrics (before/after the single update cycle):
 
 | Cycle | Games | Mean gens | Throughput (cum) | Policy loss | Value loss | Probe entropy | Target entropy | Value Brier / ECE |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 1 | 16 | 23.8 | 338/h | 1.304 | 0.367 | 1.234 | 1.200 | 0.378 / 0.354 |
+| 1 | 16 | 23.8 | 338/h | 1.304 | 0.367 | 1.234 | 1.200 | 0.378 / 0.335 |
 | 2 | 16 | 32.9 | 192/h | — (stopped before update) | — | 1.291 | 1.250 | 0.415 / 0.398 |
 
 Value calibration is measured on the cycle's newly finished games **before**
 they enter the buffer and before the update (frozen weights): n = 11,674 total,
-2,665 wins / 4,119 losses / 0 ties (from the training seat's perspective). The
+5,773 wins / 5,901 losses / 0 ties (from the training seat's perspective). The
 value head is badly overconfident on the top bin (mean predicted 0.96 vs
 observed 0.35), which the ECE reflects. The probe entropy is the network policy
 entropy on the first cycle's fixed observation set; target entropy is the
