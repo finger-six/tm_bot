@@ -134,6 +134,12 @@ function deepCloneJson<T>(value: T): T {
  * submitted for that one prompt. Clone replay uses the same path, so a checkpoint saved before
  * such a prompt replays identically.
  */
+function sameCardNames(submitted: ReadonlyArray<string>, dealt: ReadonlyArray<ICard>): boolean {
+  const a = [...submitted].sort();
+  const b = dealt.map((c) => c.name as string).sort();
+  return a.length === b.length && a.every((name, i) => name === b[i]);
+}
+
 function processEngineResponse(engineGame: IGame, seat: Seat, response: InputResponse): void {
   const player = engineGame.players[seat];
   const waiting = player.getWaitingFor();
@@ -141,8 +147,8 @@ function processEngineResponse(engineGame: IGame, seat: Seat, response: InputRes
     response.type === 'card' &&
     waiting !== undefined &&
     waiting.type === 'card' &&
-    isDealtShort(waiting as SelectCard<ICard>) &&
-    response.cards.length === (waiting as SelectCard<ICard>).cards.length
+    isDealtShort(waiting as SelectCard<ICard>, player) &&
+    sameCardNames(response.cards, (waiting as SelectCard<ICard>).cards)
   ) {
     const prompt = waiting as SelectCard<ICard>;
     const min = prompt.config.min;

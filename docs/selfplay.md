@@ -218,7 +218,10 @@ The run saved seed + full action history to
 and stopped instead of treating the game as a result. This is a real
 adapter/engine edge case for games that run far past the normal 14 generations
 (see #29/#31); it also appeared in the earlier pre-fix attempt at generations
-44-48.
+44-48. Fixed by #32: when the project deck is exhausted the adapter now offers
+the forced (short or empty) selection and lowers the engine minimum for that one
+submission; the case is a committed regression test
+(`adapter/test/cardExhaustion.test.ts`, `tests/test_bridge.py`).
 
 **Dev results** (externally evaluated from `ckpt-000000001`, 104 seat-swapped
 `dev-*` games per pairing, s4/K4, 16 workers, batch 32; JSON under

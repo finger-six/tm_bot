@@ -157,12 +157,18 @@ describe('Issue #32: 0-card SelectCard when the project deck is exhausted', () =
       }),
     );
 
-    // One card dealt against min 2: the single available card is forced.
+    // While the project deck still has cards, a short prompt is an adapter bug, not exhaustion.
+    assert.throws(() => game.choice(0), /SelectCard requires at least 2 cards, only 1 enabled/);
+    engine.projectDeck.drawPile.splice(0);
+    engine.projectDeck.discardPile.splice(0);
+
+    // One card dealt against min 2 with the deck exhausted: the single card is forced.
     const choice = game.choice(0);
     assert.equal(choice.kind, 'card');
     assert.equal(choice.candidates.length, 1);
     game.choose(0, 0);
     assert.equal(kept, 1);
+    assert.equal(prompt.config.min, 2, 'engine minimum is restored after the short submit');
 
     let keptEmpty = -1;
     const emptyPrompt = new SelectCard('Keep the cards you drew', 'Keep', [], {min: 2, max: 2});
@@ -175,6 +181,7 @@ describe('Issue #32: 0-card SelectCard when the project deck is exhausted', () =
     assert.deepEqual(game.choice(0).candidates.map((c) => c.id), ['done']);
     game.choose(0, 0);
     assert.equal(keptEmpty, 0);
+    assert.equal((emptyPrompt as unknown as {config: {min: number}}).config.min, 2);
   });
   it('still rejects a shortfall caused by disabled cards (not an exhausted deck)', () => {
     const game = createGame({seedKey: 'disabled-select-card', map: 'tharsis'});
@@ -203,6 +210,8 @@ describe('Issue #32: 0-card SelectCard when the project deck is exhausted', () =
     };
     engine.players[1].clearWaitingFor();
     p0.clearWaitingFor();
+    engine.projectDeck.drawPile.splice(0);
+    engine.projectDeck.discardPile.splice(0);
     p0.setWaitingFor(
       new SelectCard('Select 2', 'Select', [new FusionPower(), new Ants()], {min: 2, max: 2, enabled: [true, false]}),
     );

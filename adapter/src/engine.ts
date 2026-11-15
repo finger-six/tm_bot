@@ -414,6 +414,7 @@ export interface IPlayer {
   getVictoryPoints(): {total: number};
   availableHeat(): number;
   getSteelValue(): number;
+  readonly game: IGame;
   getTitaniumValue(): number;
   getSpendable(resource: SpendableResource): number;
   getCardsWithResources(resource: string): Array<ICard>;

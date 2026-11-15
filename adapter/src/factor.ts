@@ -61,11 +61,18 @@ function getEnabledCards(sc: SelectCard<ICard>): Array<ICard> {
 }
 
 /**
- * True when the engine dealt fewer cards than the prompt's minimum and every dealt card is
- * selectable (exhausted project deck). Taking all of them is then the only possible answer.
+ * True when the engine dealt fewer cards than the prompt's minimum because the project deck
+ * is exhausted (draw and discard piles both empty), and every dealt card is selectable. Taking
+ * all of them is then the only possible answer. Any other shortfall stays an adapter bug.
  */
-export function isDealtShort(sc: SelectCard<ICard>): boolean {
-  return sc.cards.length < sc.config.min && getEnabledCards(sc).length === sc.cards.length;
+export function isDealtShort(sc: SelectCard<ICard>, player: IPlayer): boolean {
+  const deck = player.game.projectDeck;
+  return (
+    sc.cards.length < sc.config.min &&
+    getEnabledCards(sc).length === sc.cards.length &&
+    deck.drawPile.length === 0 &&
+    deck.discardPile.length === 0
+  );
 }
 
 function getPaymentOptionsForSelectPayment(sp: SelectPayment, player: IPlayer): Partial<PaymentOptions> {
@@ -281,7 +288,7 @@ function buildFrame(input: PlayerInput, player: IPlayer, maxCardOverride?: numbe
       // nothing once the project deck is exhausted). The selection is then forced: take
       // whatever was dealt. The submit path lowers the engine minimum to match. Any other
       // shortfall (cards present but disabled) is still an adapter bug.
-      if (orderedCards.length < sc.config.min && !isDealtShort(sc)) {
+      if (orderedCards.length < sc.config.min && !isDealtShort(sc, player)) {
         throw new Error(`SelectCard requires at least ${sc.config.min} cards, only ${orderedCards.length} enabled`);
       }
       const effectiveMin = Math.min(sc.config.min, effectiveMax);
