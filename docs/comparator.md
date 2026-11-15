@@ -68,7 +68,9 @@ start can be run with `--epochs 4` and no step cap.
 plays `train-*` games through the same adapter runner and recorder as the main
 agent, with the same opponent sampling defaults: 60% latest comparator, 30%
 uniform from the last 10 frozen comparator checkpoints, 10% B1. The training
-seat samples from the masked policy (`temperature=1`); opponents act greedily.
+seat samples from the masked policy (`temperature=1`); comparator opponents
+(latest and pool) still act greedily. That differs from evaluation play (see
+[Evaluation policy](#evaluation-policy)) and is a known limitation.
 
 Each recorded training-seat decision stores the selected action, its behavior
 log-probability, the behavior value, and the terminal utility. GAE
@@ -78,135 +80,185 @@ bootstrap values are the win-probability head's outputs, so the terminal outcome
 enters as loss 0 / tie 0.5 / win 1 and the returns are the head's BCE targets.
 Advantages are standardized per minibatch. The learner
 ([`PPOLearner`](../tm_bot/comparator/ppo.py)) applies the clipped PPO surrogate
-(epsilon 0.2), the value-critic BCE loss, and an entropy bonus; an empty rollout
-(e.g. every game cut by the deadline) performs no update rather than reusing stale
-buffer rows. A rollout is measured in games (`games_per_cycle`), not decisions:
-the spec's 16 x 2,048 = 32,768-decision rollout corresponds to roughly 90 games
-at ~360 training-seat decisions per game. 200k-decision ring buffer, AdamW,
-lr 5e-4, batch 256.
-The development run used 16 games/cycle, 32 minibatch updates/cycle, batch 256,
-lr 3e-4, and bfloat16 AMP.
+(epsilon 0.2), the value-critic BCE loss, and an entropy bonus (coefficient 0.01).
+
+Every cycle trains only on that cycle's fresh rollout. PPO is on-policy, so a
+comparator run keeps no decision buffer: older rows carry log-probabilities and
+advantages from older weights. An empty rollout (e.g. every game cut by the
+deadline) performs no update. This also keeps the comparator's resumable
+`state.pt` at ~32 MB instead of ~1.1 GB. A rollout is measured in games
+(`games_per_cycle`), not decisions: the spec's 16 x 2,048 = 32,768-decision
+rollout corresponds to roughly 40 games at ~870 decisions per game (both
+seats). Defaults: AdamW, lr 5e-4, batch 256. The development run used 16
+games/cycle, 32 minibatch updates/cycle, batch 256, lr 3e-4 and bfloat16 AMP.
 
 Checkpoints, `dev-*` evaluation, best selection, stopping rules, monitoring,
-resource limits, and resume are the existing `tm_bot.runs` machinery;
-`CheckpointManager.restore_model` dispatches on the checkpoint architecture so
+resource limits, and resume are the existing `tm_bot.runs` machinery.
+`CheckpointManager.restore_model` dispatches on the checkpoint architecture, so
 comparator runs resume and roll back correctly.
 
-## Development run (2026-11-14)
+### Value-target bug fixed during review
 
-Run `runs/cmp-dev1h/` (gitignored): `--agent-kind comparator`, 16 workers,
-30-minute wall-clock budget, 16 games/cycle, 32 updates/cycle, warm start above,
-checkpoint interval 30 min. Training ran 13 cycles (208 games, 199,490 decisions,
-384 PPO steps, 3.5 ms p50 / 5.9 ms p95 per decision) in **1,240 s (20.7 min)** and
-then hard-stopped on the known adapter bug #32 (`SelectCard ... only 0 enabled`
-in drafting at generation 44 on `train-0198`). The regression case is
-`runs/cmp-dev1h/regression/train-0198__hellas__AdapterBugError.json`.
+The first development run reported a value head predicting ~0.99 win
+probability while losing every game vs B1 (Brier 0.87, ECE 0.93). The cause was
+a GAE bug, not overconfidence from a short warm start. GAE mixed a -1/+1
+terminal utility with win-probability (0..1) bootstrap values. A lost game then
+produced returns well above 0, which biased the BCE value targets upward.
+Commit `b5d5fd8` computes GAE entirely in win-probability space
+(`tests/test_comparator.py` covers the targets for wins and losses from both
+seats). After the fix, in-run value calibration on finished self-play games
+improved from Brier 0.094 / ECE 0.233 (cycle 1) to Brier 0.053 / ECE 0.098
+(cycle 36).
 
-| Cycle metric | Value |
+## Evaluation policy
+
+Dev evaluation, calibration and the eval-CLI factory play the comparator's
+**sampled** policy at temperature 1, seeded per seat
+(`comparator_eval_factory`, [`agent.py`](../tm_bot/comparator/agent.py)), not
+greedy argmax.
+
+Greedy play stalled the first in-run dev evaluation. Greedy comparator vs
+greedy warm start looped forever: on `tharsis` `dev-0000` the game reached
+generation 244 with oceans (9) and oxygen (14) maxed and temperature stuck at
+-10, while both seats kept buying the Aquifer standard project. Every dev game
+hit the 20,000-decision step cap. With sampled play, games take 14-20
+generations on average and a few seconds each. Each seat's agent is reset with
+its seat seed, so evaluating the same checkpoints on the same seeds reproduces
+exactly (`tests/test_comparator.py`). The main agent's IS-MCTS evaluation is
+unaffected (the #24 candidate-vs-warm-start run completed 104/104 games).
+
+## Development run (2026-11-15)
+
+Run `runs/cmp-dev1h-final/` (gitignored): `--agent-kind comparator`, warm start
+above, 16 workers, 1 h wall-clock budget, 16 games/cycle, 32 updates/cycle,
+batch 256, lr 3e-4, 15-minute checkpoints with **in-run** dev evaluation (32
+games vs B1 and 32 vs the previous best per checkpoint). It stopped on the
+budget rule after 37 cycles, with 0 adapter rejections and 0 failures.
+
+| Metric | Value |
 | --- | ---: |
-| Self-play games | 208 |
-| Decisions | 199,490 (959/game) |
-| Mean generations/game | 24.64 (range 12-59) |
-| Wins / losses / ties (training seat) | 62 / 145 / 0 |
-| Opponent mix | 191 latest / 0 pool / 17 B1 |
-| Throughput | **604 self-play games/hour** (cumulative) |
-| Policy / value loss (last completed cycle) | 0.058 / 0.298 |
-| Rejections / other failures | 1 / 0 |
-| Shape flags (outside 6-25 generations) | 69 of 208 games |
+| Self-play games | 576 |
+| Decisions | 503,500 (874/game) |
+| PPO steps | 1,152 |
+| Training-loop wall clock | 3,601 s (3,012 s self-play + learner, the rest in-run dev eval) |
+| Total wall clock incl. final dev eval | 3,773 s |
+| Throughput | **576 self-play games/hour** (cumulative, including dev eval) |
+| Mean generations/game | 21.7 (range 11-65) |
+| Shape flags (outside 6-25 generations) | 103 of 576 games |
+| Wins / losses / ties (training seat) | 194 / 382 / 0 |
+| Opponent mix | 399 latest / 126 pool / 51 B1 |
+| Decision latency p50 / p95 (median over cycles) | 3.5 ms / 6.0 ms |
+| Policy entropy, cycle 1 -> 36 | 1.17 -> 1.12 |
+| Value loss, cycle 1 -> 36 | 0.58 -> 0.17 |
 
-The frozen-checkpoint pool stayed empty because no 30-minute checkpoint elapsed
-before the 20.7-minute stop; the pool share therefore fell back to "latest", as
-designed for a fresh run.
+Mean generations per game dropped from 38.9 in cycle 1 to 17-19 from cycle 10 on.
 
-### Dev-seed evaluation
+### In-run dev evaluation
 
-Because the run hard-stopped on the adapter bug, `dev-*` games were evaluated
-externally from the final checkpoint `runs/cmp-dev1h/best/` (the run checkpoint
-plus the warm-start calibration temperature), exactly as the #24 development run
-did. Each pairing is seat-swapped over four maps (52 requested games -> 56
-games).
+| Checkpoint | Cycle | Games | vs B1 (32 games) | VP margin vs B1 | vs previous best (32 games, 95% CI) | New best |
+| --- | ---: | ---: | --- | ---: | --- | :---: |
+| ckpt-000000001 | 11 | 176 | 0.0% [0.0, 0.0] | -81.7 | 68.8% [46.9, 84.4] vs warm start | yes |
+| ckpt-000000002 | 21 | 336 | 0.0% [0.0, 0.0] | -77.5 | 71.9% [50.0, 87.5] vs ckpt-1 | no |
+| ckpt-000000003 | 30 | 480 | 0.0% [0.0, 0.0] | -73.9 | 96.9% [90.6, 100] vs ckpt-1 | no |
+| ckpt-000000004 | 37 | 576 | 0.0% [0.0, 0.0] | -77.1 | 96.9% [90.6, 100] vs ckpt-1 | no |
+| ckpt-000000005 | 37 | 576 | 0.0% [0.0, 0.0] | -77.1 | 96.9% [90.6, 100] vs ckpt-1 | no |
+
+The run exposed two orchestration issues. Both are fixed on this branch, with tests:
+
+- **Best selection.** It used the vs-B1 win rate with a strict `>`. At 0% vs B1
+  the best stayed `ckpt-000000001`, so "previous best" never advanced, and the
+  plateau rule would have fired after 12 checkpoints while the agent kept
+  improving. Now an exact vs-B1 tie becomes the new best only if it beats the
+  previous best with the 95% CI lower bound above 50% (`is_new_best` in
+  [`stopping.py`](../tm_bot/runs/stopping.py), shared by best selection and the
+  stopping monitor). Under this rule `ckpt-000000003` would have become the
+  best.
+- **Duplicate final checkpoint.** `ckpt-000000005` holds the same weights as
+  `ckpt-000000004`. The final soft-stop checkpoint fired whenever 60 s had
+  passed since the previous checkpoint *started*, and that checkpoint's own dev
+  eval took longer than that. It now fires only if the model trained since the
+  last checkpoint.
+
+### External dev evaluation and calibration (200 games per pairing)
+
+From `ckpt-000000005` with `python -m tm_bot.comparator.calibration` (seat
+swapped, four maps, `dev-*` seeds; no `eval-*` seed was touched):
 
 | Pairing | Games | Completed | Failures | Win rate (95% paired bootstrap CI) | Mean VP margin | Mean gens | Wall |
 | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: |
-| Comparator vs B1 | 56 | 48 | 8 | **0.00%** [0.00%, 0.00%] | -94.56 | 15.08 | 125 s |
-| Comparator vs its warm start | 56 | 0 | 56 | **not measurable** (CI n/a) | n/a | n/a | 235 s |
-| Comparator vs warm start, `dev` seeds 10-11 | 16 | 0 | 16 | not measurable | n/a | n/a | ~1 min |
+| Comparator vs B1 | 200 | 200 | 0 | **8.0%** [2.0, 16.0] | -60.7 | 14.0 | 332 s |
+| Comparator vs its warm start | 200 | 200 | 0 | **89.5%** [85.0, 93.5] | +34.8 | 19.8 | 742 s |
 
-All 8 vs-B1 failures and all 56 vs-warm-start failures are the same
-`AdapterBugError` (#32): a `SelectCard` prompt with zero enabled cards in the
-draft phase. Completed vs-B1 games are normal length (15.1 generations); the
-failures occur around generations 38-42 (vs B1) and 31-34 (vs its warm start),
-before any step cap. The adapter was not patched in this ticket, so the
-warm-start pairing cannot produce a win-rate estimate yet.
+After 1 h of PPO the comparator clearly beats its warm start. It is still far
+below B1.
 
-Total development pipeline: 114.5 s warm start + 1,240 s PPO + 125 s vs-B1 eval
-+ 235 s vs-warm-start eval = **1,715 s (28.6 min)**, within the 1 h development
-limit.
+### Win-probability calibration
 
-### Win-probability calibration (`dev-*`, vs B1)
+Artifacts: `runs/cmp-dev1h-final/calibration/dev_vs_{b1,warmstart}.{json,md}`
+and `*_reliability.svg` (gitignored). Every decision of the comparator's seat
+is scored against the game outcome. Temperature `T = 0.8144` was fitted on the
+warm-start validation split and is not refitted on `dev-*`.
 
-Report artifacts: `runs/cmp-dev1h/calibration/dev_vs_b1.{json,md}` and
-`dev_vs_b1_reliability.svg` (gitignored). Temperature `T = 0.8144` was fitted on
-the warm-start **validation** split; it is applied here without refitting on
-`dev-*`.
+| Pairing | n decisions | Brier raw / T | NLL raw / T | ECE raw / T | Accuracy |
+| --- | ---: | --- | --- | --- | ---: |
+| vs B1 | 52,566 | 0.089 / 0.094 | 0.280 / 0.300 | 0.084 / 0.102 | 0.877 |
+| vs warm start | 82,871 | 0.603 / 0.646 | 1.776 / 2.095 | 0.708 / 0.735 | 0.202 |
 
-| Metric (n = 12,558 decisions, 48 completed games) | Raw (T=1) | Calibrated (T=0.8144) |
-| --- | ---: | ---: |
-| Brier | 0.8695 | 0.8967 |
-| NLL | 3.9145 | 4.7684 |
-| ECE | 0.9251 | 0.9407 |
-| Accuracy | 0.0090 | 0.0090 |
+Reliability vs B1 (raw): 85% of decisions fall in the [0, 0.1] bin, with mean
+prediction 0.041 vs observed 0.052. The few won games are under-predicted
+(predictions 0.1-0.7, observed 0.55-1.0). Vs its warm start the head is
+strongly **under**confident: predictions 0.07-0.64, while the observed win rate
+is 0.88-1.0 in every bin.
 
-Reliability (calibrated), predicted -> observed:
+The head estimates the win probability from the state alone, against the
+opponent mix it was trained on (mostly itself). It has no input for who the
+opponent is, so it cannot know it faces a weaker warm start. Its calibration is
+therefore opponent-dependent: close vs B1, far off vs a much weaker opponent.
 
-| Bin | Count | Mean predicted | Observed | Gap |
-| --- | ---: | ---: | ---: | ---: |
-| [0.3, 0.4] | 8 | 0.3937 | 0.0000 | +0.3937 |
-| [0.4, 0.5] | 105 | 0.4482 | 0.0000 | +0.4482 |
-| [0.5, 0.6] | 201 | 0.5551 | 0.0000 | +0.5551 |
-| [0.6, 0.7] | 325 | 0.6531 | 0.0000 | +0.6531 |
-| [0.7, 0.8] | 754 | 0.7546 | 0.0000 | +0.7546 |
-| [0.8, 0.9] | 1,207 | 0.8575 | 0.0000 | +0.8575 |
-| [0.9, 1.0] | 9,958 | 0.9877 | 0.0000 | +0.9877 |
-
-The value head is severely overconfident: it predicts near-certain wins while
-the comparator loses every completed vs-B1 game. This is expected for a short
-warm start followed by 384 PPO steps against mostly-weak self-play opponents:
-the human-validation temperature does not transfer to the self-play/dev
-distribution. The calibration machinery is correct (temperature fit reduces
-validation NLL; see `tests/test_comparator.py`), but the agent needs the full
-24 h schedule before calibration numbers are meaningful.
+Known caveat (review P2-5): the temperature is fitted on the human-data
+validation `setup_outcomes`, not on a self-play-representative set. Here it
+makes every metric slightly worse (T < 1 sharpens). A held-out slice of
+`train-*` self-play games would be a representative fitting set. v1 does not
+use one because the spec fixes fitting to validation data.
 
 ### Known deviations
 
-- The development run hard-stopped at 20.7 min on adapter bug #32; the note in
-  the ticket explicitly allows recording and reporting this instead of patching
-  the adapter.
-- Dev evaluation was run externally after the stop (the same approach as the
-  #24 development run), not by the in-run checkpoint evaluator.
-- The warm start is a short development schedule (900 steps), not the full
-  4-epoch main-agent warm start.
-- No frozen opponent checkpoints existed during the development run because the
-  run was shorter than the 30-minute checkpoint interval.
+- The warm start is a short development schedule (1 epoch, 900 draft steps),
+  not the full 4-epoch main-agent warm start. Run `--epochs 4` before the
+  milestone run (#26) for parity with the main agent.
+- The in-run dev evaluation used 32 games per pairing to fit the 1 h limit; the
+  milestone default is 100.
+- Self-play comparator opponents act greedily, while evaluation samples.
 - `eval-*` seeds were never read or written; all reported games are `dev-*`.
+- Adapter bug #32, which cut the first development run short, is fixed on `main`.
 
 ## Commands
 
 ```bash
-# Warm start on the same corpus/split as the main agent.
+# Warm start on the same corpus/split as the main agent (full schedule: --epochs 4, no step cap).
 conda run -n tm_bot python -m tm_bot.comparator.warmstart \
   --out-dir runs/comparator-warmstart --epochs 1 --max-steps-per-epoch 900
 
-# PPO self-play under the run orchestration.
-conda run -n tm_bot python -m tm_bot.runs --run-name cmp-dev1h \
+# PPO self-play under the run orchestration (1 h development run).
+conda run -n tm_bot python -m tm_bot.runs --run-name cmp-dev1h-final \
   --agent-kind comparator --warmstart runs/comparator-warmstart/best \
-  --budget-hours 0.5 --workers 16 --games-per-cycle 16 --updates-per-cycle 32 \
-  --learner-batch-size 256 --learning-rate 0.0003 --dev-games 52
+  --budget-hours 1.0 --workers 16 --games-per-cycle 16 --updates-per-cycle 32 \
+  --learner-batch-size 256 --learning-rate 0.0003 --checkpoint-minutes 15 \
+  --dev-games 32
 
 # Dev-seed win rate + calibration report (seat-swapped, vs B1 or a checkpoint).
 conda run -n tm_bot python -m tm_bot.comparator.calibration \
-  --checkpoint runs/cmp-dev1h/best --opponent b1 --games 52 --workers 16 \
-  --device cuda --out runs/cmp-dev1h/calibration --name dev_vs_b1
+  --checkpoint runs/cmp-dev1h-final/checkpoints/ckpt-000000005 --opponent b1 \
+  --games 200 --workers 16 --device cuda \
+  --out runs/cmp-dev1h-final/calibration --name dev_vs_b1
+conda run -n tm_bot python -m tm_bot.comparator.calibration \
+  --checkpoint runs/cmp-dev1h-final/checkpoints/ckpt-000000005 \
+  --opponent runs/comparator-warmstart/best \
+  --games 200 --workers 16 --device cuda \
+  --out runs/cmp-dev1h-final/calibration --name dev_vs_warmstart
+
+# The general eval CLI loads the comparator through its factory:
+#   tm_bot.comparator:make_comparator_agent?checkpoint=<dir>&device=cuda
 ```
 
 ## Acceptance evidence
@@ -216,7 +268,7 @@ conda run -n tm_bot python -m tm_bot.comparator.calibration \
   `tests/test_comparator.py::test_illegal_candidates_get_exact_zero_probability`.
 - PPO update reduces surrogate loss on a fixed batch:
   `tests/test_comparator.py::test_ppo_update_reduces_surrogate_loss_on_fixed_batch`.
-- Calibration report: `runs/cmp-dev1h/calibration/` (Brier, NLL, reliability
-  table + SVG), summarized above.
-- Development run and dev-seed results: tables above; run artifacts under
-  `runs/cmp-dev1h/`.
+- Calibration report (Brier, NLL, reliability diagram): the tables above;
+  artifacts in `runs/cmp-dev1h-final/calibration/`.
+- 1 h development run under the run orchestration with dev-seed results: the
+  tables above; artifacts in `runs/cmp-dev1h-final/`.

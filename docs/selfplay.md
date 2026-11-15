@@ -99,8 +99,12 @@ requested 100). The candidate plays both B1 and the previous `best/` checkpoint;
 before the first `best/` exists, the resolved warm-start checkpoint (recorded in
 `config.json`) is the previous best, so the first checkpoint still gets a real
 second pairing. Win rate, 95% paired bootstrap CI, and mean VP margin are
-reported by the existing evaluation report code. Best is selected on `dev-*` win
-rate vs B1 only; `eval-*` seeds are never read or written by a run.
+reported by the existing evaluation report code. Best is selected on `dev-*`
+results only (`is_new_best` in [`stopping.py`](../tm_bot/runs/stopping.py),
+shared with the plateau and collapse rules): a higher win rate vs B1 wins; on an
+exact tie (e.g. 0% vs B1 early in training) the checkpoint becomes the new best
+only if it beats the previous best with the 95% CI lower bound above 50%.
+`eval-*` seeds are never read or written by a run.
 
 ## Stopping rules
 
