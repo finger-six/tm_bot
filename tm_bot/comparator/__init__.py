@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tm_bot.comparator.agent import ComparatorAgent
+from tm_bot.comparator.agent import ComparatorAgent, make_comparator_agent
 from tm_bot.comparator.model import (
     ComparatorConfig,
     ComparatorNetwork,
@@ -15,5 +15,6 @@ __all__ = [
     "ComparatorConfig",
     "ComparatorNetwork",
     "load_comparator_checkpoint",
+    "make_comparator_agent",
     "save_comparator_checkpoint",
 ]

@@ -185,3 +185,29 @@ def comparator_eval_factory(
         temperature=EVAL_ACTION_TEMPERATURE,
         version=version,
     )
+
+
+_EVAL_MODEL_CACHE: dict[tuple[str, str], tuple[ComparatorNetwork, CardVocab, str]] = {}
+
+
+def make_comparator_agent(
+    *,
+    checkpoint: str | Path,
+    device: str | None = None,
+) -> ComparatorAgent:
+    """Eval-CLI factory (`tm_bot.comparator:make_comparator_agent?checkpoint=...`).
+
+    Loads each checkpoint once per process and returns a fresh agent playing the
+    evaluation policy.
+    """
+    resolved_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    key = (str(Path(checkpoint).resolve()), resolved_device)
+    cached = _EVAL_MODEL_CACHE.get(key)
+    if cached is None:
+        model, vocab, meta = load_comparator_checkpoint(checkpoint, map_location=resolved_device)
+        model.eval()
+        version = str(meta.get("version") or f"comparator-{Path(checkpoint).name}")
+        cached = (model, vocab, version)
+        _EVAL_MODEL_CACHE[key] = cached
+    model, vocab, version = cached
+    return comparator_eval_factory(model, vocab, device=resolved_device, version=version)()

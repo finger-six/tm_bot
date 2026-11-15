@@ -12,7 +12,11 @@ import torch
 
 from tm_bot.agents.card_data import load_card_data
 from tm_bot.agents.protocol import GameRunResult
-from tm_bot.comparator.agent import ComparatorAgent, comparator_eval_factory
+from tm_bot.comparator.agent import (
+    EVAL_ACTION_TEMPERATURE,
+    ComparatorAgent,
+    comparator_eval_factory,
+)
 from tm_bot.comparator.calibration import (
     calibration_metrics,
     fit_temperature,
@@ -35,6 +39,7 @@ from tm_bot.comparator.ppo import (
 from tm_bot.comparator.ppo import _policy_terms as ppo_policy_terms
 from tm_bot.comparator.selfplay import ComparatorSelfPlayEngine
 from tm_bot.env.types import GameResult
+from tm_bot.eval.harness import resolve_agent_factory
 from tm_bot.models.encode import collate_encoded_batch, encode_choice, encode_observation
 from tm_bot.models.network import TMModelConfig, TMNetwork
 from tm_bot.models.vocab import CardVocab
@@ -489,3 +494,16 @@ def test_assemble_batch_targets_follow_each_training_seats_outcome() -> None:
     assert win[-1].return_ == pytest.approx(1.0)
     assert loss[-1].return_ == pytest.approx(0.0)
     assert [s.action for s in win] == [0, 1, 2]
+
+
+def test_eval_cli_spec_loads_a_cached_sampling_comparator(tmp_path: Path) -> None:
+    path = tmp_path / "comparator"
+    save_comparator_checkpoint(path, _tiny_comparator(), _VOCAB, temperature=1.3)
+    factory = resolve_agent_factory(
+        f"tm_bot.comparator:make_comparator_agent?checkpoint={path}&device=cpu"
+    )
+    first, second = factory(), factory()
+    assert first is not second
+    assert first.model is second.model, "the checkpoint is loaded once per process"
+    assert first.temperature == EVAL_ACTION_TEMPERATURE
+    assert first.calibration_temperature == pytest.approx(1.3)
