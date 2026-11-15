@@ -17,7 +17,7 @@ import {
 } from './engine';
 import {buildTrainingGameOptions, hashSeedKey, validateCreateGameOptions} from './config';
 import {applyDeterminization, computeUnseenPool} from './determinize';
-import {DecisionStepper, formatEngineTitle} from './factor';
+import {DecisionStepper, formatEngineTitle, isDealtShort} from './factor';
 import {buildActorObservation} from './observe';
 import {
   ActionRecord,
@@ -141,7 +141,8 @@ function processEngineResponse(engineGame: IGame, seat: Seat, response: InputRes
     response.type === 'card' &&
     waiting !== undefined &&
     waiting.type === 'card' &&
-    response.cards.length < (waiting as SelectCard<ICard>).config.min
+    isDealtShort(waiting as SelectCard<ICard>) &&
+    response.cards.length === (waiting as SelectCard<ICard>).cards.length
   ) {
     const prompt = waiting as SelectCard<ICard>;
     const min = prompt.config.min;

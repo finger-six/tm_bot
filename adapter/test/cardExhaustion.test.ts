@@ -176,4 +176,36 @@ describe('Issue #32: 0-card SelectCard when the project deck is exhausted', () =
     game.choose(0, 0);
     assert.equal(keptEmpty, 0);
   });
+  it('still rejects a shortfall caused by disabled cards (not an exhausted deck)', () => {
+    const game = createGame({seedKey: 'disabled-select-card', map: 'tharsis'});
+    const engine = _unsafeGetEngineGame(game);
+    const engineRoot = path.resolve(__dirname, '../../../tools/simbench/engine/build/src');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {SelectCard} = require(path.join(engineRoot, 'server/inputs/SelectCard.js')) as {
+      SelectCard: new (
+        title: string,
+        buttonLabel: string,
+        cards: ReadonlyArray<unknown>,
+        config: {min: number; max: number; enabled?: ReadonlyArray<boolean>},
+      ) => unknown;
+    };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {FusionPower} = require(path.join(engineRoot, 'server/cards/base/FusionPower.js')) as {
+      FusionPower: new () => unknown;
+    };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {Ants} = require(path.join(engineRoot, 'server/cards/base/Ants.js')) as {
+      Ants: new () => unknown;
+    };
+    const p0 = engine.players[0] as unknown as {
+      clearWaitingFor(): void;
+      setWaitingFor(input: unknown, cb?: () => void): void;
+    };
+    engine.players[1].clearWaitingFor();
+    p0.clearWaitingFor();
+    p0.setWaitingFor(
+      new SelectCard('Select 2', 'Select', [new FusionPower(), new Ants()], {min: 2, max: 2, enabled: [true, false]}),
+    );
+    assert.throws(() => game.choice(0), /SelectCard requires at least 2 cards, only 1 enabled/);
+  });
 });

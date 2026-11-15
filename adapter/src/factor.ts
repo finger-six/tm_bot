@@ -60,6 +60,14 @@ function getEnabledCards(sc: SelectCard<ICard>): Array<ICard> {
   return enabled;
 }
 
+/**
+ * True when the engine dealt fewer cards than the prompt's minimum and every dealt card is
+ * selectable (exhausted project deck). Taking all of them is then the only possible answer.
+ */
+export function isDealtShort(sc: SelectCard<ICard>): boolean {
+  return sc.cards.length < sc.config.min && getEnabledCards(sc).length === sc.cards.length;
+}
+
 function getPaymentOptionsForSelectPayment(sp: SelectPayment, player: IPlayer): Partial<PaymentOptions> {
   return {
     heat: player.canUseHeatAsMegaCredits,
@@ -112,10 +120,12 @@ export function hasLegalContinuation(input: PlayerInput, player: IPlayer): boole
       const opts = getPaymentOptionsForSelectPayment(sp, player);
       return enumerateCanonicalPayments(sp.amount, opts, sp.reserveUnits, player).length > 0;
     }
-    case 'card':
-      // A SelectCard is always answerable: when fewer cards were dealt than the prompt's
-      // minimum (exhausted deck), the adapter submits every enabled card it has.
-      return true;
+    case 'card': {
+      // Nested branches stay strict: a short SelectCard is only answerable as the root prompt
+      // (see isDealtShort), never as an optional OrOptions/AndOptions branch.
+      const sc = input as SelectCard<ICard>;
+      return getEnabledCards(sc).length >= sc.config.min;
+    }
     case 'projectCard': {
       const pc = input as SelectProjectCardToPlay | SelectStandardProjectToPlay;
       return getPlayableProjectCandidates(pc, player).length > 0;
@@ -269,7 +279,11 @@ function buildFrame(input: PlayerInput, player: IPlayer, maxCardOverride?: numbe
       const effectiveMax = Math.min(maxCap, orderedCards.length);
       // The engine can deal fewer cards than the prompt's minimum (e.g. a draft round draws
       // nothing once the project deck is exhausted). The selection is then forced: take
-      // whatever is available. The submit path lowers the engine minimum to match.
+      // whatever was dealt. The submit path lowers the engine minimum to match. Any other
+      // shortfall (cards present but disabled) is still an adapter bug.
+      if (orderedCards.length < sc.config.min && !isDealtShort(sc)) {
+        throw new Error(`SelectCard requires at least ${sc.config.min} cards, only ${orderedCards.length} enabled`);
+      }
       const effectiveMin = Math.min(sc.config.min, effectiveMax);
       if (effectiveMin === 1 && effectiveMax === 1) {
         return {kind: 'single_card', input: sc, orderedCards};
