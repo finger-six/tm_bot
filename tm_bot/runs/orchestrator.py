@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import os
 from pathlib import Path
@@ -14,7 +14,7 @@ import torch
 
 from tm_bot.models.network import TMNetwork
 from tm_bot.models.vocab import CardVocab
-from tm_bot.runs.buffer import ReplayBuffer
+from tm_bot.runs.buffer import DecisionSample, ReplayBuffer
 from tm_bot.runs.checkpoints import CheckpointManager
 from tm_bot.runs.config import RunConfig
 from tm_bot.runs.deveval import (
@@ -24,13 +24,22 @@ from tm_bot.runs.deveval import (
     dev_agent_factory,
     evaluate_dev_pairing,
 )
-from tm_bot.runs.errors import RunResumeError
-from tm_bot.runs.learner import AlphaZeroLearner, LearnerStats
+from tm_bot.runs.errors import RunResourceError, RunResumeError
+from tm_bot.runs.learner import (
+    AlphaZeroLearner,
+    LearnerStats,
+    compute_value_calibration,
+    probe_policy_entropy,
+    select_entropy_probe,
+)
 from tm_bot.runs.monitoring import (
     CycleMetrics,
+    DeterminismResult,
     MonitorLogger,
+    count_shape_flags,
     game_shape_flags,
     latency_summary,
+    vp_margin_bucket,
 )
 from tm_bot.runs.resources import check_learner_memory
 from tm_bot.runs.selfplay import (
@@ -44,7 +53,9 @@ from tm_bot.runs.stopping import FailureEvent, StopDecision, StopKind, StoppingM
 class SelfPlaySource(Protocol):
     """Anything that can produce a batch of self-play games + training rows."""
 
-    def play_batch(self, num_games: int) -> SelfPlayBatch: ...
+    def play_batch(
+        self, num_games: int, *, stop_when: Callable[[], bool] | None = None
+    ) -> SelfPlayBatch: ...
 
 
 class Learner(Protocol):
@@ -156,6 +167,7 @@ class SelfPlayRunner:
         )
         self.buffer = ReplayBuffer(config.buffer_capacity)
         self.optimizer: torch.optim.Optimizer | None = None
+        self.entropy_probe: list[DecisionSample] | None = None
 
         self.cycle = 0
         self.selfplay_games = 0
@@ -172,6 +184,12 @@ class SelfPlayRunner:
     @classmethod
     def create(cls, config: RunConfig) -> SelfPlayRunner:
         """Build the real engine, learner, model, and dev evaluator for `config`."""
+        from tm_bot.models.network import load_checkpoint
+        from tm_bot.search.agent import DEFAULT_WARMSTART_CHECKPOINT
+
+        warmstart = config.warmstart_checkpoint or str(DEFAULT_WARMSTART_CHECKPOINT)
+        config = replace(config, warmstart_checkpoint=str(warmstart))
+
         device = config.device or ("cuda" if torch.cuda.is_available() else "cpu")
         if device.startswith("cuda") and config.limits.vram_gb > 0:
             try:
@@ -182,19 +200,7 @@ class SelfPlayRunner:
             except Exception:
                 pass
 
-        checkpoint = config.warmstart_checkpoint
-        if checkpoint is not None:
-            from tm_bot.models.agent import PolicyValueAgent
-            from tm_bot.models.network import load_checkpoint
-
-            model, vocab, _meta = load_checkpoint(checkpoint, map_location=device)
-        else:
-            from tm_bot.search.agent import DEFAULT_WARMSTART_CHECKPOINT
-            from tm_bot.models.network import load_checkpoint
-
-            model, vocab, _meta = load_checkpoint(
-                DEFAULT_WARMSTART_CHECKPOINT, map_location=device
-            )
+        model, vocab, _meta = load_checkpoint(config.warmstart_checkpoint, map_location=device)
         model.eval()
         learner = AlphaZeroLearner(config, model, device=device)
         engine = SelfPlayEngine(
@@ -244,11 +250,16 @@ class SelfPlayRunner:
             )
 
         runner.evaluator = evaluator
+        if not config.dev_eval_enabled:
+            runner.evaluator = None
         return runner
 
     # --- time ----------------------------------------------------------
     def elapsed_s(self) -> float:
         return self._elapsed_base + (self.clock() - self._t_start)
+
+    def _deadline_reached(self) -> bool:
+        return self.elapsed_s() >= self.config.wall_clock_budget_s
 
     # --- resume --------------------------------------------------------
     def _restore(self) -> bool:
@@ -262,13 +273,16 @@ class SelfPlayRunner:
             )
         if self.model is not None:
             self.manager.restore_model(self.model, checkpoint)
-            if self.optimizer is not None:
-                self.manager.load_training_state(
-                    model=self.model, optimizer=self.optimizer, buffer=self.buffer
-                )
+        payload = self.manager.load_training_state(
+            optimizer=self.optimizer,
+            buffer=self.buffer,
+        )
+        if payload is not None and payload.get("entropy_probe") is not None:
+            self.entropy_probe = list(payload["entropy_probe"])
         self.cycle = int(state.get("cycle", 0))
         self.steps = int(state.get("step", 0))
         self.selfplay_games = int(state.get("selfplay_games", 0))
+        self._determinism_checks_done = int(state.get("determinism_checks_done", 0))
         best = state.get("best_dev_win_rate")
         self.best_dev_win_rate = None if best is None else float(best)
         self._elapsed_base = float(state.get("elapsed_s", 0.0))
@@ -314,6 +328,7 @@ class SelfPlayRunner:
             ),
             "pool": [_rel(Path(p), self.manager.run_dir) for p in pool],
             "seed_cursor": getattr(self.engine, "seed_cursor", None),
+            "determinism_checks_done": self._determinism_checks_done,
             "entropy_baseline": self.stopping.entropy_baseline,
             "stopping": {
                 "best_dev_win_rate": self.stopping.best_dev_win_rate,
@@ -329,7 +344,31 @@ class SelfPlayRunner:
             model=self.model,
             optimizer=self.optimizer,
             buffer=self.buffer if len(self.buffer) else None,
+            entropy_probe=self.entropy_probe,
         )
+
+    # --- pre-update measurements --------------------------------------
+    def _measure_pre_update(
+        self, batch: SelfPlayBatch
+    ) -> tuple[dict[str, Any] | None, float | None]:
+        """Calibration + fixed-probe entropy on frozen, pre-update weights."""
+        calibration: dict[str, Any] | None = None
+        probe_entropy: float | None = None
+        if self.model is not None and batch.samples:
+            calibration = compute_value_calibration(
+                self.model, batch.samples, device=self.device
+            )
+            if self.entropy_probe is None:
+                self.entropy_probe = select_entropy_probe(batch.samples)
+        if self.model is not None and self.entropy_probe:
+            probe_entropy = probe_policy_entropy(
+                self.model, self.entropy_probe, device=self.device
+            )
+            if self.stopping.entropy_baseline is None and probe_entropy is not None:
+                self.stopping.set_entropy_baseline(
+                    probe_entropy, elapsed_s=self.elapsed_s()
+                )
+        return calibration, probe_entropy
 
     # --- one cycle -----------------------------------------------------
     def _log_cycle(
@@ -337,6 +376,9 @@ class SelfPlayRunner:
         batch: SelfPlayBatch,
         *,
         learner_stats: LearnerStats | None,
+        calibration: dict[str, Any] | None,
+        probe_entropy: float | None,
+        determinism: DeterminismResult | None,
         elapsed: float,
         cycle_wall_s: float,
     ) -> CycleMetrics:
@@ -344,10 +386,28 @@ class SelfPlayRunner:
         completed = [g for g in games if g.ok]
         generations = [int(g.generations) for g in completed if g.generations is not None]
         margins: list[float] = []
-        for g, seat in zip(games, batch.training_seats or [0] * len(games)):
+        wins = losses = ties = 0
+        for i, g in enumerate(games):
             if not g.ok or g.scores is None:
                 continue
+            seat = batch.training_seats[i] if i < len(batch.training_seats) else 0
             margins.append(float(g.scores[seat] - g.scores[1 - seat]))
+            if g.tie:
+                ties += 1
+            elif g.winner == seat:
+                wins += 1
+            else:
+                losses += 1
+        histogram: dict[str, int] = {}
+        for margin in margins:
+            label = vp_margin_bucket(margin)
+            histogram[label] = histogram.get(label, 0) + 1
+        kinds: dict[str, int] = {}
+        for kind in batch.opponent_kinds:
+            kinds[kind] = kinds.get(kind, 0) + 1
+        rejections = sum(
+            1 for g in games if not g.ok and g.error_type == "AdapterBugError"
+        )
         record = CycleMetrics(
             cycle=self.cycle,
             elapsed_s=float(elapsed),
@@ -356,31 +416,44 @@ class SelfPlayRunner:
             total_selfplay_games=self.selfplay_games,
             decisions=int(batch.decisions),
             searched_decisions=int(batch.searched_decisions),
-            rejections=len(batch.failures),
-            failures=len(batch.failures),
+            searched_share=(
+                float(batch.searched_decisions) / float(batch.decisions)
+                if batch.decisions > 0
+                else None
+            ),
+            rejections=rejections,
+            failures=len(games) - len(completed),
+            wins=wins,
+            losses=losses,
+            ties=ties,
             mean_generations=(float(np.mean(generations)) if generations else None),
             min_generations=(int(min(generations)) if generations else None),
             max_generations=(int(max(generations)) if generations else None),
             mean_vp_margin=(float(np.mean(margins)) if margins else None),
+            vp_histogram=histogram,
+            opponent_kinds=kinds,
             mean_decisions_per_game=(
                 float(np.mean([g.decisions for g in completed])) if completed else None
             ),
             policy_loss=None if learner_stats is None else learner_stats.policy_loss,
             value_loss=None if learner_stats is None else learner_stats.value_loss,
             total_loss=None if learner_stats is None else learner_stats.total_loss,
-            policy_entropy=(
-                learner_stats.policy_entropy
-                if learner_stats is not None and learner_stats.policy_entropy is not None
-                else batch.entropy
-            ),
-            value_brier=None if learner_stats is None else learner_stats.value_brier,
-            value_accuracy=None if learner_stats is None else learner_stats.value_accuracy,
+            policy_entropy=probe_entropy,
+            target_policy_entropy=batch.entropy,
+            value_calibration=calibration or {},
             decision_latency_ms=latency_summary(batch.latencies_ms),
+            shape_flag_count=count_shape_flags(
+                games,
+                min_generations=self.config.shape_min_generations,
+                max_generations=self.config.shape_max_generations,
+            ),
             shape_flags=game_shape_flags(
                 games,
                 min_generations=self.config.shape_min_generations,
                 max_generations=self.config.shape_max_generations,
             ),
+            determinism_checked=determinism is not None,
+            determinism_ok=None if determinism is None else determinism.ok,
             throughput_games_per_hour=(
                 self.selfplay_games / (elapsed / 3600.0) if elapsed > 0.0 else None
             ),
@@ -427,43 +500,55 @@ class SelfPlayRunner:
             if decision.stopped:
                 self._stop = decision
 
-    def _maybe_determinism_check(self, batch: SelfPlayBatch) -> None:
+    def _maybe_determinism_check(self, batch: SelfPlayBatch) -> DeterminismResult | None:
         if self.determinism_every <= 0:
-            return
+            return None
         due = self.selfplay_games // self.determinism_every
         if due <= self._determinism_checks_done:
-            return
+            return None
         self._determinism_checks_done = due
         index = None
         for i, game in enumerate(batch.games):
             if game.ok and i < len(batch.recorders):
                 index = i
         if index is None:
-            return
+            return None
         recorder = batch.recorders[index]
-        result = determinism_check(batch.games[index], recorder.actions)
-        self.logger.log_determinism(result)
+        return determinism_check(batch.games[index], recorder.actions)
 
     def _checkpoint_and_evaluate(self, elapsed: float) -> None:
         if self.model is None or self.vocab is None:
             return
-        self.last_checkpoint = self.manager.save(
-            step=self.steps,
-            model=self.model,
-            vocab=self.vocab,
-            metadata={
-                "version": f"selfplay-{self.config.run_name}",
-                "cycle": self.cycle,
-                "step": self.steps,
-                "selfplay_games": self.selfplay_games,
-                "num_simulations": self.config.num_simulations,
-                "num_worlds": self.config.num_worlds,
-            },
-        )
-        self.last_checkpoint_elapsed_s = elapsed
         previous_best = self.manager.best_checkpoint()
         if previous_best is None and self.config.warmstart_checkpoint:
             previous_best = Path(self.config.warmstart_checkpoint)
+
+        try:
+            self.last_checkpoint = self.manager.save(
+                step=self.steps,
+                model=self.model,
+                vocab=self.vocab,
+                metadata={
+                    "version": f"selfplay-{self.config.run_name}",
+                    "cycle": self.cycle,
+                    "step": self.steps,
+                    "selfplay_games": self.selfplay_games,
+                    "num_simulations": self.config.num_simulations,
+                    "num_worlds": self.config.num_worlds,
+                    "warmstart_checkpoint": self.config.warmstart_checkpoint,
+                },
+            )
+        except RunResourceError as exc:
+            self._stop = StopDecision(
+                stopped=True,
+                kind=StopKind.RESOURCE_LIMIT,
+                reason=str(exc),
+                details={"elapsed_s": elapsed},
+            )
+            return
+        self.last_checkpoint_elapsed_s = elapsed
+        # Make the new checkpoint resumable before spending time on dev games.
+        self._save_state()
 
         if self.evaluator is not None:
             vs_b1 = self.evaluator(self.last_checkpoint, None)
@@ -477,17 +562,26 @@ class SelfPlayRunner:
                 self.best_dev_win_rate is None or win_rate > self.best_dev_win_rate
             )
             if new_best:
-                self.manager.save_best(
-                    model=self.model,
-                    vocab=self.vocab,
-                    metadata={
-                        "version": f"selfplay-{self.config.run_name}",
-                        "cycle": self.cycle,
-                        "step": self.steps,
-                        "selfplay_games": self.selfplay_games,
-                        "dev_win_rate_vs_b1": win_rate,
-                    },
-                )
+                try:
+                    self.manager.save_best(
+                        model=self.model,
+                        vocab=self.vocab,
+                        metadata={
+                            "version": f"selfplay-{self.config.run_name}",
+                            "cycle": self.cycle,
+                            "step": self.steps,
+                            "selfplay_games": self.selfplay_games,
+                            "dev_win_rate_vs_b1": win_rate,
+                        },
+                    )
+                except RunResourceError as exc:
+                    self._stop = StopDecision(
+                        stopped=True,
+                        kind=StopKind.RESOURCE_LIMIT,
+                        reason=str(exc),
+                        details={"elapsed_s": elapsed},
+                    )
+                    return
                 self.best_dev_win_rate = win_rate
             record = build_checkpoint_metrics(
                 cycle=self.cycle,
@@ -507,11 +601,23 @@ class SelfPlayRunner:
 
         setter = getattr(self.engine, "set_opponent_pool", None)
         if callable(setter):
-            pool = self.manager.list_checkpoints()[
-                -self.config.opponent_pool_size :
-            ]
+            pool = self.manager.list_checkpoints()[-self.config.opponent_pool_size :]
             setter(pool)
         self._save_state()
+
+    def _rollback(self) -> tuple[bool, str]:
+        """Restore model and optimizer from the last good checkpoint (no silent failure)."""
+        checkpoint = self.last_checkpoint or self.manager.resolve_resume_checkpoint(None)
+        if checkpoint is None or self.model is None:
+            return False, "no checkpoint available"
+        try:
+            self.manager.restore_model(self.model, checkpoint)
+            if self.optimizer is not None:
+                self.manager.load_training_state(optimizer=self.optimizer)
+            self._save_state()
+            return True, str(checkpoint)
+        except Exception as exc:  # reported in the stop decision
+            return False, f"{type(exc).__name__}: {exc}"
 
     def run(self, *, max_cycles: int | None = None, resume: bool = False) -> RunSummary:
         """Run until a stopping rule fires, the budget is exhausted, or `max_cycles`."""
@@ -539,59 +645,94 @@ class SelfPlayRunner:
                 break
 
             t_cycle = self.clock()
-            batch = self.engine.play_batch(self.config.games_per_cycle)
+            batch = self.engine.play_batch(
+                self.config.games_per_cycle, stop_when=self._deadline_reached
+            )
+            deadline_hit = any(g.error_type == "DeadlineReached" for g in batch.games)
+            if deadline_hit:
+                keep = [i for i, g in enumerate(batch.games) if g.error_type != "DeadlineReached"]
+                batch.games = [batch.games[i] for i in keep]
+                batch.recorders = [batch.recorders[i] for i in keep]
+                batch.training_seats = [batch.training_seats[i] for i in keep]
+                batch.opponent_kinds = [batch.opponent_kinds[i] for i in keep]
             self.cycle += 1
             self.selfplay_games += len(batch.games)
             elapsed = self.elapsed_s()
 
+            calibration, probe_entropy = self._measure_pre_update(batch)
             self._handle_failures(batch, elapsed)
             if self._stop.stopped:
                 self._log_cycle(
                     batch,
                     learner_stats=None,
+                    calibration=calibration,
+                    probe_entropy=probe_entropy,
+                    determinism=None,
                     elapsed=elapsed,
                     cycle_wall_s=self.clock() - t_cycle,
                 )
                 break
-
-            # The warm-start policy entropy baseline is measured on the first
-            # cycle's self-play targets, before any update from this run.
-            if self.stopping.entropy_baseline is None and batch.entropy is not None:
-                self.stopping.set_entropy_baseline(batch.entropy, elapsed_s=elapsed)
+            if deadline_hit:
+                self._stop = StopDecision(
+                    stopped=True,
+                    kind=StopKind.BUDGET,
+                    reason="wall-clock deadline reached inside the self-play batch",
+                    details={"elapsed_s": elapsed, "budget_s": self.config.wall_clock_budget_s},
+                )
 
             if batch.samples:
                 self.buffer.extend(batch.samples)
             learner_stats: LearnerStats | None = None
-            if self.learner is not None and len(self.buffer) > 0:
+            if self.learner is not None and len(self.buffer) > 0 and not self._stop.stopped:
                 learner_stats = self.learner.train(self.buffer)
                 self.steps = int(getattr(self.learner, "step", self.steps))
-                if learner_stats.nonfinite_loss is not None:
-                    self._rollback()
+                if (
+                    learner_stats.nonfinite_loss is not None
+                    or learner_stats.nonfinite_params
+                ):
+                    nonfinite_value = (
+                        learner_stats.nonfinite_loss
+                        if learner_stats.nonfinite_loss is not None
+                        else float("nan")
+                    )
+                    loss_decision = self.stopping.observe_loss(
+                        nonfinite_value, elapsed_s=elapsed
+                    )
+                    rolled_back, rollback_detail = self._rollback()
                     self._stop = StopDecision(
                         stopped=True,
-                        kind=StopKind.NONFINITE_LOSS,
-                        reason=f"non-finite loss {learner_stats.nonfinite_loss!r}; rolled back",
+                        kind=loss_decision.kind or StopKind.NONFINITE_LOSS,
+                        reason=(
+                            f"non-finite loss/params ({nonfinite_value!r}, "
+                            f"params_finite={not learner_stats.nonfinite_params}); "
+                            f"rollback={'ok' if rolled_back else 'FAILED'}"
+                        ),
                         details={
                             "loss": learner_stats.nonfinite_loss,
+                            "nonfinite_params": learner_stats.nonfinite_params,
+                            "rolled_back": rolled_back,
+                            "rollback_detail": rollback_detail,
                             "elapsed_s": elapsed,
-                            "rolled_back_to": (
-                                str(self.last_checkpoint) if self.last_checkpoint else None
-                            ),
                         },
                     )
 
+            determinism = self._maybe_determinism_check(batch)
             self._log_cycle(
                 batch,
                 learner_stats=learner_stats,
+                calibration=calibration,
+                probe_entropy=probe_entropy,
+                determinism=determinism,
                 elapsed=elapsed,
                 cycle_wall_s=self.clock() - t_cycle,
             )
-            self._maybe_determinism_check(batch)
+            if determinism is not None:
+                self.logger.log_determinism(determinism)
 
             if not self._stop.stopped:
                 try:
                     check_learner_memory(self.config.limits)
-                except Exception as exc:
+                except RunResourceError as exc:
                     self._stop = StopDecision(
                         stopped=True,
                         kind=StopKind.RESOURCE_LIMIT,
@@ -599,10 +740,9 @@ class SelfPlayRunner:
                         details={"elapsed_s": elapsed},
                     )
 
-            entropy = learner_stats.policy_entropy if learner_stats else batch.entropy
-            if entropy is not None:
-                decision = self.stopping.observe_entropy(entropy, elapsed_s=elapsed)
-                if decision.stopped and not self._stop.stopped:
+            if probe_entropy is not None and not self._stop.stopped:
+                decision = self.stopping.observe_entropy(probe_entropy, elapsed_s=elapsed)
+                if decision.stopped:
                     self._stop = decision
 
             step_decision = self.stopping.check_steps(self.steps, elapsed_s=elapsed)
@@ -611,18 +751,15 @@ class SelfPlayRunner:
 
             due = (
                 self.model is not None
-                and self.evaluator is not None
+                and self.vocab is not None
                 and (
-                    (
-                        self._stop.stopped
-                        and self._stop.kind not in _HARD_STOPS
-                    )
+                    (self._stop.stopped and self._stop.kind not in _HARD_STOPS)
                     or elapsed - self.last_checkpoint_elapsed_s
                     >= self.config.checkpoint_interval_s
                     or (max_cycles is not None and self.cycle >= max_cycles)
                 )
             )
-            if due:
+            if due and not (self._stop.stopped and self._stop.kind in _HARD_STOPS):
                 self._checkpoint_and_evaluate(elapsed)
 
             if self._stop.stopped:
@@ -630,53 +767,52 @@ class SelfPlayRunner:
 
         return self._finalize()
 
-    def _rollback(self) -> None:
-        """Restore the last periodic checkpoint after a non-finite loss."""
-        if self.model is None:
-            return
-        checkpoint = self.last_checkpoint or self.manager.resolve_resume_checkpoint(None)
-        if checkpoint is None:
-            return
-        self.manager.restore_model(self.model, checkpoint)
-        if self.optimizer is not None and self.manager.state_tensors_path.exists():
-            try:
-                payload = torch.load(
-                    self.manager.state_tensors_path,
-                    map_location="cpu",
-                    weights_only=False,
-                )
-                if "optimizer_state_dict" in payload:
-                    self.optimizer.load_state_dict(payload["optimizer_state_dict"])
-            except Exception:
-                pass
-        self._save_state()
-
     def _finalize(self) -> RunSummary:
         elapsed = self.elapsed_s()
         hard_stop = self._stop.stopped and self._stop.kind in _HARD_STOPS
         if self.model is not None and self.vocab is not None and hard_stop:
             # A broken run must not spend more compute on dev games; save the
             # rolled-back state so the run can be resumed after the bug is fixed.
-            self.last_checkpoint = self.manager.save(
-                step=self.steps,
-                model=self.model,
-                vocab=self.vocab,
-                metadata={
-                    "cycle": self.cycle,
-                    "step": self.steps,
-                    "stop": self._stop.to_dict(),
-                },
-            )
+            if self._stop.kind != StopKind.RESOURCE_LIMIT:
+                try:
+                    self.last_checkpoint = self.manager.save(
+                        step=self.steps,
+                        model=self.model,
+                        vocab=self.vocab,
+                        metadata={
+                            "cycle": self.cycle,
+                            "step": self.steps,
+                            "stop": self._stop.to_dict(),
+                        },
+                    )
+                except RunResourceError:
+                    self._stop = StopDecision(
+                        stopped=True,
+                        kind=StopKind.RESOURCE_LIMIT,
+                        reason=(
+                            f"{self._stop.reason}; final checkpoint skipped "
+                            "(disk cap)"
+                        ),
+                        details=self._stop.details,
+                    )
         elif self.model is not None and self.vocab is not None and self.evaluator is not None:
             if elapsed - self.last_checkpoint_elapsed_s > 60.0 or self.last_checkpoint is None:
                 self._checkpoint_and_evaluate(elapsed)
         elif self.model is not None and self.vocab is not None:
-            self.last_checkpoint = self.manager.save(
-                step=self.steps,
-                model=self.model,
-                vocab=self.vocab,
-                metadata={"cycle": self.cycle, "step": self.steps},
-            )
+            try:
+                self.last_checkpoint = self.manager.save(
+                    step=self.steps,
+                    model=self.model,
+                    vocab=self.vocab,
+                    metadata={"cycle": self.cycle, "step": self.steps},
+                )
+            except RunResourceError as exc:
+                self._stop = StopDecision(
+                    stopped=True,
+                    kind=StopKind.RESOURCE_LIMIT,
+                    reason=str(exc),
+                    details={"elapsed_s": elapsed},
+                )
         self._save_state()
         summary_path = self.logger.write_summary(self.manager.summary_path)
         run_summary = RunSummary(

@@ -112,12 +112,13 @@ def build_selfplay_specs(
     sampler: OpponentSampler,
     opponent_factory: Any,
     seed_start: int = 0,
-) -> tuple[list[GameSpec], list[GameRecorder], list[int]]:
+) -> tuple[list[GameSpec], list[GameRecorder], list[int], list[str]]:
     """Build one-game-per-seed specs with a training seat and a sampled opponent.
 
     `learner_factory(seed)` and `opponent_factory(choice, seed)` must return
     `Agent`s; the recorder's `capture_seat` is the training seat, so only that
-    seat's `(observation, choice)` pairs become training rows.
+    seat's `(observation, choice)` pairs become training rows. Returns
+    `(specs, recorders, training_seats, opponent_kinds)`.
     """
     if not maps:
         raise ValueError("maps must be non-empty")
@@ -126,6 +127,7 @@ def build_selfplay_specs(
     specs: list[GameSpec] = []
     recorders: list[GameRecorder] = []
     training_seats: list[int] = []
+    opponent_kinds: list[str] = []
     for i, seed_key in enumerate(seed_keys):
         map_name = maps[(seed_start + i) % len(maps)]
         training_seat = i % 2
@@ -162,7 +164,8 @@ def build_selfplay_specs(
         )
         recorders.append(recorder)
         training_seats.append(training_seat)
-    return specs, recorders, training_seats
+        opponent_kinds.append(opponent.kind)
+    return specs, recorders, training_seats, opponent_kinds
 
 
 def game_summary(outcome: GameRunResult) -> GameSummary:
@@ -187,6 +190,10 @@ def utility_for_seat(summary: GameSummary, seat: int) -> float:
         raise ValueError("cannot score an unfinished game")
     if summary.tie:
         return 0.0
+    if summary.winner is None:
+        raise ValueError(
+            f"game {summary.seed_key} has no declared winner and is not a tie"
+        )
     return 1.0 if summary.winner == seat else -1.0
 
 
@@ -198,6 +205,7 @@ class SelfPlayBatch:
     samples: list[DecisionSample]
     recorders: list[GameRecorder] = field(default_factory=list)
     training_seats: list[int] = field(default_factory=list)
+    opponent_kinds: list[str] = field(default_factory=list)
     decisions: int = 0
     searched_decisions: int = 0
     latencies_ms: list[float] = field(default_factory=list)
@@ -239,11 +247,14 @@ class SelfPlayEngine:
         )
         self._card_data = None
         self._pool_agents: dict[str, ISMCTSAgent] = {}
-        self.next_seed_index = config.train_seed_start
         self.seed_cursor = config.train_seed_start
 
     def set_opponent_pool(self, checkpoints: Sequence[str | Path]) -> None:
         self.opponents.set_pool(checkpoints)
+        keep = {str(Path(p)) for p in checkpoints}
+        for key in list(self._pool_agents):
+            if key not in keep:
+                del self._pool_agents[key]
 
     def _learner_factory(self, seed: int) -> ISMCTSAgent:
         from tm_bot.models.agent import PolicyValueAgent
@@ -285,13 +296,24 @@ class SelfPlayEngine:
             return self._pool_factory(choice.checkpoint, seed)
         return self._learner_factory(seed)
 
-    def play_batch(self, num_games: int) -> SelfPlayBatch:
-        """Play `num_games` self-play games on fresh `train-*` seeds."""
+    def play_batch(
+        self,
+        num_games: int,
+        *,
+        stop_when: Any | None = None,
+    ) -> SelfPlayBatch:
+        """Play `num_games` self-play games on fresh `train-*` seeds.
+
+        `stop_when` is polled between runner steps; when it returns True the
+        in-flight batch is cut short and the partial games are reported with
+        `error_type="DeadlineReached"` (the orchestrator treats that as a budget
+        stop, not an engine failure).
+        """
         if num_games < 1:
             raise ValueError("num_games must be >= 1")
         keys = make_train_seed_keys(self.seed_cursor, num_games)
         self.seed_cursor += num_games
-        specs, recorders, training_seats = build_selfplay_specs(
+        specs, recorders, training_seats, kinds = build_selfplay_specs(
             seed_keys=keys,
             maps=self.config.maps,
             learner_factory=self._learner_factory,
@@ -304,14 +326,16 @@ class SelfPlayEngine:
             num_workers=self.config.workers,
             batch_size=self.config.batch_size,
             max_decisions=self.config.max_decisions_per_game,
+            stop_when=stop_when,
         )
-        return self.assemble_batch(outcomes, recorders, training_seats)
+        return self.assemble_batch(outcomes, recorders, training_seats, kinds)
 
     def assemble_batch(
         self,
         outcomes: Sequence[GameRunResult],
         recorders: Sequence[GameRecorder],
         training_seats: Sequence[int],
+        opponent_kinds: Sequence[str] | None = None,
     ) -> SelfPlayBatch:
         """Encode recorded acting-seat decisions into training rows with utility targets."""
         games = [game_summary(o) for o in outcomes]
@@ -355,6 +379,7 @@ class SelfPlayEngine:
             samples=samples,
             recorders=list(recorders),
             training_seats=list(training_seats),
+            opponent_kinds=list(opponent_kinds or []),
             decisions=decisions,
             searched_decisions=searched,
             latencies_ms=latencies,

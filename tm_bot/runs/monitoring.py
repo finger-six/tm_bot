@@ -55,20 +55,27 @@ class CycleMetrics:
     total_selfplay_games: int
     decisions: int
     searched_decisions: int
+    searched_share: float | None
     rejections: int
     failures: int
+    wins: int = 0
+    losses: int = 0
+    ties: int = 0
     mean_generations: float | None = None
     min_generations: int | None = None
     max_generations: int | None = None
     mean_vp_margin: float | None = None
+    vp_histogram: dict[str, int] = field(default_factory=dict)
+    opponent_kinds: dict[str, int] = field(default_factory=dict)
     mean_decisions_per_game: float | None = None
     policy_loss: float | None = None
     value_loss: float | None = None
     total_loss: float | None = None
     policy_entropy: float | None = None
-    value_brier: float | None = None
-    value_accuracy: float | None = None
+    target_policy_entropy: float | None = None
+    value_calibration: dict[str, Any] = field(default_factory=dict)
     decision_latency_ms: dict[str, Any] = field(default_factory=dict)
+    shape_flag_count: int = 0
     shape_flags: list[dict[str, Any]] = field(default_factory=list)
     determinism_checked: bool = False
     determinism_ok: bool | None = None
@@ -143,6 +150,41 @@ def game_shape_flags(
             }
         )
     return flagged
+
+
+def count_shape_flags(
+    games: Sequence[GameSummary],
+    *,
+    min_generations: int,
+    max_generations: int,
+) -> int:
+    """Count every completed game outside the expected shape range (no truncation)."""
+    return sum(
+        1
+        for game in games
+        if game.ok
+        and game.generations is not None
+        and not (min_generations <= int(game.generations) <= max_generations)
+    )
+
+
+_VP_MARGIN_BUCKETS: tuple[tuple[str, float, float], ...] = (
+    ("<= -50", float("-inf"), -50.0),
+    ("-50..-20", -50.0, -20.0),
+    ("-20..-5", -20.0, -5.0),
+    ("-5..5", -5.0, 5.0),
+    ("5..20", 5.0, 20.0),
+    ("20..50", 20.0, 50.0),
+    ("> 50", 50.0, float("inf")),
+)
+
+
+def vp_margin_bucket(margin: float) -> str:
+    """Bucket a VP margin for the per-cycle histogram."""
+    for label, lo, hi in _VP_MARGIN_BUCKETS:
+        if lo <= margin < hi:
+            return label
+    return "> 50"
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,9 +317,16 @@ class MonitorLogger:
         throughput = (
             total_selfplay_games / (elapsed / 3600.0) if elapsed > 0.0 else None
         )
-        shape_flag_count = sum(len(c.shape_flags) for c in self._cycles)
+        shape_flag_count = sum(int(c.shape_flag_count) for c in self._cycles)
         shape_examples = [flag for c in self._cycles for flag in c.shape_flags][:20]
         determ = [r.to_dict() for r in self._determinism]
+        calib = [c.value_calibration for c in self._cycles if c.value_calibration.get("n")]
+        briers = [float(c["brier"]) for c in calib if c.get("brier") is not None]
+        eces = [float(c["ece"]) for c in calib if c.get("ece") is not None]
+        opponent_kinds: dict[str, int] = {}
+        for cycle in self._cycles:
+            for kind, count in cycle.opponent_kinds.items():
+                opponent_kinds[kind] = opponent_kinds.get(kind, 0) + int(count)
         return {
             "schema_version": "selfplay-summary-v1",
             "cycles": len(self._cycles),
@@ -287,12 +336,23 @@ class MonitorLogger:
             "throughput_games_per_hour": throughput,
             "decisions": sum(int(c.decisions) for c in self._cycles),
             "searched_decisions": sum(int(c.searched_decisions) for c in self._cycles),
-            "rejections": len(self._rejections),
+            "rejections": sum(int(c.rejections) for c in self._cycles),
             "failures": sum(int(c.failures) for c in self._cycles),
+            "wins": sum(int(c.wins) for c in self._cycles),
+            "losses": sum(int(c.losses) for c in self._cycles),
+            "ties": sum(int(c.ties) for c in self._cycles),
+            "opponent_kinds": opponent_kinds,
             "policy_entropy": _aggregate_numeric(cycles, "policy_entropy"),
+            "target_policy_entropy": _aggregate_numeric(cycles, "target_policy_entropy"),
             "policy_loss": _aggregate_numeric(cycles, "policy_loss"),
             "value_loss": _aggregate_numeric(cycles, "value_loss"),
-            "value_brier": _aggregate_numeric(cycles, "value_brier"),
+            "value_calibration": {
+                "cycles": len(calib),
+                "samples": int(sum(int(c["n"]) for c in calib)),
+                "mean_brier": float(np.mean(briers)) if briers else None,
+                "mean_ece": float(np.mean(eces)) if eces else None,
+                "last": calib[-1] if calib else None,
+            },
             "mean_generations": _aggregate_numeric(cycles, "mean_generations"),
             "mean_vp_margin": _aggregate_numeric(cycles, "mean_vp_margin"),
             "mean_decisions_per_game": _aggregate_numeric(

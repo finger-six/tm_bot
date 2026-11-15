@@ -71,10 +71,6 @@ class GameRecorder:
         )
 
     @property
-    def num_decisions(self) -> int:
-        return len(self.decisions)
-
-    @property
     def num_searched(self) -> int:
         return sum(1 for d in self.decisions if d.was_searched)
 

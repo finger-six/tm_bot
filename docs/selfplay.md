@@ -22,25 +22,27 @@ decision; every field is overridable from the CLI.
 | Setting | Default | Notes |
 | --- | --- | --- |
 | Workers | 16 | Node adapter workers; one game per active worker |
-| Wall-clock budget | 24 h | Hard stop when reached (checked per cycle) |
+| Wall-clock budget | 24 h | Hard stop when reached (checked between cycles and inside the self-play batch loop) |
 | Simulations / searched decision | 64 | `--sims` |
 | Worlds (K) | 4 | `--worlds` |
 | Opponents | 60% latest / 30% last-10 pool / 10% B1 | `OpponentSampler` |
 | Replay buffer | last 200,000 decisions | `ReplayBuffer` |
 | Learner | AdamW, lr 5e-4, wd 2e-4, grad clip 1.0, batch 256 | same optimizer settings as warm start |
-| Checkpoints | every 30 min | numbered `step-XXXXXXXXX/`, plus `best/` |
+| Checkpoints | every 30 min | monotonic `ckpt-XXXXXXXXX/` save counter, plus `best/` |
 | Retained checkpoints | best + last 10 | older ones pruned |
-| Disk cap | 50 GB | oldest non-best checkpoints deleted first |
-| Dev evaluation | 100 `dev-*` games vs B1 and 100 vs previous best | selected on `dev-*` only |
+| Disk cap | 50 GB | oldest non-best checkpoints deleted first; a cap hit stops the run as `resource_limit` |
+| Dev evaluation | 100 `dev-*` games vs B1 and 100 vs previous best | seat-swapped pairs; selected on `dev-*` only |
 | Plateau | 12 checkpoints without a new best | |
 | Collapse (win rate) | >15 points below best for 3 checkpoints | |
-| Collapse (entropy) | <10% of warm-start entropy within 2 h | |
+| Collapse (entropy) | <10% of warm-start network entropy within 2 h | |
 | Determinism spot check | every 1,000 self-play games | replay seed + action history |
 
-Resource limits live in `ResourceLimits`: workers ≤ 6 GB RAM (one worker per
-game, capped by the worker count), learner + buffer ≤ 10 GB, VRAM ≤ 12 GB (a
-`torch.cuda.set_per_process_memory_fraction` guard when CUDA is available), and
-run outputs ≤ 50 GB under the gitignored `runs/` directory.
+Resource limits live in `ResourceLimits`: learner + buffer <= 10 GB RSS and
+VRAM <= 12 GB (checked every cycle; a breach stops the run as `resource_limit`),
+run outputs <= 50 GB under the gitignored `runs/` directory, and the configured
+worker count bounds engine workers (per-worker RSS is not measured separately;
+it is bounded by the 16-worker default). When CUDA is available, VRAM is also
+soft-capped with `torch.cuda.set_per_process_memory_fraction`.
 
 Run outputs (`runs/<run-name>/`): `config.json`, `state.json` + `state.pt`
 (resume), `checkpoints/`, `best/`, `monitor/metrics.jsonl`, `monitor/summary.json`,
@@ -76,19 +78,29 @@ checks the encoding is seat-scoped).
   loss uses `(u + 1) / 2` as the target.
 
 `AlphaZeroLearner` ([`learner.py`](../tm_bot/runs/learner.py)) samples decisions
-from the replay buffer, runs a masked policy cross-entropy plus value BCE, and
-reports policy/value loss, predicted-policy entropy, Brier score, and value
-accuracy. A non-finite loss immediately stops the cycle and rolls the model back
-to the last periodic checkpoint.
+from the replay buffer and runs a masked policy cross-entropy plus value BCE.
+Value-head calibration (Brier, ECE, reliability bins, win/loss/tie counts) is
+measured by `compute_value_calibration` on each cycle's newly finished games
+**before** they enter the buffer and before the optimizer step, with frozen
+weights, so the cycle record is out-of-sample for that update. Training records
+carry only training-batch losses (policy/value/total means); calibration is not
+mixed into them. Every parameter tensor is checked for finiteness after each
+optimizer step; a NaN/Inf loss or parameter stops the cycle and rolls the model
+and optimizer back to the last periodic checkpoint (a failed rollback is
+reported in the stop decision rather than swallowed).
 
 ## Dev evaluation and best selection
 
-`dev-*` games are built by `build_dev_games` exactly `N` at a time: each
-`(seed, map)` is played once, alternating the candidate's seat so seats are
-balanced, and the candidate plays both B1 and the previous `best/` checkpoint.
-Win rate, 95% paired bootstrap CI, and mean VP margin are reported by the
-existing evaluation report code. Best is selected on `dev-*` win rate vs B1
-only; `eval-*` seeds are never read or written by a run.
+`dev-*` games use `build_paired_specs` from
+[`tm_bot/eval/pairing.py`](../tm_bot/eval/pairing.py): every `(seed, map)` is
+played twice with the candidate in opposite seats, so the paired bootstrap CI is
+valid. The schedule is rounded up to whole seat-swapped pairs (104 games for a
+requested 100). The candidate plays both B1 and the previous `best/` checkpoint;
+before the first `best/` exists, the resolved warm-start checkpoint (recorded in
+`config.json`) is the previous best, so the first checkpoint still gets a real
+second pairing. Win rate, 95% paired bootstrap CI, and mean VP margin are
+reported by the existing evaluation report code. Best is selected on `dev-*` win
+rate vs B1 only; `eval-*` seeds are never read or written by a run.
 
 ## Stopping rules
 
@@ -106,7 +118,8 @@ test in [`tests/test_runs.py`](../tests/test_runs.py):
 | `collapse_entropy` | policy entropy <10% of warm-start value within 2 h | stop |
 | `plateau` | no new best for 12 checkpoints | stop |
 | `max_steps` | optional learner step cap | stop |
-| `budget` | wall-clock budget reached | stop |
+| `resource_limit` | RAM/VRAM ceiling or disk cap hit | stop, keep state for resume |
+| `budget` | wall-clock budget reached | stop; also polled inside the self-play batch loop, which returns partial games as `DeadlineReached` and excludes them from training |
 
 A regression case is `regression/<seed>__<map>__<error>.json` containing the
 seed key, map, error, decision count, and the full ordered action history.
@@ -115,59 +128,113 @@ seed key, map, error, decision count, and the full ordered action history.
 
 `MonitorLogger` writes one JSON line per self-play cycle and per checkpoint to
 `monitor/metrics.jsonl`, plus `monitor/summary.json`. Cycle records contain:
-policy entropy, policy/value/total losses, value Brier and accuracy,
-generations/game, VP margin, decisions/game, rejections/failures, decision
-latency p50/p95, throughput, and game-shape flags (generations outside 6-25).
+network policy entropy on the fixed probe, self-play target entropy,
+policy/value/total training losses, pre-update value calibration (n, W/L/T,
+Brier, ECE, reliability bins), W/L/T and VP-margin histogram for the training
+seat, generations/game, decisions/game, searched-decision share, realized
+opponent-kind mix, separate rejection and failure counts, decision latency
+p50/p95, throughput, determinism check result, and untruncated game-shape flag
+counts (generations outside 6-25) with up to 20 example games.
 Checkpoint records contain dev win rates and CIs vs B1 and the previous best.
 Determinism spot checks replay a finished game from its seed and recorded action
-history and compare generations, scores, winner, and tie
-(`replay_game`, `compare_replay`).
+history and compare generations, scores, winner, and tie (`replay_game`,
+`compare_replay`); the check counter is persisted across resume.
+
+The entropy collapse rule uses exactly one quantity: the network policy entropy
+on the first cycle's fixed observation set (`probe_policy_entropy`). That probe
+is captured before any update, stored in `state.pt`, and re-evaluated with the
+current weights each cycle; the self-play target entropy is logged separately
+for information and never compared to the network probe.
 
 ## Resume
 
 `state.json` stores the cycle, learner step, self-play game count, best dev win
-rate, elapsed wall clock, seed cursor, opponent pool, and the last checkpoint.
-`state.pt` stores the model/optimizer and the replay buffer. `--resume` restores
-the model from the last good checkpoint (falling back to the newest numbered
-checkpoint, then `best/`), reopens the metrics stream, restores the seed cursor
-so training never reuses `dev-*`/`eval-*` seeds, and continues the run.
+rate, elapsed wall clock, seed cursor, opponent pool, determinism-check counter,
+entropy probe baseline, and stopping-rule counters. `state.pt` stores the
+model/optimizer and the replay buffer (plus the fixed entropy probe). `--resume`
+restores the model from the last good checkpoint (falling back to the newest
+numbered checkpoint, then `best/`), restores the optimizer and replay buffer
+independently (a missing optimizer state does not skip the buffer), reopens the
+metrics stream, restores the seed cursor and stopping counters, and continues
+the run. Checkpoints are named by a monotonic save counter (`ckpt-000000001`,
+`ckpt-000000002`, ...) so two saves with the same learner step never collide.
 
 ## Results
 
-### Throughput measurement (1 h development run)
+### Development run (2026-11-14)
 
-The 1 h development run used the config below; `runs/dev1h/` (gitignored) holds
-the full metrics. Results are recorded here because run outputs stay out of git.
+All run outputs are gitignored; the numbers below are transcribed here. Artifacts:
+`runs/dev1h-nov/` (`monitor/metrics.jsonl`, `monitor/summary.json`,
+`run_summary.json`, `regression/`, `dev_reports/`).
 
-| Setting | Default (#10) | Development run | Why |
-| --- | --- | --- | --- |
-| simulations | 64 | **4** | throughput gate; see below |
-| worlds (K) | 4 | 4 | unchanged |
-| workers | 16 | 16 | unchanged |
-| games/cycle | 32 | 16 | keep cycles short enough to checkpoint and stop promptly |
-| checkpoint interval | 30 min | 20 min | fit three dev evaluations into the 45 min budget |
-| dev games per opponent | 100 | 8 | time budget; CIs are correspondingly wide |
+**Config used (deviations from the table above):** 4 simulations, K = 4, 16
+workers, batch 16, 16 games/cycle, 16 learner updates/cycle, 20-minute wall-clock
+budget, 60-minute checkpoint interval, dev evaluation disabled in-run and run
+externally afterwards with the same search settings (104 dev games per pairing,
+seat-swapped over four maps). Warm start `C:\2026\tm_bot\runs\warmstart\best`.
 
-Search cost measurements on the same host (16 workers, batch of 16 self-play
-games, `max_decisions_per_game=8000`):
+**Search-cost measurements** (same host, 16 workers, self-play batch):
 
 | Setting | Games | Wall | Throughput | Generations (min/median/max) | Decisions |
 | --- | ---: | ---: | ---: | --- | ---: |
-| s8/K4 (eval reference) | 400 eval games | 2,051 s | ~700/h | 14.8 mean | ~490/game |
-| s4/K4 | 16 | 171.3 s | **336/h** | 12 / 25 / 33 | 612/game |
-| s2/K2 | 16 | > 25 min (measured attempt) | — | games did not finish (step cap) | — |
+| s4/K4, batch 16 | 16 | 171.3 s | **336 games/h** | 12 / 25 / 33 | 9,797 (612/game) |
+| s4/K4, run cycle 1 | 16 | 171 s | 338 games/h | 23.8 mean | 9,727 |
+| s4/K4, run cycle 2 | 16 | 427 s | 135 games/h | 32.9 mean (max 63) | 15,751 |
+| s8/K4, one self-play game | 1 | 47.5 s | (not a batch measurement) | 26 | 738 |
+| s2/K2, batch 16 | 16 | did not finish in 25 min; games hit the decision cap | — | — | — |
 
-Reducing simulations from 64 to 4 was necessary to make games finish at all in
-self-play; at s2/K2 the untrained action policy no longer terraforms and games
-run to the decision cap. Note that in self-play **both** seats come from the
-warm-start network, so games are much longer than the s8/K4 evaluation against
-B1 (which was 14.8 generations/game); at s4/K4 self-play games median 25
-generations, which is already at the top of the #10 6-25 sanity band and is
-flagged by the shape monitor for the long tail. The 1,000 games/hour speed gate
-is **not met** (336 games/hour measured); the limiting factor is game length,
-not search cost (p50 searched-decision latency is 14 ms). Recorded per the
-ticket: simulations were reduced first, then K was left at 4 because lowering K
-did not help while games failed to terminate.
+The >= 1,000 self-play games/hour gate is **not met**. Simulations were reduced
+first (64 -> 8 -> 4). K was left at 4: lowering it to 2 did not help because at
+s2/K2 the untrained action policy stops terraforming, games run past the
+decision cap, and no batch completes. The limiting factor is game length, not
+per-decision search cost: s4/K4 self-play games median 25-33 generations
+(vs 15 generations when the warm start plays B1), so the shape monitor flags the
+long tail (`shape_flag_count` 6/16 in cycle 1 and 12/16 in cycle 2). This is the
+expected pre-#25 behaviour of an untrained action policy, but it means the
+throughput gate cannot be cleared until the policy plays normal-length games.
 
-Run results (throughput, losses, dev results with CIs, stop triggers) are
-recorded below from `runs/dev1h/monitor/summary.json` and the checkpoint rows.
+**Training**: 32 self-play games and 16 learner updates in 601 s before the hard
+stop. Per-cycle metrics (before/after the single update cycle):
+
+| Cycle | Games | Mean gens | Throughput (cum) | Policy loss | Value loss | Probe entropy | Target entropy | Value Brier / ECE |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 16 | 23.8 | 338/h | 1.304 | 0.367 | 1.234 | 1.200 | 0.378 / 0.354 |
+| 2 | 16 | 32.9 | 192/h | — (stopped before update) | — | 1.291 | 1.250 | 0.415 / 0.398 |
+
+Value calibration is measured on the cycle's newly finished games **before**
+they enter the buffer and before the update (frozen weights): n = 11,674 total,
+2,665 wins / 4,119 losses / 0 ties (from the training seat's perspective). The
+value head is badly overconfident on the top bin (mean predicted 0.96 vs
+observed 0.35), which the ECE reflects. The probe entropy is the network policy
+entropy on the first cycle's fixed observation set; target entropy is the
+self-play visit-distribution entropy (they are different quantities and both
+are logged).
+
+**Stop trigger**: `adapter_rejection` at 599 s. `train-0027` reached generation
+73 on Vastitas Borealis Nova, and the adapter failed to factor a drafting prompt
+with zero offered cards (`SelectCard requires at least 1 cards, only 0 enabled`).
+The run saved seed + full action history to
+`runs/dev1h-nov/regression/train-0027__vastitas_borealis_nova__AdapterBugError.json`
+and stopped instead of treating the game as a result. This is a real
+adapter/engine edge case for games that run far past the normal 14 generations
+(see #29/#31); it also appeared in the earlier pre-fix attempt at generations
+44-48.
+
+**Dev results** (externally evaluated from `ckpt-000000001`, 104 seat-swapped
+`dev-*` games per pairing, s4/K4, 16 workers, batch 32; JSON under
+`runs/dev1h-nov/dev_reports/`):
+
+| Pairing | Completed | Failures | Win rate (95% paired bootstrap CI) | Mean VP margin | Gens/game | Wall |
+| --- | ---: | ---: | --- | ---: | ---: | ---: |
+| Candidate vs warm start | 104 | 0 | **45.19%** [35.58%, 54.81%] | -3.38 | 27.5 | 1,299 s |
+| Warm start vs B1 | 104 | 0 | **7.69%** [0.00%, 19.23%] | -68.61 | 15.0 | 332 s |
+| Candidate vs B1 | 103 | 1 | **7.77%** [0.00%, 17.65%] | -71.82 | 15.9 | 498 s |
+
+The candidate is not measurably better than its warm start after 16 updates
+(45% vs 50%, CI includes 50%); both lose to B1 at ~8%, matching the pre-training
+search result in [search.md](search.md). CIs are wide (104 games, one training
+seed) and the training run was cut short by the adapter bug, so this is a
+throughput/plumbing result, not a strength result.
+
+Total development-run wall clock: 601 s training + 1,299 s + 332 s + 498 s of
+dev evaluation = **2,730 s (45.5 min)**, within the 1 h limit.

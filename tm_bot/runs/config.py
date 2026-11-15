@@ -84,6 +84,7 @@ class RunConfig:
     # Checkpointing and evaluation.
     checkpoint_interval_s: float = 30.0 * 60.0
     keep_last_checkpoints: int = 10
+    dev_eval_enabled: bool = True
     warmstart_checkpoint: str | None = None
     device: str | None = None
 

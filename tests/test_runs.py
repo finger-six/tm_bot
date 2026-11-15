@@ -2,26 +2,38 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 import pytest
 import torch
 
-from tm_bot.agents import B0Agent, play_game
+from tm_bot.agents import B0Agent, play_game, play_games
 from tm_bot.agents.card_data import load_card_data
 from tm_bot.env.types import Candidate, Choice
 from tm_bot.eval.seeds import SeedKey
 from tm_bot.models.encode import encode_choice, encode_observation
-from tm_bot.models.network import TMModelConfig, TMNetwork
+from tm_bot.models.network import TMModelConfig, TMNetwork, save_checkpoint
 from tm_bot.models.vocab import CardVocab
 from tm_bot.runs.buffer import DecisionSample, ReplayBuffer, collate_samples
 from tm_bot.runs.checkpoints import CheckpointManager
 from tm_bot.runs.config import ResourceLimits, RunConfig
-from tm_bot.runs.deveval import DevResult, build_dev_games
+from tm_bot.runs.deveval import (
+    DevResult,
+    _load_policy_value_agent,
+    build_dev_games,
+    cached_policy_value_agent,
+    clear_dev_agent_cache,
+)
 from tm_bot.runs.errors import RunResumeError
-from tm_bot.runs.learner import LearnerStats
+from tm_bot.runs.learner import (
+    LearnerStats,
+    compute_value_calibration,
+    probe_policy_entropy,
+)
 from tm_bot.runs.monitoring import (
     CheckpointMetrics,
     CycleMetrics,
@@ -31,7 +43,7 @@ from tm_bot.runs.monitoring import (
     game_shape_flags,
 )
 from tm_bot.runs.orchestrator import SelfPlayRunner
-from tm_bot.runs.recorder import DecisionRecord, GameRecorder, RecordingAgent, capture_agent
+from tm_bot.runs.recorder import GameRecorder, RecordingAgent, capture_agent
 from tm_bot.runs.selfplay import (
     OpponentSampler,
     SelfPlayBatch,
@@ -39,6 +51,7 @@ from tm_bot.runs.selfplay import (
     build_selfplay_specs,
     make_train_seed_keys,
     replay_game,
+    utility_for_seat,
 )
 from tm_bot.runs.stopping import StopKind, StoppingMonitor
 
@@ -139,7 +152,7 @@ def _obs(*, actor: int = 0, opponent_hand: tuple[str, ...] = ()) -> dict[str, An
             "preludeCardsInHand": [],
             "draftedCards": [],
             "currentDraftPacket": [],
-            # Decoy fields: only the opponent's hand differs between the twins.
+            # Decoy field: only differs when it is the acting seat's own private data.
             "pendingCardSelection": list(opponent_hand) if actor == 1 else [],
         },
         "history": {
@@ -154,20 +167,20 @@ def _obs(*, actor: int = 0, opponent_hand: tuple[str, ...] = ()) -> dict[str, An
 def _choice(*, seat: int = 0) -> Choice:
     return Choice(
         seat=seat,  # type: ignore[arg-type]
-        kind="branch",
-        prompt="Take your first action",
-        candidates=(Candidate("a", "A"), Candidate("b", "B")),
+        kind="card",
+        prompt="Select a card to keep",
+        candidates=(Candidate("Algae", "Algae"), Candidate("Birds", "Birds")),
     )
 
 
-def _encoded_sample() -> DecisionSample:
+def _encoded_sample(*, value: float = 1.0) -> DecisionSample:
     observation = _obs(actor=0)
     choice = _choice()
     return DecisionSample(
         observation=encode_observation(observation, _VOCAB),  # type: ignore[arg-type]
         choice=encode_choice(choice, observation, _VOCAB),  # type: ignore[arg-type]
         policy_target=np.array([0.75, 0.25], dtype=np.float32),
-        value_target=1.0,
+        value_target=value,
         seat=0,
         was_searched=True,
         seed_key="train-0000",
@@ -200,6 +213,12 @@ def test_adapter_rejection_and_engine_error_hard_stop() -> None:
     assert engine.stopped is True
     assert engine.kind is StopKind.ENGINE_ERROR
 
+    unknown = StoppingMonitor().observe_failures(
+        [FailureEvent("train-0004", "hellas", "RuntimeError", "boom")]
+    )
+    assert unknown.stopped is True
+    assert unknown.kind is StopKind.ENGINE_ERROR
+
     step_cap = StoppingMonitor().observe_failures(
         [FailureEvent("train-0003", "elysium", "StepCapError", "too many decisions")]
     )
@@ -222,7 +241,7 @@ def _checkpoint_record(cycle: int, win_rate: float, *, elapsed_s: float = 0.0) -
         elapsed_s=elapsed_s,
         step=cycle,
         games=cycle * 10,
-        checkpoint=f"step-{cycle:09d}",
+        checkpoint=f"ckpt-{cycle:09d}",
         dev_games=100,
         dev_win_rate_vs_b1=win_rate,
         dev_win_rate_vs_b1_ci_95=(win_rate - 0.05, win_rate + 0.05),
@@ -237,7 +256,6 @@ def _checkpoint_record(cycle: int, win_rate: float, *, elapsed_s: float = 0.0) -
 def test_collapse_win_rate_rule_fires_after_three_checkpoints() -> None:
     monitor = StoppingMonitor(collapse_win_rate_drop=0.15, collapse_checkpoints=3)
     assert monitor.observe_checkpoint(_checkpoint_record(1, 0.80)).stopped is False
-    # Within 15 points of the 0.80 best: no streak.
     assert monitor.observe_checkpoint(_checkpoint_record(2, 0.70)).stopped is False
     assert monitor.observe_checkpoint(_checkpoint_record(3, 0.60)).stopped is False
     assert monitor.observe_checkpoint(_checkpoint_record(4, 0.64)).stopped is False
@@ -253,7 +271,6 @@ def test_collapse_entropy_rule_only_within_two_hours() -> None:
     decision = monitor.observe_entropy(0.1, elapsed_s=300.0)
     assert decision.stopped is True
     assert decision.kind is StopKind.COLLAPSE_ENTROPY
-    # After the two-hour window the same entropy does not trigger collapse.
     later = StoppingMonitor(entropy_collapse_fraction=0.10, entropy_collapse_window_s=7200.0)
     later.set_entropy_baseline(2.0)
     assert later.observe_entropy(0.1, elapsed_s=7201.0).stopped is False
@@ -305,7 +322,7 @@ def test_training_seeds_never_fall_in_dev_or_eval_namespaces() -> None:
 def test_selfplay_specs_use_train_seeds_and_one_capture_seat() -> None:
     keys = make_train_seed_keys(0, 3)
     sampler = OpponentSampler(b1_prob=1.0, latest_prob=0.0, pool_prob=0.0)
-    specs, recorders, seats = build_selfplay_specs(
+    specs, recorders, seats, kinds = build_selfplay_specs(
         seed_keys=keys,
         maps=["tharsis", "hellas"],
         learner_factory=lambda seed: B0Agent(seed=seed),
@@ -314,22 +331,26 @@ def test_selfplay_specs_use_train_seeds_and_one_capture_seat() -> None:
     )
     assert all(spec.seed_key.startswith("train-") for spec in specs)
     assert seats == [0, 1, 0]
+    assert kinds == ["b1", "b1", "b1"]
     assert [r.capture_seat for r in recorders] == [0, 1, 0]
     assert [r.seed_key for r in recorders] == [k.key for k in keys]
 
 
-def test_dev_games_are_exactly_n_and_dev_namespaced() -> None:
-    games = build_dev_games(100, maps=["tharsis", "elysium", "hellas", "vastitas borealis nova"])
-    assert len(games) == 100
+def test_dev_games_are_seat_swapped_pairs() -> None:
+    games = build_dev_games(
+        100, maps=["tharsis", "elysium", "hellas", "vastitas borealis nova"]
+    )
+    assert len(games) == 104  # rounded up to whole seat-swapped pairs
     assert all(seed.startswith("dev-") for seed, _map, _seat in games)
-    assert sum(1 for _s, _m, seat in games if seat == 0) == 50
-    assert sum(1 for _s, _m, seat in games if seat == 1) == 50
+    pairs: dict[tuple[str, str], list[int]] = {}
+    for seed, map_name, seat in games:
+        pairs.setdefault((seed, map_name), []).append(seat)
+    assert all(sorted(seats) == [0, 1] for seats in pairs.values())
+    assert sum(1 for _s, _m, seat in games if seat == 0) == 52
 
 
 # --- leakage -----------------------------------------------------------
 def test_opponent_private_cards_never_enter_the_acting_seat_encoding() -> None:
-    # From seat 0, both worlds look identical: the opponent's private cards are not in
-    # the actor observation at all. (Only the public hand *count* is visible.)
     obs_a = _obs(actor=0, opponent_hand=("Algae",))
     obs_b = _obs(actor=0, opponent_hand=("Birds", "Debris"))
     enc_a = encode_observation(obs_a, _VOCAB)  # type: ignore[arg-type]
@@ -339,8 +360,6 @@ def test_opponent_private_cards_never_enter_the_acting_seat_encoding() -> None:
     assert np.array_equal(enc_a.card_dyn, enc_b.card_dyn)
     assert np.array_equal(enc_a.space_feats, enc_b.space_feats)
 
-    # From seat 1 those same cards are its own private data, so the encoding differs:
-    # the encoder is seat-scoped, and the recorder only ever stores the acting seat view.
     own_a = encode_observation(_obs(actor=1, opponent_hand=("Algae",)), _VOCAB)  # type: ignore[arg-type]
     own_b = encode_observation(_obs(actor=1, opponent_hand=("Birds", "Debris")), _VOCAB)  # type: ignore[arg-type]
     assert not np.array_equal(own_a.obs_scalars, own_b.obs_scalars)
@@ -356,9 +375,7 @@ def test_recorder_captures_only_the_training_seat() -> None:
     assert len(recorder.decisions) == 1
     assert int(recorder.decisions[0].observation["actor"]) == 0
 
-    # An observation that belongs to another seat can never become a training row.
-    from types import SimpleNamespace
-
+    from tm_bot.runs.recorder import DecisionRecord
     from tm_bot.runs.selfplay import SelfPlayEngine
 
     config = RunConfig(run_name="leak", output_root=Path("unused"), workers=1)
@@ -392,18 +409,17 @@ def test_recorder_captures_only_the_training_seat() -> None:
 
 # --- 3. resume ---------------------------------------------------------
 class _FakeEngine:
-    def __init__(self) -> None:
-        from types import SimpleNamespace
-
+    def __init__(self, *, value: float = 1.0) -> None:
         self.seed_cursor = 0
         self.opponents = SimpleNamespace(pool=())
+        self.value = value
 
     def set_opponent_pool(self, checkpoints) -> None:
         self.opponents.pool = tuple(Path(p) for p in checkpoints)
 
-    def play_batch(self, num_games: int) -> SelfPlayBatch:
+    def play_batch(self, num_games: int, *, stop_when=None) -> SelfPlayBatch:
         games = []
-        for i in range(num_games):
+        for _ in range(num_games):
             seed = f"train-{self.seed_cursor:04d}"
             self.seed_cursor += 1
             games.append(
@@ -420,28 +436,56 @@ class _FakeEngine:
             )
         return SelfPlayBatch(
             games=games,
-            samples=[_encoded_sample() for _ in games],
+            samples=[_encoded_sample(value=self.value) for _ in games],
             training_seats=[0 for _ in games],
+            opponent_kinds=["latest" for _ in games],
             decisions=120 * num_games,
             searched_decisions=20 * num_games,
         )
 
 
 class _FakeLearner:
-    def __init__(self) -> None:
+    def __init__(self, model: TMNetwork | None = None) -> None:
         self.step = 0
+        self.model = model
+        self.nonfinite = False
+        self.set_win_probability = False
 
     def train(self, buffer, *, updates=None) -> LearnerStats:
         self.step += 1
+        if self.model is not None and self.set_win_probability:
+            with torch.no_grad():
+                self.model.value_head[-1].bias.fill_(10.0)
+        if self.model is not None and self.nonfinite:
+            with torch.no_grad():
+                self.model.obs_norm.weight.fill_(float("nan"))
+            return LearnerStats(updates=0, nonfinite_loss=float("nan"))
         return LearnerStats(
             updates=1,
             policy_loss=1.2,
             value_loss=0.7,
             total_loss=1.9,
-            policy_entropy=1.5,
-            value_brier=0.24,
-            value_accuracy=0.55,
         )
+
+
+class _SharpeningLearner(_FakeLearner):
+    def __init__(self, model: TMNetwork) -> None:
+        super().__init__(model=model)
+        self.optimizer = torch.optim.SGD(model.parameters(), lr=0.05)
+
+    def train(self, buffer, *, updates=None) -> LearnerStats:
+        self.step += 1
+        assert self.model is not None
+        batch, _targets, _values = collate_samples([_encoded_sample()])
+        target = torch.tensor([[1.0, 0.0]])
+        for _ in range(20):
+            self.optimizer.zero_grad(set_to_none=True)
+            out = self.model(batch, compute_policy=True, compute_value=False)
+            log_probs = torch.log_softmax(out["policy_logits"], dim=-1)
+            loss = -(target * log_probs).sum(dim=-1).mean()
+            loss.backward()
+            self.optimizer.step()
+        return LearnerStats(updates=1, policy_loss=1.0, value_loss=0.5, total_loss=1.5)
 
 
 def _fake_dev(_checkpoint: Path, _opponent: Path | None) -> DevResult:
@@ -456,8 +500,8 @@ def _fake_dev(_checkpoint: Path, _opponent: Path | None) -> DevResult:
     )
 
 
-def _run_config(tmp_path: Path, name: str) -> RunConfig:
-    return RunConfig(
+def _run_config(tmp_path: Path, name: str, **overrides: Any) -> RunConfig:
+    data: dict[str, Any] = dict(
         run_name=name,
         output_root=tmp_path,
         workers=1,
@@ -470,16 +514,17 @@ def _run_config(tmp_path: Path, name: str) -> RunConfig:
         determinism_check_every_games=1_000,
         limits=ResourceLimits(disk_gb=50.0),
     )
+    data.update(overrides)
+    return RunConfig(**data)
 
 
 def test_resume_continues_from_last_good_checkpoint(tmp_path: Path) -> None:
     config = _run_config(tmp_path, "resume-run")
     model = _tiny_model(seed=1)
-    learner = _FakeLearner()
     runner = SelfPlayRunner(
         config,
         engine=_FakeEngine(),
-        learner=learner,
+        learner=_FakeLearner(),
         evaluator=_fake_dev,
         model=model,
         vocab=_VOCAB,
@@ -488,11 +533,17 @@ def test_resume_continues_from_last_good_checkpoint(tmp_path: Path) -> None:
     assert first.cycles == 2
     assert first.selfplay_games == 2
     assert first.last_checkpoint is not None
-    assert first.last_checkpoint.name == "step-000000002"
+    assert first.last_checkpoint.name.startswith("ckpt-")
+    assert len(runner.buffer) == 2
+    assert first.best_dev_win_rate == pytest.approx(0.5)
+    assert runner.stopping.best_dev_win_rate == pytest.approx(0.5)
     state = runner.manager.load_state()
     assert state is not None and state["cycle"] == 2
+    assert state["seed_cursor"] == 2
+    assert state["pool"]
+    state["determinism_checks_done"] = 2
+    runner.manager.state_path.write_text(json.dumps(state), encoding="utf-8")
 
-    # A fresh model must be replaced by the last good checkpoint on resume.
     resumed_model = _tiny_model(seed=999)
     resumed_learner = _FakeLearner()
     resumed = SelfPlayRunner(
@@ -508,6 +559,12 @@ def test_resume_continues_from_last_good_checkpoint(tmp_path: Path) -> None:
     assert second.selfplay_games == 3
     assert resumed.cycle == 3
     assert resumed.learner.step == 3  # type: ignore[union-attr]
+    assert len(resumed.buffer) == 3
+    assert resumed.best_dev_win_rate == pytest.approx(0.5)
+    assert resumed.stopping.best_dev_win_rate == pytest.approx(0.5)
+    assert resumed._determinism_checks_done == 2
+    assert resumed.engine.seed_cursor == 3  # type: ignore[attr-defined]
+    assert resumed.engine.opponents.pool  # type: ignore[attr-defined]
 
     def weights(path: Path) -> dict[str, torch.Tensor]:
         payload = torch.load(path / "checkpoint.pt", map_location="cpu", weights_only=False)
@@ -518,7 +575,6 @@ def test_resume_continues_from_last_good_checkpoint(tmp_path: Path) -> None:
     for key in step2:
         assert torch.equal(step2[key], step3[key]), key
 
-    # Starting over in the same directory without --resume is refused.
     with pytest.raises(RunResumeError):
         SelfPlayRunner(
             config,
@@ -547,28 +603,38 @@ def test_run_outputs_are_gitignored(tmp_path: Path) -> None:
 # --- checkpoints / buffer / monitoring ---------------------------------
 def test_checkpoint_retention_keeps_best_and_last_ten(tmp_path: Path) -> None:
     manager = CheckpointManager(tmp_path / "run", keep_last=10, disk_limit_gb=50.0)
-    for step in range(1, 15):
-        target = manager.checkpoint_dir(step)
+    for _ in range(14):
+        target = manager.checkpoint_dir(manager._save_counter)
+        manager._save_counter += 1
         target.mkdir(parents=True)
         (target / "checkpoint.pt").write_bytes(b"x" * 16)
     manager.best_dir.mkdir(parents=True, exist_ok=True)
     (manager.best_dir / "checkpoint.pt").write_bytes(b"best")
     manager.prune()
     remaining = [p.name for p in manager.list_checkpoints()]
-    assert remaining == [f"step-{step:09d}" for step in range(5, 15)]
+    assert remaining == [f"ckpt-{counter:09d}" for counter in range(5, 15)]
     assert (manager.best_dir / "checkpoint.pt").read_bytes() == b"best"
+
+
+def test_checkpoint_names_are_monotonic_even_with_same_step(tmp_path: Path) -> None:
+    manager = CheckpointManager(tmp_path / "run", keep_last=10, disk_limit_gb=50.0)
+    model = _tiny_model()
+    first = manager.save(step=0, model=model, vocab=_VOCAB, metadata={})
+    second = manager.save(step=0, model=model, vocab=_VOCAB, metadata={})
+    assert first.name == "ckpt-000000001"
+    assert second.name == "ckpt-000000002"
+    assert first.exists() and second.exists()
 
 
 def test_disk_cap_prunes_oldest_then_raises(tmp_path: Path) -> None:
     manager = CheckpointManager(tmp_path / "run", keep_last=10, disk_limit_gb=1e-9)
-    for step in range(1, 4):
-        target = manager.checkpoint_dir(step)
+    for counter in range(1, 4):
+        target = manager.checkpoint_dir(counter)
         target.mkdir(parents=True)
         (target / "checkpoint.pt").write_bytes(b"x" * 4096)
     removed = manager.enforce_disk_cap()
     assert removed
     assert manager.list_checkpoints() == []
-    # A file that cannot be pruned keeps the run over its cap.
     (manager.monitor_dir / "metrics.jsonl").write_bytes(b"x" * 4096)
     from tm_bot.runs.errors import RunResourceError
 
@@ -599,12 +665,19 @@ def test_monitor_logger_writes_jsonl_and_summary(tmp_path: Path) -> None:
             total_selfplay_games=16,
             decisions=320,
             searched_decisions=64,
+            searched_share=0.2,
             rejections=0,
             failures=0,
+            wins=8,
+            losses=6,
+            ties=2,
             mean_generations=12.0,
+            opponent_kinds={"latest": 12, "b1": 4},
             policy_entropy=1.5,
+            target_policy_entropy=1.1,
             policy_loss=1.2,
             value_loss=0.7,
+            value_calibration={"n": 32, "brier": 0.2, "ece": 0.05, "wins": 16, "losses": 16, "ties": 0},
             throughput_games_per_hour=5760.0,
         )
     )
@@ -614,7 +687,7 @@ def test_monitor_logger_writes_jsonl_and_summary(tmp_path: Path) -> None:
             elapsed_s=10.0,
             step=1,
             games=16,
-            checkpoint="step-000000001",
+            checkpoint="ckpt-000000001",
             dev_games=100,
             dev_win_rate_vs_b1=0.55,
             dev_win_rate_vs_b1_ci_95=(0.45, 0.65),
@@ -633,7 +706,10 @@ def test_monitor_logger_writes_jsonl_and_summary(tmp_path: Path) -> None:
     assert summary["cycles"] == 1
     assert summary["checkpoints"] == 1
     assert summary["selfplay_games"] == 16
+    assert summary["wins"] == 8 and summary["losses"] == 6 and summary["ties"] == 2
+    assert summary["opponent_kinds"] == {"latest": 12, "b1": 4}
     assert summary["policy_entropy"]["mean"] == pytest.approx(1.5)
+    assert summary["value_calibration"]["mean_brier"] == pytest.approx(0.2)
     lines = (tmp_path / "monitor" / "metrics.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
 
@@ -647,55 +723,6 @@ def test_game_shape_flags_outside_six_to_twenty_five_generations() -> None:
     ]
     flags = game_shape_flags(games, min_generations=6, max_generations=25)
     assert [flag["seed_key"] for flag in flags] == ["train-0", "train-2"]
-
-
-def test_hard_failure_writes_regression_case_and_stops(tmp_path: Path) -> None:
-    class _FailingEngine(_FakeEngine):
-        def play_batch(self, num_games: int) -> SelfPlayBatch:
-            recorder = GameRecorder("train-0005", "tharsis", capture_seat=0)
-            recorder.actions = [(0, 0), (1, 1)]
-            return SelfPlayBatch(
-                games=[
-                    GameSummary(
-                        seed_key="train-0005",
-                        map_name="tharsis",
-                        ok=False,
-                        generations=None,
-                        decisions=2,
-                        error_type="AdapterBugError",
-                        error="adapter rejected candidate",
-                    )
-                ],
-                samples=[],
-                recorders=[recorder],
-                training_seats=[0],
-                decisions=2,
-            )
-
-    def _must_not_evaluate(_checkpoint: Path, _opponent: Path | None) -> DevResult:
-        raise AssertionError("dev evaluation must not run after a hard stop")
-
-    config = _run_config(tmp_path, "failure-run")
-    runner = SelfPlayRunner(
-        config,
-        engine=_FailingEngine(),
-        learner=_FakeLearner(),
-        evaluator=_must_not_evaluate,
-        model=_tiny_model(seed=4),
-        vocab=_VOCAB,
-    )
-    summary = runner.run(max_cycles=5)
-    assert summary.stop.stopped is True
-    assert summary.stop.kind is StopKind.ADAPTER_REJECTION
-    cases = list((config.run_dir / "regression").glob("*.json"))
-    assert len(cases) == 1
-    import json
-
-    payload = json.loads(cases[0].read_text(encoding="utf-8"))
-    assert payload["seed_key"] == "train-0005"
-    assert payload["map_name"] == "tharsis"
-    assert payload["error_type"] == "AdapterBugError"
-    assert payload["actions"] == [[0, 0], [1, 1]]
 
 
 def test_replay_from_seed_and_actions_matches_finished_game() -> None:
@@ -719,3 +746,393 @@ def test_replay_from_seed_and_actions_matches_finished_game() -> None:
     )
     replay = replay_game(original.seed_key, original.map_name, recorder.actions)
     assert compare_replay(original, replay).ok is True
+
+
+def test_play_games_deadline_reports_partial_games() -> None:
+    specs = [
+        SimpleNamespace(
+            seed_key="train-0099",
+            map_name="tharsis",
+            agents=(B0Agent(seed=1), B0Agent(seed=2)),
+            seat_seeds=None,
+        )
+    ]
+    outcomes = play_games(specs, num_workers=1, stop_when=lambda: True)  # type: ignore[arg-type]
+    assert len(outcomes) == 1
+    assert outcomes[0].ok is False
+    assert outcomes[0].error_type == "DeadlineReached"
+
+
+# --- fix-specific orchestrator tests ----------------------------------
+def test_cycle_calibration_uses_frozen_pre_update_weights(tmp_path: Path) -> None:
+    config = _run_config(tmp_path, "calibration-run")
+    model = _tiny_model(seed=2)
+    engine = _FakeEngine(value=-1.0)
+    expected = compute_value_calibration(model, engine.play_batch(1).samples, device="cpu")
+
+    learner = _FakeLearner(model=model)
+    learner.set_win_probability = True
+    runner = SelfPlayRunner(
+        config,
+        engine=engine,
+        learner=learner,
+        evaluator=None,
+        model=model,
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=1)
+    record = runner.logger.cycles[-1]
+    calib = record.value_calibration
+    assert calib["n"] == expected["n"]
+    assert calib["losses"] == 1
+    assert calib["brier"] == pytest.approx(expected["brier"], rel=1e-6)
+    assert calib["brier"] < 0.99  # the post-update all-win model would score ~1.0
+
+
+def test_first_checkpoint_uses_recorded_warmstart_as_previous_best(tmp_path: Path) -> None:
+    warmstart = str(tmp_path / "warmstart")
+    calls: list[tuple[Path, Path | None]] = []
+
+    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+        calls.append((candidate, opponent))
+        return _fake_dev(candidate, opponent)
+
+    config = _run_config(tmp_path, "warmstart-run", warmstart_checkpoint=warmstart)
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=evaluator,
+        model=_tiny_model(seed=5),
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=1)
+    assert len(calls) == 2
+    assert calls[0][1] is None
+    assert calls[1][1] == Path(warmstart)
+    written = json.loads((config.run_dir / "config.json").read_text(encoding="utf-8"))
+    assert written["warmstart_checkpoint"] == warmstart
+
+
+def test_entropy_collapse_uses_fixed_network_probe(tmp_path: Path) -> None:
+    config = _run_config(
+        tmp_path,
+        "entropy-run",
+        entropy_collapse_fraction=0.10,
+        entropy_collapse_window_s=7200.0,
+    )
+    model = _tiny_model(seed=7)
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_SharpeningLearner(model=model),
+        evaluator=None,
+        model=model,
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=3)
+    cycles = runner.logger.cycles
+    assert len(cycles) == 3
+    assert cycles[0].policy_entropy is not None
+    assert runner.stopping.entropy_baseline == pytest.approx(cycles[0].policy_entropy)
+    assert cycles[-1].policy_entropy is not None
+    assert cycles[-1].policy_entropy < cycles[0].policy_entropy
+    assert cycles[-1].target_policy_entropy == pytest.approx(cycles[0].target_policy_entropy)
+    # The probe is a network quantity, not the self-play target entropy.
+    assert not pytest.approx(cycles[0].target_policy_entropy) == cycles[0].policy_entropy
+
+
+def test_hard_failure_writes_regression_case_and_stops(tmp_path: Path) -> None:
+    class _FailingEngine(_FakeEngine):
+        def play_batch(self, num_games: int, *, stop_when=None) -> SelfPlayBatch:
+            recorder = GameRecorder("train-0005", "tharsis", capture_seat=0)
+            recorder.actions = [(0, 0), (1, 1)]
+            return SelfPlayBatch(
+                games=[
+                    GameSummary(
+                        seed_key="train-0005",
+                        map_name="tharsis",
+                        ok=False,
+                        generations=None,
+                        decisions=2,
+                        error_type="AdapterBugError",
+                        error="adapter rejected candidate",
+                    )
+                ],
+                samples=[],
+                recorders=[recorder],
+                training_seats=[0],
+                opponent_kinds=["latest"],
+                decisions=2,
+            )
+
+    def _must_not_evaluate(_checkpoint: Path, _opponent: Path | None) -> DevResult:
+        raise AssertionError("dev evaluation must not run after a hard stop")
+
+    config = _run_config(tmp_path, "failure-run")
+    runner = SelfPlayRunner(
+        config,
+        engine=_FailingEngine(),
+        learner=_FakeLearner(),
+        evaluator=_must_not_evaluate,
+        model=_tiny_model(seed=4),
+        vocab=_VOCAB,
+    )
+    summary = runner.run(max_cycles=5)
+    assert summary.stop.kind is StopKind.ADAPTER_REJECTION
+    cases = list((config.run_dir / "regression").glob("*.json"))
+    assert len(cases) == 1
+    payload = json.loads(cases[0].read_text(encoding="utf-8"))
+    assert payload["seed_key"] == "train-0005"
+    assert payload["error_type"] == "AdapterBugError"
+    assert payload["actions"] == [[0, 0], [1, 1]]
+
+
+def test_nonfinite_learner_rolls_back_and_stops(tmp_path: Path) -> None:
+    config = _run_config(tmp_path, "nan-run")
+    model = _tiny_model(seed=8)
+    learner = _FakeLearner(model=model)
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=learner,
+        evaluator=None,
+        model=model,
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=1)
+    checkpoint = runner.last_checkpoint
+    assert checkpoint is not None
+    payload = torch.load(checkpoint / "checkpoint.pt", map_location="cpu", weights_only=False)
+    good = payload["model_state_dict"]
+
+    learner.nonfinite = True
+    summary = runner.run(max_cycles=2, resume=True)
+    assert summary.stop.kind is StopKind.NONFINITE_LOSS
+    assert summary.stop.details["rolled_back"] is True
+    for key, value in model.state_dict().items():
+        assert torch.equal(value, good[key]), key
+    final_payload = torch.load(
+        runner.last_checkpoint / "checkpoint.pt", map_location="cpu", weights_only=False
+    )
+    for key, value in final_payload["model_state_dict"].items():
+        assert torch.isfinite(value).all(), key
+
+
+def test_disk_cap_crash_becomes_resource_stop(tmp_path: Path) -> None:
+    config = _run_config(
+        tmp_path,
+        "disk-run",
+        limits=ResourceLimits(disk_gb=1e-9),
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=_fake_dev,
+        model=_tiny_model(seed=9),
+        vocab=_VOCAB,
+    )
+    summary = runner.run(max_cycles=1)
+    assert summary.stop.stopped is True
+    assert summary.stop.kind is StopKind.RESOURCE_LIMIT
+    assert runner.manager.state_path.exists()
+
+
+def test_monitoring_separates_rejections_and_records_game_mix(tmp_path: Path, monkeypatch) -> None:
+    class _MixedEngine(_FakeEngine):
+        def play_batch(self, num_games: int, *, stop_when=None) -> SelfPlayBatch:
+            recorder = GameRecorder("train-0005", "tharsis", capture_seat=0)
+            recorder.actions = [(0, 0)]
+            games = [
+                GameSummary("train-0005", "tharsis", True, 30, 100, (60, 50), 0, False),
+                GameSummary("train-0006", "hellas", True, 12, 100, (40, 50), 1, False),
+                GameSummary("train-0007", "elysium", True, 12, 100, (50, 50), None, True),
+                GameSummary(
+                    "train-0008",
+                    "tharsis",
+                    False,
+                    None,
+                    7,
+                    error_type="AdapterBugError",
+                    error="rejected",
+                ),
+            ]
+            return SelfPlayBatch(
+                games=games,
+                samples=[_encoded_sample(value=1.0) for _ in range(3)],
+                recorders=[recorder],
+                training_seats=[0, 0, 0, 0],
+                opponent_kinds=["latest", "pool", "b1", "latest"],
+                decisions=400,
+                searched_decisions=100,
+            )
+
+    from tm_bot.runs.monitoring import DeterminismResult
+
+    monkeypatch.setattr(
+        "tm_bot.runs.orchestrator.determinism_check",
+        lambda original, actions: DeterminismResult(
+            original.seed_key, original.map_name, True, "identical"
+        ),
+    )
+    config = _run_config(
+        tmp_path,
+        "monitor-run",
+        games_per_cycle=4,
+        determinism_check_every_games=1,
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_MixedEngine(),
+        learner=_FakeLearner(),
+        evaluator=None,
+        model=_tiny_model(seed=10),
+        vocab=_VOCAB,
+    )
+    summary = runner.run(max_cycles=5)
+    assert summary.stop.kind is StopKind.ADAPTER_REJECTION
+    record = runner.logger.cycles[-1]
+    assert record.rejections == 1
+    assert record.failures == 1
+    assert (record.wins, record.losses, record.ties) == (1, 1, 1)
+    assert record.opponent_kinds == {"latest": 2, "pool": 1, "b1": 1}
+    assert record.searched_share == pytest.approx(0.25)
+    assert record.shape_flag_count == 1
+    assert record.determinism_checked is False  # hard stops do not replay a game
+    assert record.vp_histogram
+
+
+def test_determinism_spot_check_is_logged(tmp_path: Path, monkeypatch) -> None:
+    class _RecorderEngine(_FakeEngine):
+        def play_batch(self, num_games: int, *, stop_when=None) -> SelfPlayBatch:
+            games = []
+            recorders = []
+            for i in range(num_games):
+                seed = f"train-{self.seed_cursor:04d}"
+                self.seed_cursor += 1
+                games.append(
+                    GameSummary(seed, "tharsis", True, 12, 120, (60, 50), 0, False)
+                )
+                recorder = GameRecorder(seed, "tharsis", capture_seat=0)
+                recorder.actions = [(0, 0)]
+                recorders.append(recorder)
+            return SelfPlayBatch(
+                games=games,
+                samples=[_encoded_sample(value=1.0) for _ in games],
+                recorders=recorders,
+                training_seats=[0 for _ in games],
+                opponent_kinds=["latest" for _ in games],
+                decisions=120 * num_games,
+                searched_decisions=20 * num_games,
+            )
+
+    from tm_bot.runs.monitoring import DeterminismResult
+
+    monkeypatch.setattr(
+        "tm_bot.runs.orchestrator.determinism_check",
+        lambda original, actions: DeterminismResult(
+            original.seed_key, original.map_name, True, "identical"
+        ),
+    )
+    config = _run_config(
+        tmp_path, "determinism-run", games_per_cycle=2, determinism_check_every_games=1
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_RecorderEngine(),
+        learner=_FakeLearner(),
+        evaluator=None,
+        model=_tiny_model(seed=12),
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=2)
+    cycles = runner.logger.cycles
+    assert cycles[0].determinism_checked is True
+    assert cycles[0].determinism_ok is True
+    assert runner.logger.summary()["determinism_checks"] == 2
+
+
+def test_utility_for_seat_rejects_unknown_winner() -> None:
+    with pytest.raises(ValueError, match="no declared winner"):
+        utility_for_seat(
+            GameSummary("train-0", "tharsis", True, 12, 10, (50, 50), None, False), 0
+        )
+    assert utility_for_seat(
+        GameSummary("train-0", "tharsis", True, 12, 10, (50, 50), None, True), 1
+    ) == 0.0
+
+
+def test_dev_agent_cache_is_bounded(tmp_path: Path) -> None:
+    clear_dev_agent_cache()
+    paths = []
+    for index in range(3):
+        target = tmp_path / f"ckpt-{index}"
+        save_checkpoint(target, _tiny_model(seed=index), _VOCAB)
+        paths.append(target)
+    for target in paths:
+        cached_policy_value_agent(target, "cpu")
+    info = _load_policy_value_agent.cache_info()
+    assert info.maxsize == 2
+    assert info.currsize <= 2
+    clear_dev_agent_cache()
+
+
+def test_pool_agent_cache_is_trimmed(tmp_path: Path) -> None:
+    from tm_bot.runs.selfplay import SelfPlayEngine
+
+    config = RunConfig(run_name="pool", output_root=tmp_path, workers=1)
+    engine = SelfPlayEngine(config, model=_tiny_model(), vocab=_VOCAB)
+    keep = tmp_path / "a"
+    engine._pool_agents = {str(keep): object(), str(tmp_path / "b"): object()}  # type: ignore[assignment]
+    engine.set_opponent_pool([keep])
+    assert set(engine._pool_agents) == {str(keep)}
+    assert engine.opponents.pool == (keep,)
+
+
+def test_params_are_finite_detects_nan() -> None:
+    from tm_bot.runs.learner import params_are_finite
+
+    model = _tiny_model(seed=13)
+    assert params_are_finite(model) is True
+    with torch.no_grad():
+        model.obs_norm.weight[0] = float("nan")
+    assert params_are_finite(model) is False
+
+
+def test_orchestrator_deadline_stop(tmp_path: Path) -> None:
+    class _DeadlineEngine(_FakeEngine):
+        def play_batch(self, num_games: int, *, stop_when=None) -> SelfPlayBatch:
+            self.seed_cursor += num_games
+            return SelfPlayBatch(
+                games=[
+                    GameSummary(
+                        "train-0100",
+                        "tharsis",
+                        False,
+                        None,
+                        10,
+                        error_type="DeadlineReached",
+                        error="deadline",
+                    )
+                ],
+                samples=[],
+                recorders=[GameRecorder("train-0100", "tharsis")],
+                training_seats=[0],
+                opponent_kinds=["latest"],
+                decisions=10,
+            )
+
+    config = _run_config(tmp_path, "deadline-run", games_per_cycle=1)
+    runner = SelfPlayRunner(
+        config,
+        engine=_DeadlineEngine(),
+        learner=_FakeLearner(),
+        evaluator=None,
+        model=_tiny_model(seed=11),
+        vocab=_VOCAB,
+    )
+    summary = runner.run(max_cycles=5)
+    assert summary.stop.kind is StopKind.BUDGET
+    assert summary.selfplay_games == 0
+    assert runner.logger.cycles[-1].failures == 0

@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--learning-rate", type=float, default=5e-4)
     parser.add_argument("--checkpoint-minutes", type=float, default=30.0)
     parser.add_argument("--dev-games", type=int, default=100)
+    parser.add_argument("--skip-dev-eval", action="store_true")
     parser.add_argument("--dev-seed-start", type=int, default=0)
     parser.add_argument("--train-seed-start", type=int, default=0)
     parser.add_argument("--keep-last-checkpoints", type=int, default=10)
@@ -58,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
         learning_rate=args.learning_rate,
         checkpoint_interval_s=args.checkpoint_minutes * 60.0,
         dev_games_per_opponent=args.dev_games,
+        dev_eval_enabled=not args.skip_dev_eval,
         dev_seed_start=args.dev_seed_start,
         train_seed_start=args.train_seed_start,
         keep_last_checkpoints=args.keep_last_checkpoints,

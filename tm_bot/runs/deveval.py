@@ -1,36 +1,44 @@
-"""Dev-seed checkpoint evaluation against B1 and the previous best checkpoint."""
+"""Dev-seed checkpoint evaluation against B1 and the previous best checkpoint.
+
+Dev games use the same seat-swapped pairing as `tm_bot.eval.pairing`: every
+`(dev-seed, map)` is played twice with the candidate in opposite seats, so the
+paired bootstrap CI is valid.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
+import math
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from tm_bot.agents import B1Agent, load_card_data
 from tm_bot.agents.protocol import Agent
-from tm_bot.agents.runner import GameSpec, play_games
+from tm_bot.agents.runner import play_games
 from tm_bot.env.types import SUPPORTED_MAPS
-from tm_bot.eval.pairing import PairedGameMeta
+from tm_bot.eval.pairing import build_paired_specs
 from tm_bot.eval.report import summarize_evaluation
-from tm_bot.eval.seeds import derive_agent_seed, make_seed_key
+from tm_bot.eval.seeds import generate_seed_keys
 from tm_bot.models.agent import PolicyValueAgent
 from tm_bot.runs.monitoring import CheckpointMetrics
 from tm_bot.runs.selfplay import assert_namespace
 from tm_bot.search.agent import ISMCTSAgent
 from tm_bot.search.config import SearchConfig
 
-_DEV_AGENT_CACHE: dict[tuple[str, str], PolicyValueAgent] = {}
+
+@lru_cache(maxsize=2)
+def _load_policy_value_agent(checkpoint: str, device: str) -> PolicyValueAgent:
+    """Bounded cache: at most the candidate and opponent of one pairing."""
+    return PolicyValueAgent.from_checkpoint(checkpoint, device=device, temperature=0.0)
 
 
 def cached_policy_value_agent(checkpoint: str | Path, device: str) -> PolicyValueAgent:
-    key = (str(Path(checkpoint).resolve()), device)
-    cached = _DEV_AGENT_CACHE.get(key)
-    if cached is None:
-        cached = PolicyValueAgent.from_checkpoint(
-            checkpoint, device=device, temperature=0.0
-        )
-        _DEV_AGENT_CACHE[key] = cached
-    return cached
+    return _load_policy_value_agent(str(Path(checkpoint).resolve()), device)
+
+
+def clear_dev_agent_cache() -> None:
+    _load_policy_value_agent.cache_clear()
 
 
 def dev_agent_factory(
@@ -53,28 +61,32 @@ def b1_agent_factory() -> Callable[[], Agent]:
     return lambda: B1Agent(seed=0, card_data=card_data)
 
 
+def dev_seed_count(num_games: int, maps: Sequence[str] = SUPPORTED_MAPS) -> int:
+    """Smallest seed count whose seat-swapped schedule covers `num_games` games."""
+    if num_games < 2:
+        raise ValueError("num_games must be >= 2 for seat-swapped dev evaluation")
+    if not maps:
+        raise ValueError("maps must be non-empty")
+    return max(1, math.ceil(num_games / (2 * len(maps))))
+
+
 def build_dev_games(
     num_games: int,
     *,
     maps: Sequence[str] = SUPPORTED_MAPS,
     seed_start: int = 0,
 ) -> list[tuple[str, str, int]]:
-    """Build exactly `num_games` `dev-*` games with balanced seats.
+    """Build the seat-swapped `dev-*` schedule (>= `num_games`, multiple of 2*|maps|).
 
-    Each `(seed, map)` is played once; the candidate takes seat 0 on even game
-    indices and seat 1 on odd ones, so seats are balanced across the schedule.
+    Each `(seed, map)` appears twice, once with the candidate in each seat. The
+    returned total is rounded up to a whole number of seat-swapped pairs.
     """
-    if num_games < 1:
-        raise ValueError("num_games must be >= 1")
-    if not maps:
-        raise ValueError("maps must be non-empty")
+    seeds = generate_seed_keys("dev", dev_seed_count(num_games, maps), start=seed_start)
     games: list[tuple[str, str, int]] = []
-    for i in range(num_games):
-        seed_index = seed_start + i // len(maps)
-        seed_key = make_seed_key("dev", seed_index).key
-        map_name = maps[i % len(maps)]
-        a_seat = 0 if i % 2 == 0 else 1
-        games.append((seed_key, map_name, a_seat))
+    for seed_key in seeds:
+        for map_name in maps:
+            games.append((seed_key.key, map_name, 0))
+            games.append((seed_key.key, map_name, 1))
     assert_namespace([g[0] for g in games], "dev")
     return games
 
@@ -104,43 +116,20 @@ def evaluate_dev_pairing(
     agent_a_name: str = "candidate",
     agent_b_name: str = "opponent",
 ) -> DevResult:
-    """Play exactly `num_games` seat-balanced `dev-*` games and summarize."""
-    games = build_dev_games(num_games, maps=maps, seed_start=seed_start)
-    specs: list[GameSpec] = []
-    metas: list[PairedGameMeta] = []
-    for seed_key, map_name, a_seat in games:
-        seed_a = derive_agent_seed(seed_key, map_name=map_name, role="a")
-        seed_b = derive_agent_seed(seed_key, map_name=map_name, role="b")
-        if a_seat == 0:
-            specs.append(
-                GameSpec(
-                    seed_key=seed_key,
-                    map_name=map_name,
-                    agents=(candidate_factory(), opponent_factory()),
-                    seat_seeds=(seed_a, seed_b),
-                )
-            )
-        else:
-            specs.append(
-                GameSpec(
-                    seed_key=seed_key,
-                    map_name=map_name,
-                    agents=(opponent_factory(), candidate_factory()),
-                    seat_seeds=(seed_b, seed_a),
-                )
-            )
-        metas.append(
-            PairedGameMeta(
-                seed_key=seed_key, map_name=map_name, a_seat=a_seat, seed_a=seed_a, seed_b=seed_b
-            )
-        )
+    """Play seat-swapped `dev-*` games and summarize with the paired bootstrap CI."""
+    seeds = generate_seed_keys("dev", dev_seed_count(num_games, maps), start=seed_start)
+    specs, metas = build_paired_specs(
+        agent_a=candidate_factory,
+        agent_b=opponent_factory,
+        seed_keys=seeds,
+        maps=maps,
+    )
+    assert_namespace([m.seed_key for m in metas], "dev")
 
     import time
 
     t0 = time.perf_counter()
-    outcomes = play_games(
-        specs, num_workers=num_workers, batch_size=batch_size
-    )
+    outcomes = play_games(specs, num_workers=num_workers, batch_size=batch_size)
     wall_s = time.perf_counter() - t0
     report = summarize_evaluation(
         outcomes=outcomes,

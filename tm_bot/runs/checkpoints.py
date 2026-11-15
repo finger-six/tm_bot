@@ -17,7 +17,7 @@ from tm_bot.runs.buffer import ReplayBuffer
 from tm_bot.runs.config import RunConfig
 from tm_bot.runs.errors import RunResourceError, RunResumeError
 
-_STEP_DIR_RE = re.compile(r"^step-(\d{9,})$")
+_SAVE_DIR_RE = re.compile(r"^(?:step|ckpt)-(\d{9,})$")
 CONFIG_NAME = "config.json"
 STATE_NAME = "state.json"
 STATE_TENSORS_NAME = "state.pt"
@@ -49,7 +49,6 @@ class CheckpointManager:
         *,
         keep_last: int = 10,
         disk_limit_gb: float = 50.0,
-        diagnose_ram_gb: float | None = None,
     ) -> None:
         if keep_last < 1:
             raise ValueError("keep_last must be >= 1")
@@ -60,7 +59,7 @@ class CheckpointManager:
         self.regression_dir = self.run_dir / "regression"
         self.keep_last = int(keep_last)
         self.disk_limit_bytes = float(disk_limit_gb) * (1024.0**3)
-        self.diagnose_ram_gb = diagnose_ram_gb
+        self._save_counter = 0
         for path in (
             self.run_dir,
             self.checkpoint_root,
@@ -68,6 +67,8 @@ class CheckpointManager:
             self.regression_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
+        existing = self._list_save_counters()
+        self._save_counter = (max(existing) + 1) if existing else 1
 
     # --- paths ---------------------------------------------------------
     @property
@@ -102,18 +103,29 @@ class CheckpointManager:
             self.config_path.write_text(config.to_json(), encoding="utf-8")
 
     # --- checkpoints ---------------------------------------------------
-    def checkpoint_dir(self, step: int) -> Path:
-        return self.checkpoint_root / f"step-{int(step):09d}"
+    def checkpoint_dir(self, counter: int) -> Path:
+        return self.checkpoint_root / f"ckpt-{int(counter):09d}"
 
-    def list_checkpoints(self) -> list[Path]:
-        found: list[tuple[int, Path]] = []
+    def _list_save_counters(self) -> list[int]:
         if not self.checkpoint_root.exists():
             return []
+        found: list[int] = []
         for entry in self.checkpoint_root.iterdir():
-            match = _STEP_DIR_RE.match(entry.name)
+            match = _SAVE_DIR_RE.match(entry.name)
+            if match and entry.is_dir():
+                found.append(int(match.group(1)))
+        return found
+
+    def list_checkpoints(self) -> list[Path]:
+        """Numbered checkpoints in monotonic save order (legacy `step-` dirs included)."""
+        if not self.checkpoint_root.exists():
+            return []
+        found: list[tuple[int, Path]] = []
+        for entry in self.checkpoint_root.iterdir():
+            match = _SAVE_DIR_RE.match(entry.name)
             if match and entry.is_dir():
                 found.append((int(match.group(1)), entry))
-        return [path for _step, path in sorted(found)]
+        return [path for _counter, path in sorted(found)]
 
     def save(
         self,
@@ -124,8 +136,9 @@ class CheckpointManager:
         metadata: Mapping[str, Any],
         is_best: bool = False,
     ) -> Path:
-        """Save a numbered checkpoint; optionally refresh the best copy."""
-        target = self.checkpoint_dir(step)
+        """Save a checkpoint named by a monotonic save counter (never by step)."""
+        target = self.checkpoint_dir(self._save_counter)
+        self._save_counter += 1
         save_checkpoint(target, model, vocab, metadata=dict(metadata))
         if is_best:
             save_checkpoint(self.best_dir, model, vocab, metadata=dict(metadata))
@@ -183,6 +196,7 @@ class CheckpointManager:
         model: TMNetwork | None = None,
         optimizer: torch.optim.Optimizer | None = None,
         buffer: ReplayBuffer | None = None,
+        entropy_probe: Any | None = None,
     ) -> None:
         data = dict(payload)
         _write_json_atomic(self.state_path, data)
@@ -193,6 +207,8 @@ class CheckpointManager:
             tensors["optimizer_state_dict"] = optimizer.state_dict()
         if buffer is not None:
             tensors["buffer"] = buffer.state_dict()
+        if entropy_probe is not None:
+            tensors["entropy_probe"] = entropy_probe
         if tensors:
             torch.save(tensors, self.state_tensors_path)
 
@@ -224,20 +240,21 @@ class CheckpointManager:
     def load_training_state(
         self,
         *,
-        model: TMNetwork,
+        model: TMNetwork | None = None,
         optimizer: torch.optim.Optimizer | None = None,
         buffer: ReplayBuffer | None = None,
-    ) -> bool:
+    ) -> dict[str, Any] | None:
+        """Restore any of model/optimizer/buffer independently; return the raw payload."""
         if not self.state_tensors_path.exists():
-            return False
+            return None
         payload = torch.load(self.state_tensors_path, map_location="cpu", weights_only=False)
-        if "model_state_dict" in payload:
+        if model is not None and "model_state_dict" in payload:
             model.load_state_dict(payload["model_state_dict"])
         if optimizer is not None and "optimizer_state_dict" in payload:
             optimizer.load_state_dict(payload["optimizer_state_dict"])
         if buffer is not None and "buffer" in payload:
             buffer.load_state_dict(payload["buffer"])
-        return True
+        return payload
 
     # --- regression cases ---------------------------------------------
     def write_regression_case(self, payload: Mapping[str, Any]) -> Path:

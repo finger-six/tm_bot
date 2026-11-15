@@ -6,7 +6,7 @@ import copy
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from tm_bot.agents.protocol import Agent, GameRunResult, SearchAgent
 from tm_bot.agents.sampler import (
@@ -275,6 +275,7 @@ def play_games(
     num_workers: int = 4,
     batch_size: int = 32,
     max_decisions: int = DEFAULT_MAX_DECISIONS,
+    stop_when: Callable[[], bool] | None = None,
 ) -> list[GameRunResult]:
     """Play a batch of games concurrently across a WorkerPool with per-game failure isolation.
 
@@ -283,6 +284,9 @@ def play_games(
     `act_with_sampler` or class-level `act_batch_with_samplers` so GPU neural
     evaluation and worker-pool rollouts batch across all concurrent games. All
     sampled clones are closed after every step even when an error occurs.
+
+    `stop_when` is polled between steps; when it returns True the remaining active
+    games are closed and reported with `error_type="DeadlineReached"`.
     """
     if not specs:
         return []
@@ -363,6 +367,31 @@ def play_games(
         try:
             spawn_slots(active_client)
             while active:
+                if stop_when is not None and stop_when():
+                    for slot in active:
+                        outcomes[slot.index] = _make_run_result(
+                            seed_key=slot.spec.seed_key,
+                            map_name=slot.spec.map_name,
+                            result=None,
+                            generations=None,
+                            decisions=slot.decisions,
+                            versions=slot.versions,
+                            ok=False,
+                            error_type="DeadlineReached",
+                            error=f"wall-clock deadline reached for seed_key={slot.spec.seed_key!r}",
+                            latencies_0=slot.latencies_0,
+                            latencies_1=slot.latencies_1,
+                            searched_latencies_0=slot.searched_latencies_0,
+                            searched_latencies_1=slot.searched_latencies_1,
+                        )
+                    try:
+                        active_client.batch(
+                            [Op.close(s.gid) for s in active], raise_on_error=False
+                        )
+                    except Exception:
+                        pass
+                    active = []
+                    break
                 pending_res = active_client.batch(
                     [Op.pending(s.gid) for s in active],
                     raise_on_error=False,
