@@ -707,9 +707,10 @@ class SelfPlayRunner:
                     )
                     return
                 self.best_dev_win_rate = win_rate
+            wall = self.elapsed_s()
             record = build_checkpoint_metrics(
                 cycle=self.cycle,
-                elapsed_s=self.elapsed_s(),
+                elapsed_s=wall,
                 step=self.steps,
                 games=self.selfplay_games,
                 checkpoint=self.last_checkpoint,
@@ -717,7 +718,7 @@ class SelfPlayRunner:
                 vs_previous_best=vs_best,
                 new_best=bool(new_best),
                 best_dev_win_rate=self.best_dev_win_rate,
-                training_s=self.training_s(),
+                training_s=wall - self.dev_eval_s,
                 dev_eval_s=self.dev_eval_s,
             )
             self.logger.log_checkpoint(record)

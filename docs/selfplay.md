@@ -135,7 +135,9 @@ the same training budget even though their dev evaluations cost very different
 wall time. Cycle and checkpoint records, `monitor/summary.json`,
 `run_summary.json` and `state.json` report all three clocks: `elapsed_s` (total
 wall clock), `training_s` and `dev_eval_s`. The summary also gives throughput per
-wall hour and per training hour.
+wall hour and per training hour. `run_summary.json` is the authoritative
+record of the final clocks; `monitor/summary.json` is derived from the last
+logged record and omits the few seconds of final state saving.
 
 A regression case is `regression/<seed>__<map>__<error>.json` containing the
 seed key, map, error, decision count, and the full ordered action history.
