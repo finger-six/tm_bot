@@ -68,7 +68,9 @@ start can be run with `--epochs 4` and no step cap.
 plays `train-*` games through the same adapter runner and recorder as the main
 agent, with the same opponent sampling defaults: 60% latest comparator, 30%
 uniform from the last 10 frozen comparator checkpoints, 10% B1. The training
-seat samples from the masked policy (`temperature=1`); comparator opponents
+seat samples from the masked policy at temperature 1 (`RunConfig` rejects any
+other `action_temperature` for comparator runs, because PPO recomputes the
+behavior log-probabilities at temperature 1); comparator opponents
 (latest and pool) still act greedily. That differs from evaluation play (see
 [Evaluation policy](#evaluation-policy)) and is a known limitation.
 
@@ -87,10 +89,12 @@ comparator run keeps no decision buffer: older rows carry log-probabilities and
 advantages from older weights. An empty rollout (e.g. every game cut by the
 deadline) performs no update. This also keeps the comparator's resumable
 `state.pt` at ~32 MB instead of ~1.1 GB. A rollout is measured in games
-(`games_per_cycle`), not decisions: the spec's 16 x 2,048 = 32,768-decision
-rollout corresponds to roughly 40 games at ~870 decisions per game (both
-seats). Defaults: AdamW, lr 5e-4, batch 256. The development run used 16
-games/cycle, 32 minibatch updates/cycle, batch 256, lr 3e-4 and bfloat16 AMP.
+(`games_per_cycle`), not decisions. Only the training seat's decisions become
+PPO rows (~437 per game, half of the ~874 decisions both seats make), so the
+spec's 16 x 2,048 = 32,768-row rollout corresponds to roughly 75 games per
+cycle. Defaults: AdamW, lr 5e-4, batch 256. The development run used 16
+games/cycle (~7,000 rows, a deviation from the spec rollout size), 32 minibatch
+updates/cycle, batch 256, lr 3e-4 and bfloat16 AMP.
 
 Checkpoints, `dev-*` evaluation, best selection, stopping rules, monitoring,
 resource limits, and resume are the existing `tm_bot.runs` machinery.
@@ -142,7 +146,7 @@ budget rule after 37 cycles, with 0 adapter rejections and 0 failures.
 | PPO steps | 1,152 |
 | Training-loop wall clock | 3,601 s (3,012 s self-play + learner, the rest in-run dev eval) |
 | Total wall clock incl. final dev eval | 3,773 s |
-| Throughput | **576 self-play games/hour** (cumulative, including dev eval) |
+| Throughput | **576 self-play games/hour** over the training loop incl. in-run dev eval (549.6/hour incl. the final dev eval) |
 | Mean generations/game | 21.7 (range 11-65) |
 | Shape flags (outside 6-25 generations) | 103 of 576 games |
 | Wins / losses / ties (training seat) | 194 / 382 / 0 |
@@ -195,14 +199,23 @@ below B1.
 ### Win-probability calibration
 
 Artifacts: `runs/cmp-dev1h-final/calibration/dev_vs_{b1,warmstart}.{json,md}`
-and `*_reliability.svg` (gitignored). Every decision of the comparator's seat
-is scored against the game outcome. Temperature `T = 0.8144` was fitted on the
-warm-start validation split and is not refitted on `dev-*`.
+and `*_reliability.svg` (gitignored). Every non-forced decision (more than one
+candidate) of the comparator's seat in the 200 games is scored against that
+game's outcome. Temperature `T = 0.8144` was fitted on the warm-start
+validation split with the **warm-start** weights and reused unchanged after
+PPO; it is not refitted on `dev-*`. These are the same `dev-*` seeds used for
+checkpoint selection, so the numbers are not a held-out estimate.
 
-| Pairing | n decisions | Brier raw / T | NLL raw / T | ECE raw / T | Accuracy |
+The base-rate column is the score of a constant prediction equal to the
+decision-weighted win frequency (0.172 vs B1, 0.907 vs warm start; won games
+are longer, so this exceeds the per-game win rate).
+
+| Pairing | n decisions | Brier raw / T / base rate | NLL raw / T / base rate | ECE raw / T | Accuracy (base rate) |
 | --- | ---: | --- | --- | --- | ---: |
-| vs B1 | 52,566 | 0.089 / 0.094 | 0.280 / 0.300 | 0.084 / 0.102 | 0.877 |
-| vs warm start | 82,871 | 0.603 / 0.646 | 1.776 / 2.095 | 0.708 / 0.735 | 0.202 |
+| vs B1 | 52,566 | 0.089 / 0.094 / 0.143 | 0.280 / 0.300 / 0.460 | 0.084 / 0.102 | 0.877 (0.828) |
+| vs warm start | 82,871 | 0.603 / 0.646 / 0.084 | 1.776 / 2.095 / 0.309 | 0.708 / 0.735 | 0.202 (0.907) |
+
+Vs B1 the head beats the constant baseline; vs its warm start it is far worse.
 
 Reliability vs B1 (raw): 85% of decisions fall in the [0, 0.1] bin, with mean
 prediction 0.041 vs observed 0.052. The few won games are under-predicted
@@ -229,6 +242,15 @@ use one because the spec fixes fitting to validation data.
 - The in-run dev evaluation used 32 games per pairing to fit the 1 h limit; the
   milestone default is 100.
 - Self-play comparator opponents act greedily, while evaluation samples.
+- Rollouts were 16 games (~7,000 PPO rows) per cycle, not the spec's 32,768
+  rows (~75 games); use `--games-per-cycle 75` for the milestone run.
+- The collapse rule (vs-B1 drop of 15 points below the best) cannot fire while
+  the best vs-B1 win rate is 0%.
+- 103 of 576 games were flagged as shape anomalies (outside 6-25 generations),
+  88 of them in cycles 1-6 and none after cycle 21; they were not investigated
+  individually (deferred to the milestone run, #26).
+- The reproducibility test covers the evaluation agent's seeded `act` calls,
+  not a full `play_games` replay.
 - `eval-*` seeds were never read or written; all reported games are `dev-*`.
 - Adapter bug #32, which cut the first development run short, is fixed on `main`.
 
