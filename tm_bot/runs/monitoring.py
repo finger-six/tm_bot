@@ -319,7 +319,11 @@ class MonitorLogger:
         total_selfplay_games = max(
             (int(c.total_selfplay_games) for c in self._cycles), default=0
         )
-        elapsed = max((float(c.elapsed_s) for c in self._cycles), default=0.0)
+        # Checkpoint records are written after their dev eval, so they carry the
+        # latest wall clock as well.
+        elapsed = max(
+            (float(r.elapsed_s) for r in [*self._cycles, *self._checkpoints]), default=0.0
+        )
         throughput = (
             total_selfplay_games / (elapsed / 3600.0) if elapsed > 0.0 else None
         )

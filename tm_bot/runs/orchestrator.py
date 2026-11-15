@@ -491,7 +491,6 @@ class SelfPlayRunner:
         calibration: dict[str, Any] | None,
         probe_entropy: float | None,
         determinism: DeterminismResult | None,
-        elapsed: float,
         cycle_wall_s: float,
     ) -> CycleMetrics:
         games = batch.games
@@ -524,7 +523,7 @@ class SelfPlayRunner:
         record = CycleMetrics(
             cycle=self.cycle,
             elapsed_s=float(wall),
-            training_s=float(elapsed),
+            training_s=float(wall - self.dev_eval_s),
             dev_eval_s=float(self.dev_eval_s),
             wall_clock_s=float(cycle_wall_s),
             selfplay_games=len(games),
@@ -670,13 +669,15 @@ class SelfPlayRunner:
 
         if self.evaluator is not None:
             t_eval = self.clock()
-            vs_b1 = self.evaluator(self.last_checkpoint, None)
-            vs_best = (
-                self.evaluator(self.last_checkpoint, previous_best)
-                if previous_best is not None
-                else None
-            )
-            self.dev_eval_s += self.clock() - t_eval
+            try:
+                vs_b1 = self.evaluator(self.last_checkpoint, None)
+                vs_best = (
+                    self.evaluator(self.last_checkpoint, previous_best)
+                    if previous_best is not None
+                    else None
+                )
+            finally:
+                self.dev_eval_s += self.clock() - t_eval
             win_rate = vs_b1.win_rate
             new_best = is_new_best(
                 win_rate,
@@ -716,7 +717,7 @@ class SelfPlayRunner:
                 vs_previous_best=vs_best,
                 new_best=bool(new_best),
                 best_dev_win_rate=self.best_dev_win_rate,
-                training_s=elapsed,
+                training_s=self.training_s(),
                 dev_eval_s=self.dev_eval_s,
             )
             self.logger.log_checkpoint(record)
@@ -793,7 +794,6 @@ class SelfPlayRunner:
                     calibration=calibration,
                     probe_entropy=probe_entropy,
                     determinism=None,
-                    elapsed=elapsed,
                     cycle_wall_s=self.clock() - t_cycle,
                 )
                 break
@@ -857,7 +857,6 @@ class SelfPlayRunner:
                 calibration=calibration,
                 probe_entropy=probe_entropy,
                 determinism=determinism,
-                elapsed=elapsed,
                 cycle_wall_s=self.clock() - t_cycle,
             )
             if determinism is not None:

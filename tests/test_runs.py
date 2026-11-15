@@ -1348,6 +1348,8 @@ def test_budget_and_checkpoint_interval_run_on_the_training_clock(tmp_path: Path
     monitor_summary = runner.logger.summary()
     assert monitor_summary["training_s"] == pytest.approx(600.0)
     assert monitor_summary["dev_eval_s"] == pytest.approx(5_000.0)
+    # Both summaries report the same total wall clock, including the last dev eval.
+    assert monitor_summary["elapsed_s"] == pytest.approx(summary.elapsed_s)
 
 
 def test_entropy_window_runs_on_the_training_clock(tmp_path: Path) -> None:
@@ -1400,3 +1402,54 @@ def test_resume_keeps_the_training_and_dev_eval_clocks(tmp_path: Path) -> None:
     state = json.loads((config.run_dir / "state.json").read_text(encoding="utf-8"))
     assert state["dev_eval_s"] == pytest.approx(3_000.0)
     assert state["training_s"] == pytest.approx(200.0)
+
+
+class _ClockedLearner(_FakeLearner):
+    def __init__(self, now: list[float], step_s: float) -> None:
+        super().__init__()
+        self.now = now
+        self.step_s = step_s
+
+    def train(self, buffer, *, updates=None) -> LearnerStats:
+        self.now[0] += self.step_s
+        return super().train(buffer, updates=updates)
+
+
+def test_cycle_records_split_wall_clock_into_training_and_dev_eval(tmp_path: Path) -> None:
+    now = [0.0]
+    config = _run_config(tmp_path, "clock-identity", checkpoint_interval_s=100.0)
+    runner = SelfPlayRunner(
+        config,
+        engine=_ClockedEngine(now, 100.0),
+        learner=_ClockedLearner(now, 40.0),
+        evaluator=_clocked_dev(now, 1_000.0),
+        model=_tiny_model(seed=15),
+        vocab=_VOCAB,
+        clock=lambda: now[0],
+    )
+    runner.run(max_cycles=3)
+    for record in [*runner.logger.cycles, *runner.logger.checkpoints]:
+        assert record.elapsed_s == pytest.approx(record.training_s + record.dev_eval_s)
+
+
+def test_raising_dev_eval_still_counts_as_dev_eval_time(tmp_path: Path) -> None:
+    now = [0.0]
+
+    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+        now[0] += 1_000.0
+        raise RuntimeError("dev bridge crashed")
+
+    config = _run_config(tmp_path, "clock-raise", checkpoint_interval_s=100.0)
+    runner = SelfPlayRunner(
+        config,
+        engine=_ClockedEngine(now, 100.0),
+        learner=_FakeLearner(),
+        evaluator=evaluator,
+        model=_tiny_model(seed=16),
+        vocab=_VOCAB,
+        clock=lambda: now[0],
+    )
+    with pytest.raises(RuntimeError, match="dev bridge crashed"):
+        runner.run(max_cycles=1)
+    assert runner.dev_eval_s == pytest.approx(1_000.0)
+    assert runner.training_s() == pytest.approx(100.0)
