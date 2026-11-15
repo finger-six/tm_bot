@@ -47,7 +47,13 @@ from tm_bot.runs.selfplay import (
     SelfPlayEngine,
     determinism_check,
 )
-from tm_bot.runs.stopping import FailureEvent, StopDecision, StopKind, StoppingMonitor
+from tm_bot.runs.stopping import (
+    FailureEvent,
+    StopDecision,
+    StopKind,
+    StoppingMonitor,
+    is_new_best,
+)
 
 
 class SelfPlaySource(Protocol):
@@ -645,8 +651,10 @@ class SelfPlayRunner:
                 else vs_b1
             )
             win_rate = vs_b1.win_rate
-            new_best = win_rate is not None and (
-                self.best_dev_win_rate is None or win_rate > self.best_dev_win_rate
+            new_best = is_new_best(
+                win_rate,
+                self.best_dev_win_rate,
+                vs_best.win_rate_ci_95 if previous_best is not None else None,
             )
             if new_best:
                 try:

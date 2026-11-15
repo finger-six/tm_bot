@@ -51,6 +51,27 @@ def _stop(kind: StopKind, reason: str, **details: Any) -> StopDecision:
     return StopDecision(stopped=True, kind=kind, reason=reason, details=details)
 
 
+def is_new_best(
+    win_rate_vs_b1: float | None,
+    best_win_rate_vs_b1: float | None,
+    vs_previous_best_ci_95: Sequence[float] | None,
+) -> bool:
+    """Best-checkpoint rule, on `dev-*` results only.
+
+    A checkpoint is the new best if its win rate vs B1 beats the best so far. On
+    an exact tie (e.g. 0% vs B1 early in training) it is the new best only if it
+    beats the previous best with the 95% CI lower bound above 50%, so the
+    incumbent advances while B1 is still out of reach and noise alone does not.
+    """
+    if win_rate_vs_b1 is None:
+        return False
+    if best_win_rate_vs_b1 is None or win_rate_vs_b1 > best_win_rate_vs_b1:
+        return True
+    if win_rate_vs_b1 < best_win_rate_vs_b1 or vs_previous_best_ci_95 is None:
+        return False
+    return float(vs_previous_best_ci_95[0]) > 0.5
+
+
 @dataclass(frozen=True, slots=True)
 class FailureEvent:
     """A failed game or rejected decision that hard-stops the run."""
@@ -200,7 +221,11 @@ class StoppingMonitor:
         if win_rate is None:
             return _not_stopped()
 
-        new_best = self.best_dev_win_rate is None or win_rate > self.best_dev_win_rate
+        new_best = is_new_best(
+            win_rate,
+            self.best_dev_win_rate,
+            metrics.dev_win_rate_vs_previous_best_ci_95,
+        )
         if new_best:
             self.best_dev_win_rate = win_rate
             self.below_best_streak = 0

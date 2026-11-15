@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,7 +54,7 @@ from tm_bot.runs.selfplay import (
     replay_game,
     utility_for_seat,
 )
-from tm_bot.runs.stopping import StopKind, StoppingMonitor
+from tm_bot.runs.stopping import StopKind, StoppingMonitor, is_new_best
 
 _CARDS = load_card_data()
 _VOCAB = CardVocab.from_card_data(_CARDS)
@@ -285,6 +286,40 @@ def test_plateau_rule_fires_after_twelve_checkpoints_without_a_new_best() -> Non
     assert decision.stopped is True
     assert decision.kind is StopKind.PLATEAU
     assert decision.details["checkpoints_without_improvement"] == 12
+
+
+def _tied_record(cycle: int, win_rate: float, vs_best_ci: tuple[float, float]) -> CheckpointMetrics:
+    return dataclasses.replace(
+        _checkpoint_record(cycle, win_rate),
+        dev_win_rate_vs_previous_best=sum(vs_best_ci) / 2.0,
+        dev_win_rate_vs_previous_best_ci_95=vs_best_ci,
+    )
+
+
+def test_is_new_best_breaks_vs_b1_ties_on_significant_win_over_previous_best() -> None:
+    assert is_new_best(0.0, None, None) is True
+    assert is_new_best(0.1, 0.0, (0.0, 0.2)) is True
+    assert is_new_best(0.0, 0.1, (0.9, 1.0)) is False
+    assert is_new_best(0.0, 0.0, (0.51, 0.8)) is True
+    assert is_new_best(0.0, 0.0, (0.5, 0.8)) is False
+    assert is_new_best(0.0, 0.0, None) is False
+    assert is_new_best(None, None, (0.9, 1.0)) is False
+
+
+def test_plateau_does_not_fire_while_tied_checkpoints_beat_previous_best() -> None:
+    monitor = StoppingMonitor(plateau_checkpoints=12)
+    for cycle in range(1, 20):
+        decision = monitor.observe_checkpoint(_tied_record(cycle, 0.0, (0.6, 0.8)))
+        assert decision.stopped is False
+    assert monitor.checkpoints_without_improvement == 0
+
+
+def test_plateau_fires_when_tied_checkpoints_do_not_beat_previous_best() -> None:
+    monitor = StoppingMonitor(plateau_checkpoints=12)
+    for cycle in range(1, 13):
+        assert monitor.observe_checkpoint(_tied_record(cycle, 0.0, (0.4, 0.6))).stopped is False
+    decision = monitor.observe_checkpoint(_tied_record(13, 0.0, (0.4, 0.6)))
+    assert decision.kind is StopKind.PLATEAU
 
 
 def test_learner_step_cap_rule_fires() -> None:
@@ -787,6 +822,32 @@ def test_cycle_calibration_uses_frozen_pre_update_weights(tmp_path: Path) -> Non
     assert calib["losses"] == 1
     assert calib["brier"] == pytest.approx(expected["brier"], rel=1e-6)
     assert calib["brier"] < 0.99  # the post-update all-win model would score ~1.0
+
+
+def test_tied_vs_b1_checkpoint_that_beats_previous_best_becomes_best(tmp_path: Path) -> None:
+    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+        if opponent is None:
+            return DevResult(16, 16, 0, 0.0, (0.0, 0.0), -20.0, {})
+        return DevResult(16, 16, 0, 0.9, (0.75, 1.0), 10.0, {})
+
+    ticks = iter(float(i) for i in range(10_000))
+    config = _run_config(tmp_path, "tie-break-run", checkpoint_interval_s=0.5)
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=evaluator,
+        model=_tiny_model(seed=6),
+        vocab=_VOCAB,
+        clock=lambda: next(ticks),
+    )
+    runner.run(max_cycles=3)
+    records = runner.logger.checkpoints
+    assert len(records) == 3
+    assert all(r.new_best for r in records)
+    assert runner.stopping.checkpoints_without_improvement == 0
+    best = runner.manager.best_dir / "checkpoint.pt"
+    assert torch.load(best, map_location="cpu", weights_only=False)["metadata"]["cycle"] == records[-1].cycle
 
 
 def test_first_checkpoint_uses_recorded_warmstart_as_previous_best(tmp_path: Path) -> None:
