@@ -154,9 +154,10 @@ policy/value/total training losses, pre-update value calibration (n, W/L/T,
 Brier, ECE, reliability bins), W/L/T and VP-margin histogram for the training
 seat, generations/game, decisions/game, searched-decision share, realized
 opponent-kind mix, separate rejection and failure counts, decision latency
-p50/p95 (on the unbatched paths the training seat's latency includes the
-record-time encoding of its decisions; batched IS-MCTS latency is search time
-only), throughput, determinism check result, and untruncated game-shape flag
+p50/p95 (both seats pooled; on the unbatched paths the training seat's latency
+includes the record-time encoding of its decisions, so the seats are not
+directly comparable; batched IS-MCTS latency is search or policy-head time
+amortized across the batch and excludes encoding), throughput, determinism check result, and untruncated game-shape flag
 counts (generations outside 6-25) with up to 20 example games.
 Checkpoint records contain dev win rates and CIs vs B1 and the previous best.
 Determinism spot checks replay a finished game from its seed and recorded action

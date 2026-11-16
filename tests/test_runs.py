@@ -558,20 +558,28 @@ def test_batched_recording_rolls_back_when_a_later_entry_fails_to_encode(
             raise ValueError("encode failed")
         return real_encode(*args, **kwargs)
 
-    monkeypatch.setattr(recorder_module, "encode_observation", encode_second_fails)
     recorders = [
         GameRecorder(f"train-000{i}", "tharsis", capture_seat=0, vocab=_VOCAB) for i in range(2)
     ]
-    agents = [RecordingSearchAgent(_BatchInner(), r, capture_seat=0) for r in recorders]
+    # History recorded before the batch must survive the rollback.
+    for r in recorders:
+        r.record(_obs(actor=1), _choice(seat=1), 1, None, was_searched=False)  # type: ignore[arg-type]
+    monkeypatch.setattr(recorder_module, "encode_observation", encode_second_fails)
+    # Both seats of one game share a recorder in self-play; agents 0 and 1 do here too.
+    agents = [
+        RecordingSearchAgent(_BatchInner(), recorders[0], capture_seat=0),
+        RecordingSearchAgent(_BatchInner(), recorders[0], capture_seat=0),
+        RecordingSearchAgent(_BatchInner(), recorders[1], capture_seat=0),
+    ]
     with pytest.raises(ValueError, match="encode failed"):
         RecordingSearchAgent.act_batch_with_samplers(
             agents,
-            [_obs(actor=0), _obs(actor=0)],  # type: ignore[list-item]
-            [_choice(seat=0), _choice(seat=0)],
-            [None, None],
+            [_obs(actor=0), _obs(actor=0), _obs(actor=0)],  # type: ignore[list-item]
+            [_choice(seat=0), _choice(seat=0), _choice(seat=0)],
+            [None, None, None],
         )
     for r in recorders:
-        assert r.actions == []
+        assert r.actions == [(1, 1)]
         assert r.decisions == []
 
 
