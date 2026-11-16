@@ -282,7 +282,10 @@ def test_build_random_init_model_is_deterministic_and_seeded(tmp_path: Path):
     )
     # The seed fully determines the init: the caller's global RNG never leaks in.
     torch.manual_seed(1)
+    caller_state = torch.get_rng_state()
     third, _, _ = build_random_init_model(checkpoint, seed=7)
+    # ...and the call leaves the caller's RNG stream untouched.
+    assert torch.equal(torch.get_rng_state(), caller_state)
     torch.manual_seed(999)
     fourth, _, _ = build_random_init_model(checkpoint, seed=7)
     assert all(

@@ -1851,3 +1851,60 @@ def test_raising_dev_eval_still_counts_as_dev_eval_time(tmp_path: Path) -> None:
         runner.run(max_cycles=1)
     assert runner.dev_eval_s == pytest.approx(1_000.0)
     assert runner.training_s() == pytest.approx(100.0)
+
+
+def _random_init_run_with_only_init(tmp_path: Path, name: str) -> tuple[RunConfig, Path]:
+    """A random-init run that crashed before its first periodic checkpoint."""
+    warmstart = _trained_tiny_checkpoint(tmp_path)
+    config = _run_config(
+        tmp_path, name, random_init=True, warmstart_checkpoint=str(warmstart)
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=_fake_dev,
+        model=_tiny_model(seed=3),
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=0)
+    shutil.rmtree(runner.manager.run_dir / "checkpoints", ignore_errors=True)
+    shutil.rmtree(runner.manager.best_dir, ignore_errors=True)
+    return config, config.run_dir / "init"
+
+
+def test_resume_before_first_checkpoint_restores_the_saved_init_weights(
+    tmp_path: Path,
+) -> None:
+    config, init = _random_init_run_with_only_init(tmp_path, "init-only")
+    saved = torch.load(init / "checkpoint.pt", map_location="cpu", weights_only=False)
+    model = _tiny_model(seed=99)
+    resumed = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=_fake_dev,
+        model=model,
+        vocab=_VOCAB,
+    )
+    resumed.run(resume=True, max_cycles=0)
+    assert resumed.previous_best_fallback == init
+    state_dict = saved["model_state_dict"]
+    assert all(
+        torch.equal(tensor, state_dict[name]) for name, tensor in model.state_dict().items()
+    )
+
+
+def test_resume_with_missing_init_checkpoint_raises_resume_error(tmp_path: Path) -> None:
+    config, init = _random_init_run_with_only_init(tmp_path, "init-gone")
+    shutil.rmtree(init)
+    resumed = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=_fake_dev,
+        model=_tiny_model(seed=99),
+        vocab=_VOCAB,
+    )
+    with pytest.raises(RunResumeError, match="init checkpoint"):
+        resumed.run(resume=True, max_cycles=0)

@@ -492,10 +492,10 @@ def build_random_init_model(
     `temperature` attribute, and `config`/`card_static_matrix` are the only
     non-learned state), so nothing else is carried over.
     """
-    warm, vocab, metadata = load_checkpoint(path, map_location="cpu")
-    # Parameters are drawn on CPU, so fork only the CPU RNG and leave the
-    # caller's (and any CUDA) random state untouched.
+    # Loading and drawing both happen on CPU inside a forked CPU RNG, so the
+    # caller's (and any CUDA) random state is left untouched.
     with torch.random.fork_rng(devices=[]):
+        warm, vocab, metadata = load_checkpoint(path, map_location="cpu")
         torch.manual_seed(seed)
         model = TMNetwork(warm.config, warm.card_static_matrix)
     model = model.to(map_location)

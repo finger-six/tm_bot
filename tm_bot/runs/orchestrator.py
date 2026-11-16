@@ -396,6 +396,11 @@ class SelfPlayRunner:
             # Resume must keep comparing against the run's own init checkpoint,
             # not the warm start it borrowed its architecture from (#27).
             self.init_checkpoint = _resolve(str(init), self.manager.run_dir)
+            if not (self.init_checkpoint / "checkpoint.pt").exists():
+                raise RunResumeError(
+                    f"Run {self.config.run_name} records init checkpoint "
+                    f"{self.init_checkpoint}, but it is missing"
+                )
             self.previous_best_fallback = self.init_checkpoint
         checkpoint = self.manager.resolve_resume_checkpoint(state)
         if checkpoint is None and self.init_checkpoint is not None:

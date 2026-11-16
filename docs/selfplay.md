@@ -188,14 +188,16 @@ protocol as the warm-started run:
 conda run -n tm_bot python -m tm_bot.runs --run-name milestone-pure --random-init --budget-hours 24 --sims 4 --worlds 4 --workers 16 --checkpoint-minutes 30 --dev-games 100 --device cuda
 ```
 
-`--warmstart <checkpoint>` (or the default `TM_SEARCH_CHECKPOINT`) is still
-read: it supplies the `TMModelConfig`, the `CardVocab`, and the non-learned
+`--warmstart <checkpoint>` (default: `DEFAULT_WARMSTART_CHECKPOINT`,
+`runs/warmstart/best`) is still read, also on `--resume`: it supplies the `TMModelConfig`, the `CardVocab`, and the non-learned
 `card_static_matrix`, so the observation/action encoding and the network shape
 are identical. **No learned parameter is copied.** Every weight is
 re-initialised by `build_random_init_model`
 ([`network.py`](../tm_bot/models/network.py)) from `RunConfig.seed` inside a
 `torch.random.fork_rng` context, so two runs with the same `--seed` start
-bit-identical even though checkpoint loading consumes the global RNG.
+from bit-identical weights and the caller's global RNG is left untouched. Only
+the initial weights are seeded this way: later torch randomness (dropout in the
+learner) is not torch-seeded, as in warm-started runs.
 `TMNetwork` has no non-learned `temperature` attribute; its `config` and
 `card_static_matrix` buffer are the only non-learned state, and both are kept.
 
@@ -208,7 +210,10 @@ Differences from a warm-started run:
 - Before the first `best/` exists, that `init/` checkpoint is the
   previous-best dev opponent instead of the warm start.
 - `state.json` and `run_summary.json` record `init: "random"` and
-  `init_checkpoint`; `--resume` keeps using the recorded init reference.
+  `init_checkpoint`; `--resume` keeps using the recorded init reference. As
+  for any run, `--resume` must repeat the original flags, including
+  `--random-init` and the same `--warmstart`, or the config check rejects it.
+  A missing `<run>/init/` fails the resume with `RunResumeError`.
 - `--random-init` is rejected for `--agent-kind comparator` (PPO requires its
   warm start).
 
