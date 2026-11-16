@@ -225,7 +225,8 @@ def test_b1_takes_corporation_first_action_instead_of_passing() -> None:
     )
     obs = {"actor": 0, "public": {"globalParameters": {"temperature": -30, "oxygenLevel": 0, "oceans": 0}}}
     assert B1Agent(seed=0).act(obs, choice) == 0
-    # The rule follows the label, not the position or the menu size.
+    # Synthetic menu (the engine only pairs the first action with Pass): the rule
+    # follows the label, not the position or the menu size.
     labels = (
         "Play project card",
         "Pass for this generation",
