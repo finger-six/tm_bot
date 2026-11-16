@@ -13,10 +13,10 @@ Agents receive **only** the actor observation (`ActorObservation`) and current a
 - **Behavior**: Selects uniformly at random over `range(len(choice.candidates))` using an isolated `random.Random(seed)` instance (never the global `random` module).
 - **Determinism**: Given `(seed_key, map_name, seat0_seed, seat1_seed)`, `B0` produces an identical candidate sequence and game outcome.
 
-## `B1` (`B1_VERSION = "b1-v1"`)
+## `B1` (`B1_VERSION = "b1-v2"`)
 
 - **Implementation**: [`tm_bot/agents/b1.py`](../tm_bot/agents/b1.py) (`B1Agent`)
-- **Freeze policy**: `B1`'s behavior is frozen under `B1_VERSION = "b1-v1"`. Any behavioral change requires bumping `B1_VERSION`. Game outcomes from `play_game` / `play_games` record `agent_versions`.
+- **Freeze policy**: `B1`'s behavior is frozen under `B1_VERSION = "b1-v2"`. Any behavioral change requires bumping `B1_VERSION`. `b1-v2` (#34) adds rule 3.0 below; `b1-v1` never took a corporation's mandatory first action (e.g. Valley Trust), passed every generation of those games, and lost them to any opponent. Game outcomes from `play_game` / `play_games` record `agent_versions`.
 
 ### Static Card Data Generation
 
@@ -35,7 +35,7 @@ conda run -n tm_bot python -m tm_bot.agents.card_data --export
 
 This writes the gitignored file `data/cards.json`. `load_card_data()` auto-regenerates it if missing.
 
-### `B1` Decision Rules (`b1-v1`)
+### `B1` Decision Rules (`b1-v2`)
 
 1. **Horizon & valuation**:
    - Estimates remaining terraforming steps `rem_steps = (8 - temp)//2 + (14 - oxy) + (9 - oceans)` (max `42`, `rem_frac = rem_steps / 42`).
@@ -52,6 +52,7 @@ This writes the gitignored file `data/cards.json`. `load_card_data()` auto-regen
    - **Discard / Sell patents**: keeps cards when `done` is offered on Sell Patents; when forced, discards/sells the lowest net-value card.
 
 3. **Action-phase branch priority**:
+   0. **Take first action of <corporation>** (always when offered: it blocks every other root action until taken).
    1. **Claim a milestone** (always when available).
    2. **Convert plants into greenery** (always when available).
    3. **Convert heat into temperature** (when `temperature < 8`).
@@ -78,5 +79,5 @@ conda run -n tm_bot python -m tm_bot.agents.gate
 
 ## Full 400-Game Evaluation (`tm_bot.eval`)
 
-See [Evaluation Harness](evaluation.md) for the full `eval-*` protocol and reports. On `400` `eval-*` games (`50` seeds x `4` supported maps x `2` seats), `b1-v1` beats `b0-v1` at **96.00%** (`[92.00%, 99.00%]` 95% paired bootstrap CI), `0` failures, `+78.42` mean VP margin, with byte-identical deterministic reports across repeated runs.
+See [Evaluation Harness](evaluation.md) for the full `eval-*` protocol and reports. On `400` `eval-*` games (`50` seeds x `4` supported maps x `2` seats), `b1-v2` beats `b0-v1` at **100.00%** (`[100.00%, 100.00%]` 95% paired bootstrap CI, `400W-0L`), `0` failures, `+86.38` mean VP margin, `13.23` generations/game (max `18`). `b1-v1` scored `96.00%` (`[92.00%, 99.00%]`, `+78.42`); its `16` losses were the first-action bug (#34).
 

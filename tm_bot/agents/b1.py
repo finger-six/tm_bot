@@ -9,7 +9,7 @@ from typing import Any
 from tm_bot.agents.card_data import CardSpec, load_card_data
 from tm_bot.env.types import ActorObservation, Choice
 
-B1_VERSION = "b1-v1"
+B1_VERSION = "b1-v2"
 
 # Engine SpaceBonus enum values (see tools/simbench/engine/src/common/boards/SpaceBonus.ts)
 _BONUS_TITANIUM = 0
@@ -414,7 +414,9 @@ class B1Agent:
         by_type: dict[str, int] = {}
         for idx, cand in enumerate(candidates):
             lbl = cand.label.lower()
-            if "claim a milestone" in lbl:
+            if lbl.startswith("take first action of"):
+                by_type.setdefault("first_action", idx)
+            elif "claim a milestone" in lbl:
                 by_type.setdefault("milestone", idx)
             elif "convert" in lbl and "greenery" in lbl:
                 by_type.setdefault("greenery", idx)
@@ -432,6 +434,11 @@ class B1Agent:
                 by_type.setdefault("pass", idx)
             elif "end turn" in lbl:
                 by_type.setdefault("end_turn", idx)
+
+        # A corporation's mandatory first action blocks every other root action
+        # until taken; passing would repeat each generation.
+        if "first_action" in by_type:
+            return by_type["first_action"]
 
         if "milestone" in by_type:
             return by_type["milestone"]

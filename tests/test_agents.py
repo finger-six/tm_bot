@@ -169,7 +169,7 @@ def test_card_data_exported_from_pinned_engine(tmp_path) -> None:
 def test_b1_plays_complete_games_on_all_supported_maps_with_version_tag() -> None:
     from tm_bot.agents import B1_VERSION, B1Agent
 
-    assert B1_VERSION == "b1-v1"
+    assert B1_VERSION == "b1-v2"
     with WorkerClient() as client:
         for idx, map_name in enumerate(SUPPORTED_MAPS):
             b1 = B1Agent(seed=100 + idx)
@@ -206,6 +206,44 @@ def test_b1_is_deterministic_given_seed() -> None:
         )
     assert r1.ok is True
     assert r1 == r2
+
+
+def test_b1_takes_corporation_first_action_instead_of_passing() -> None:
+    from tm_bot.agents import B1Agent
+    from tm_bot.env import Candidate
+
+    # Until a corporation's initial action is taken, the root action menu offers
+    # only that action and Pass (e.g. Valley Trust); passing repeats every generation.
+    choice = Choice(
+        seat=0,
+        kind="branch",
+        prompt="Select one option",
+        candidates=(
+            Candidate(id="branch:0", label="Take first action of Valley Trust corporation"),
+            Candidate(id="branch:1", label="Pass for this generation"),
+        ),
+    )
+    obs = {"actor": 0, "public": {"globalParameters": {"temperature": -30, "oxygenLevel": 0, "oceans": 0}}}
+    assert B1Agent(seed=0).act(obs, choice) == 0
+
+
+def test_b1_finishes_first_action_corporation_game_normally() -> None:
+    """Regression (#34): B1 in seat 0 with Valley Trust passed every generation."""
+    from tm_bot.agents import B1Agent, load_card_data
+
+    with WorkerClient() as client:
+        outcome = play_game(
+            (B1Agent(seed=0, card_data=load_card_data()), B0Agent(seed=0)),
+            seed_key="dev-0006",
+            map_name="tharsis",
+            client=client,
+            seat_seeds=(1608211574, 1168229789),
+        )
+    assert outcome.ok is True, outcome.error
+    assert outcome.result is not None
+    assert outcome.generations is not None and outcome.generations <= 25
+    assert outcome.result.winner == 0
+    assert outcome.result.scores[0] > 60
 
 
 def test_b1_heuristic_decisions_at_public_seam() -> None:
