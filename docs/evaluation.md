@@ -14,7 +14,7 @@ Fair, reproducible two-player evaluation over disjoint seed namespaces (`train-*
 ## CLI Usage
 
 ```bash
-conda run -n tm_bot python -m tm_bot.eval --a b1 --b b0 --games 400 --namespace eval --out data/reports/b1_vs_b0
+conda run -n tm_bot python -m tm_bot.eval --a b1 --b b0 --games 400 --namespace eval --out data/reports/b1v2_vs_b0
 ```
 
 Pass `--omit-timing` to exclude runtime latency, wall-clock, and hardware sections from `report.json` and `report.md`.
@@ -42,7 +42,7 @@ Pass `--omit-timing` to exclude runtime latency, wall-clock, and hardware sectio
 
 ### `b1-v1` (historical, superseded by #34)
 
-`b1-v1` never took a corporation's mandatory first action; its `16` losses below are those games.
+`b1-v1` never took a corporation's mandatory first action; its `16` losses below are those games. The run directories were not retained; the figures are transcribed from the original reports.
 
 Executed twice (`data/reports/b1_vs_b0_run1` and `data/reports/b1_vs_b0_run2`, gitignored); `report_deterministic.json` was byte-identical across both runs (`2,860` bytes).
 

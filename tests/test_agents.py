@@ -225,31 +225,55 @@ def test_b1_takes_corporation_first_action_instead_of_passing() -> None:
     )
     obs = {"actor": 0, "public": {"globalParameters": {"temperature": -30, "oxygenLevel": 0, "oceans": 0}}}
     assert B1Agent(seed=0).act(obs, choice) == 0
-    # The rule follows the label, not the position.
-    reversed_choice = Choice(
+    # The rule follows the label, not the position or the menu size.
+    labels = (
+        "Play project card",
+        "Pass for this generation",
+        "Take first action of Valley Trust corporation",
+    )
+    later_choice = Choice(
         seat=0,
         kind="branch",
         prompt="Select one option",
-        candidates=tuple(reversed(choice.candidates)),
+        candidates=tuple(
+            Candidate(id=f"branch:{i}", label=label) for i, label in enumerate(labels)
+        ),
     )
-    assert B1Agent(seed=0).act(obs, reversed_choice) == 1
+    assert B1Agent(seed=0).act(obs, later_choice) == 2
 
 
 def test_b1_finishes_first_action_corporation_game_normally() -> None:
     """Regression (#34): B1 in seat 0 with Valley Trust passed every generation."""
     from tm_bot.agents import B1Agent, load_card_data
 
+    class FirstActionWatch(B1Agent):
+        """B1 that logs its answers to first-action menus, so the test cannot pass vacuously."""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.first_action_picks: list[str] = []
+
+        def act(self, observation: Any, choice: Choice) -> int:
+            index = super().act(observation, choice)
+            if any(
+                c.label.lower().startswith("take first action of") for c in choice.candidates
+            ):
+                self.first_action_picks.append(choice.candidates[index].label)
+            return index
+
+    b1 = FirstActionWatch(seed=0, card_data=load_card_data())
     with WorkerClient() as client:
         outcome = play_game(
-            (B1Agent(seed=0, card_data=load_card_data()), B0Agent(seed=0)),
+            (b1, B0Agent(seed=0)),
             seed_key="dev-0006",
             map_name="tharsis",
             client=client,
-            # derive_agent_seed("dev-0006", "tharsis", role="b"), then role="a": the deal
-            # that gives seat 0 Valley Trust and reproduced the b1-v1 pass loop.
+            # The deal (seat 0 gets Valley Trust) comes from dev-0006/tharsis; the seeds pin
+            # the agents' RNG: derive_agent_seed("dev-0006", "tharsis", role="b"), role="a".
             seat_seeds=(1608211574, 1168229789),
         )
     assert outcome.ok is True, outcome.error
+    assert b1.first_action_picks == ["Take first action of Valley Trust corporation"]
     assert outcome.result is not None
     assert outcome.generations is not None and outcome.generations <= 25
     assert outcome.result.winner == 0
