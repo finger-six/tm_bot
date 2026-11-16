@@ -53,7 +53,7 @@ none of these are committed.
 
 Each game is one `train-*` seed and one supported map. The training seat is
 alternated; the other seat is an opponent sampled 60% from the latest network,
-30% from the last 10 frozen checkpoints, and 10% `b1` (`b1-v2` since #34). With an empty pool (a
+30% from the last 10 frozen checkpoints, and 10% `b1` (the current `B1_VERSION`). With an empty pool (a
 fresh run) the pool share falls back to the latest network.
 
 `RecordingSearchAgent` ([`recorder.py`](../tm_bot/runs/recorder.py)) wraps both

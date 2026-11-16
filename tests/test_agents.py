@@ -225,6 +225,14 @@ def test_b1_takes_corporation_first_action_instead_of_passing() -> None:
     )
     obs = {"actor": 0, "public": {"globalParameters": {"temperature": -30, "oxygenLevel": 0, "oceans": 0}}}
     assert B1Agent(seed=0).act(obs, choice) == 0
+    # The rule follows the label, not the position.
+    reversed_choice = Choice(
+        seat=0,
+        kind="branch",
+        prompt="Select one option",
+        candidates=tuple(reversed(choice.candidates)),
+    )
+    assert B1Agent(seed=0).act(obs, reversed_choice) == 1
 
 
 def test_b1_finishes_first_action_corporation_game_normally() -> None:
@@ -237,6 +245,8 @@ def test_b1_finishes_first_action_corporation_game_normally() -> None:
             seed_key="dev-0006",
             map_name="tharsis",
             client=client,
+            # derive_agent_seed("dev-0006", "tharsis", role="b"), then role="a": the deal
+            # that gives seat 0 Valley Trust and reproduced the b1-v1 pass loop.
             seat_seeds=(1608211574, 1168229789),
         )
     assert outcome.ok is True, outcome.error

@@ -21,6 +21,29 @@ Pass `--omit-timing` to exclude runtime latency, wall-clock, and hardware sectio
 
 ## Baseline Acceptance Run (`B1` vs `B0`, 400 `eval-*` games)
 
+### `b1-v2` (current, #34)
+
+`data/reports/b1v2_vs_b0` (gitignored).
+
+- **Agents**: `b1` (`b1-v2`, `training_seeds=0`) vs `b0` (`b0-v1`, `training_seeds=0`)
+- **Games**: `400` total, `400` completed, `0` failures (`0.00%`)
+- **Record (`b1`)**: `400W - 0L - 0T`
+- **Win Rate (95% paired bootstrap CI)**: **100.00%** `[100.00%, 100.00%]` (target `>= 90%`)
+- **Mean VP Margin (`b1 - b0`)**: `+86.38` (`125.56` vs `39.18`)
+- **Generations / Game**: `13.23` (`min=10`, `max=18`), `184,888` total decisions (`462.2`/game)
+
+| Map | Status | Games | Failures | Win Rate | 95% CI | Mean VP Margin | Mean Gen |
+| --- | --- | ---: | ---: | ---: | --- | ---: | ---: |
+| Tharsis | supported | 100 | 0 | 100.00% | [100.00%, 100.00%] | +84.22 | 13.33 |
+| Elysium | supported | 100 | 0 | 100.00% | [100.00%, 100.00%] | +90.51 | 13.34 |
+| Hellas | supported | 100 | 0 | 100.00% | [100.00%, 100.00%] | +86.08 | 13.15 |
+| Vastitas Borealis Nova | supported | 100 | 0 | 100.00% | [100.00%, 100.00%] | +84.69 | 13.12 |
+| Amazonis Planitia | not supported | 0 | 0 | not supported | not supported | not supported | not supported |
+
+### `b1-v1` (historical, superseded by #34)
+
+`b1-v1` never took a corporation's mandatory first action; its `16` losses below are those games.
+
 Executed twice (`data/reports/b1_vs_b0_run1` and `data/reports/b1_vs_b0_run2`, gitignored); `report_deterministic.json` was byte-identical across both runs (`2,860` bytes).
 
 - **Agents**: `b1` (`b1-v1`, `training_seeds=0`) vs `b0` (`b0-v1`, `training_seeds=0`)
