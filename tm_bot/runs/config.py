@@ -95,6 +95,10 @@ class RunConfig:
     keep_last_checkpoints: int = 10
     dev_eval_enabled: bool = True
     warmstart_checkpoint: str | None = None
+    # Train the main agent from random initialisation instead of the
+    # warm-start weights (#27). The warm-start checkpoint still supplies the
+    # architecture, vocabulary, and card static matrix. Main agent only.
+    random_init: bool = False
     device: str | None = None
 
     # Stopping rules.
@@ -165,6 +169,11 @@ class RunConfig:
             raise ValueError(
                 "comparator runs require action_temperature == 1.0, got "
                 f"{self.action_temperature}"
+            )
+        if self.random_init and self.agent_kind == "comparator":
+            raise ValueError(
+                "random_init is only supported for the main agent; "
+                "the comparator must start from its warm-start checkpoint"
             )
         probs = (
             self.opponent_latest_prob,

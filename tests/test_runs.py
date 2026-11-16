@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
+import copy
 import json
 from pathlib import Path
+import shutil
 from types import SimpleNamespace
 from typing import Any
 
@@ -1089,6 +1091,206 @@ def test_first_checkpoint_uses_recorded_warmstart_as_previous_best(tmp_path: Pat
     assert calls[1][1] == Path(warmstart)
     written = json.loads((config.run_dir / "config.json").read_text(encoding="utf-8"))
     assert written["warmstart_checkpoint"] == warmstart
+
+
+def _trained_tiny_checkpoint(tmp_path: Path, name: str = "warmstart") -> Path:
+    """Save a small checkpoint whose learned weights differ from a fresh init."""
+    warm = _tiny_model(seed=2)
+    with torch.no_grad():
+        for parameter in warm.parameters():
+            parameter.add_(0.1)
+    target = tmp_path / name
+    save_checkpoint(target, warm, _VOCAB)
+    return target
+
+
+def test_random_init_run_uses_saved_init_as_first_previous_best(
+    tmp_path: Path,
+) -> None:
+    warmstart = _trained_tiny_checkpoint(tmp_path)
+    calls: list[tuple[Path, Path | None]] = []
+
+    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+        calls.append((candidate, opponent))
+        return _fake_dev(candidate, opponent)
+
+    model = _tiny_model(seed=42)
+    initial_state = copy.deepcopy(model.state_dict())
+    config = _run_config(
+        tmp_path,
+        "random-init-run",
+        random_init=True,
+        warmstart_checkpoint=str(warmstart),
+        keep_last_checkpoints=1,
+    )
+    ticks = iter(float(i) * 100.0 for i in range(10_000))
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=evaluator,
+        model=model,
+        vocab=_VOCAB,
+        clock=lambda: next(ticks),
+    )
+    runner.run(max_cycles=3)
+
+    init = config.run_dir / "init"
+    assert (init / "checkpoint.pt").exists()
+    # The init reference survives pruning of the numbered checkpoints.
+    assert len(runner.manager.list_checkpoints()) == 1
+    assert runner.init_checkpoint == init
+    # First checkpoint: vs B1, then vs the saved random init (never the warm start).
+    assert calls[0][1] is None
+    assert calls[1][1] == init
+    assert calls[1][1] != warmstart
+    assert calls[3][1] == runner.manager.best_dir
+
+    payload = torch.load(init / "checkpoint.pt", map_location="cpu", weights_only=False)
+    assert payload["metadata"]["init"] == "random"
+    assert payload["metadata"]["warmstart_checkpoint"] is None
+    assert payload["metadata"]["architecture_from"] == str(warmstart)
+    for name, tensor in payload["model_state_dict"].items():
+        assert torch.equal(tensor, initial_state[name]), name
+
+    numbered = runner.logger.checkpoints
+    assert [record.cycle for record in numbered] == [1, 2, 3]
+    periodic = torch.load(
+        runner.manager.list_checkpoints()[-1] / "checkpoint.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert periodic["metadata"]["init"] == "random"
+    assert periodic["metadata"]["warmstart_checkpoint"] is None
+    assert numbered[0].step == 1
+
+    state = runner.manager.load_state()
+    assert state is not None
+    assert state["init"] == "random"
+    assert state["init_checkpoint"] == "init"
+    summary = json.loads(
+        (config.run_dir / "run_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["init"] == "random"
+    assert summary["init_checkpoint"] == str(init)
+
+
+def test_resume_of_random_init_run_keeps_the_init_reference(tmp_path: Path) -> None:
+    warmstart = _trained_tiny_checkpoint(tmp_path)
+    config = _run_config(
+        tmp_path,
+        "random-resume",
+        random_init=True,
+        warmstart_checkpoint=str(warmstart),
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=_fake_dev,
+        model=_tiny_model(seed=3),
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=1)
+    init = config.run_dir / "init"
+    assert runner.init_checkpoint == init
+    state = runner.manager.load_state()
+    assert state is not None and state["init_checkpoint"] == "init"
+    # Force the fallback path: no best/ means the recorded init is previous best.
+    shutil.rmtree(runner.manager.best_dir)
+
+    calls: list[tuple[Path, Path | None]] = []
+
+    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+        calls.append((candidate, opponent))
+        return _fake_dev(candidate, opponent)
+
+    resumed = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=evaluator,
+        model=_tiny_model(seed=99),
+        vocab=_VOCAB,
+    )
+    resumed.run(resume=True, max_cycles=2)
+    assert resumed.init_checkpoint == init
+    assert calls[0][1] is None
+    assert calls[1][1] == init
+
+
+def test_create_builds_a_random_init_model_from_the_architecture_only(
+    tmp_path: Path,
+) -> None:
+    warmstart = _trained_tiny_checkpoint(tmp_path)
+    warm = torch.load(
+        warmstart / "checkpoint.pt", map_location="cpu", weights_only=False
+    )
+    config = _run_config(
+        tmp_path,
+        "random-create",
+        random_init=True,
+        warmstart_checkpoint=str(warmstart),
+        device="cpu",
+        dev_eval_enabled=False,
+    )
+    runner = SelfPlayRunner.create(config)
+    assert runner.config.random_init is True
+    assert runner.config.warmstart_checkpoint == str(warmstart)
+    assert runner.model is not None
+    assert runner.model.config.to_dict() == warm["config"]
+    for name, tensor in runner.model.state_dict().items():
+        if name == "card_static_matrix":
+            assert torch.equal(tensor, warm["model_state_dict"][name])
+        else:
+            assert not torch.equal(tensor, warm["model_state_dict"][name]), name
+
+
+def test_cli_random_init_sets_the_field_and_rejects_comparator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tm_bot.runs import __main__ as runs_cli
+
+    captured: list[RunConfig] = []
+
+    class _Runner:
+        def run(self, *, resume: bool = False, max_cycles: int | None = None):
+            return SimpleNamespace(to_dict=lambda: {"ok": True})
+
+    def fake_create(config: RunConfig) -> _Runner:
+        captured.append(config)
+        return _Runner()
+
+    monkeypatch.setattr(SelfPlayRunner, "create", fake_create)
+    assert (
+        runs_cli.main(
+            ["--run-name", "pure", "--out-root", str(tmp_path), "--random-init"]
+        )
+        == 0
+    )
+    assert captured[0].random_init is True
+
+    with pytest.raises(ValueError, match="random_init"):
+        runs_cli.main(
+            [
+                "--run-name",
+                "comparator",
+                "--out-root",
+                str(tmp_path),
+                "--agent-kind",
+                "comparator",
+                "--warmstart",
+                str(tmp_path / "warmstart.pt"),
+                "--random-init",
+            ]
+        )
+
+
+def test_random_init_config_rejects_the_comparator_agent() -> None:
+    with pytest.raises(ValueError, match="random_init"):
+        RunConfig(run_name="comparator", agent_kind="comparator", random_init=True)
+    assert RunConfig(run_name="main", random_init=True).random_init is True
+    assert RunConfig(run_name="main").random_init is False
 
 
 def test_entropy_collapse_uses_fixed_network_probe(tmp_path: Path) -> None:

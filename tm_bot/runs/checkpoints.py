@@ -91,6 +91,10 @@ class CheckpointManager:
     def summary_path(self) -> Path:
         return self.monitor_dir / "summary.json"
 
+    @property
+    def init_dir(self) -> Path:
+        return self.run_dir / "init"
+
     def initialize(self, config: RunConfig) -> None:
         """Write the run config if the directory is new; verify it on resume."""
         if self.config_path.exists():
@@ -187,6 +191,22 @@ class CheckpointManager:
     def best_checkpoint(self) -> Path | None:
         path = self.best_dir / "checkpoint.pt"
         return self.best_dir if path.exists() else None
+
+    def save_init(
+        self,
+        *,
+        model: TMNetwork,
+        vocab: CardVocab,
+        metadata: Mapping[str, Any],
+    ) -> Path:
+        """Save the run's initial weights outside the pruned checkpoint pool.
+
+        The random-init run (#27) uses this checkpoint as the first
+        previous-best opponent. It lives in `<run>/init/`, which
+        `prune`/`enforce_disk_cap` (which only scan `checkpoints/`) never remove.
+        """
+        save_checkpoint(self.init_dir, model, vocab, metadata=dict(metadata))
+        return self.init_dir
 
     # --- run state / resume -------------------------------------------
     def save_state(

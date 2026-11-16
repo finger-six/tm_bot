@@ -17,6 +17,7 @@ from tm_bot.models.encode import (
 from tm_bot.models.network import (
     TMModelConfig,
     TMNetwork,
+    build_random_init_model,
     load_checkpoint,
     save_checkpoint,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "PolicyValueAgent",
     "TMModelConfig",
     "TMNetwork",
+    "build_random_init_model",
     "classify_prompt_type",
     "collate_encoded_batch",
     "encode_choice",

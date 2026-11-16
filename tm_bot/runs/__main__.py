@@ -41,6 +41,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--step-cap", type=int, default=None)
     parser.add_argument("--determinism-every-games", type=int, default=1_000)
     parser.add_argument("--warmstart", type=str, default=None)
+    parser.add_argument(
+        "--random-init",
+        action="store_true",
+        help="Main agent only: train from random weights (architecture/vocab from --warmstart).",
+    )
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--ppo-clip", type=float, default=0.2)
@@ -79,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         step_cap=args.step_cap,
         determinism_check_every_games=args.determinism_every_games,
         warmstart_checkpoint=args.warmstart,
+        random_init=args.random_init,
         device=args.device,
         use_amp=not args.no_amp,
         seed=args.seed,

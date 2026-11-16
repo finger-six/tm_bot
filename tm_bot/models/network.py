@@ -474,3 +474,30 @@ def load_checkpoint(
     model.eval()
     metadata = dict(payload.get("metadata", {}))
     return model, vocab, metadata
+
+
+def build_random_init_model(
+    path: str | Path,
+    *,
+    seed: int,
+    map_location: str | torch.device = "cpu",
+) -> tuple[TMNetwork, CardVocab, dict[str, Any]]:
+    """Build a fresh model from a checkpoint's architecture and vocabulary (#27).
+
+    The checkpoint supplies only the `TMModelConfig`, the `CardVocab`, and the
+    non-learned `card_static_matrix` buffer. Every learned parameter is drawn
+    from `seed`, so two runs with the same seed start from identical weights
+    regardless of the checkpoint's weights or the caller's global RNG state.
+    `load_checkpoint` sets no other non-learned attributes (`TMNetwork` has no
+    `temperature` attribute, and `config`/`card_static_matrix` are the only
+    non-learned state), so nothing else is carried over.
+    """
+    warm, vocab, metadata = load_checkpoint(path, map_location="cpu")
+    # Parameters are drawn on CPU, so fork only the CPU RNG and leave the
+    # caller's (and any CUDA) random state untouched.
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        model = TMNetwork(warm.config, warm.card_static_matrix)
+    model = model.to(map_location)
+    model.eval()
+    return model, vocab, metadata

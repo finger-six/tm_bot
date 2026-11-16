@@ -16,6 +16,7 @@ from tm_bot.models import (
     PolicyValueAgent,
     TMModelConfig,
     TMNetwork,
+    build_random_init_model,
     collate_encoded_batch,
     encode_choice,
     encode_observation,
@@ -210,6 +211,84 @@ def test_checkpoint_save_load_roundtrip(tmp_path: Path):
     agent.reset(seed=7)
     idx = agent.act(obs, ch)
     assert 0 <= idx < len(ch.candidates)
+
+
+def _small_config(vocab: CardVocab) -> TMModelConfig:
+    return TMModelConfig(
+        vocab_size=vocab.size,
+        d_model=32,
+        card_id_emb_dim=16,
+        card_static_proj_dim=16,
+        slot_emb_dim=8,
+        card_dyn_proj_dim=8,
+        space_hidden_dim=16,
+        n_heads=2,
+        n_obs_layers=1,
+        dim_feedforward=64,
+        policy_ff_dim=32,
+        dropout=0.0,
+    )
+
+
+def _trained_tiny_model(vocab: CardVocab, *, seed: int) -> TMNetwork:
+    """A small checkpoint whose learned weights differ from any fresh init."""
+    torch.manual_seed(seed)
+    model = TMNetwork.from_vocab(vocab, _small_config(vocab))
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.add_(0.1)
+    return model
+
+
+def test_build_random_init_model_keeps_architecture_not_weights(tmp_path: Path):
+    vocab = CardVocab.from_card_data()
+    warm = _trained_tiny_model(vocab, seed=3)
+    checkpoint = tmp_path / "warmstart"
+    save_checkpoint(checkpoint, warm, vocab, metadata={"tag": "warmstart"})
+
+    model, loaded_vocab, metadata = build_random_init_model(checkpoint, seed=123)
+
+    assert metadata["tag"] == "warmstart"
+    assert loaded_vocab.names == vocab.names
+    assert model.config == warm.config
+    warm_state = warm.state_dict()
+    fresh_state = model.state_dict()
+    assert set(fresh_state) == set(warm_state)
+    for name, tensor in fresh_state.items():
+        assert tensor.shape == warm_state[name].shape
+        if name == "card_static_matrix":
+            # Non-learned card features come from the checkpoint unchanged.
+            assert torch.equal(tensor, warm_state[name])
+        else:
+            assert not torch.equal(tensor, warm_state[name]), name
+
+
+def test_build_random_init_model_is_deterministic_and_seeded(tmp_path: Path):
+    vocab = CardVocab.from_card_data()
+    checkpoint = tmp_path / "warmstart"
+    save_checkpoint(checkpoint, _trained_tiny_model(vocab, seed=5), vocab)
+
+    first, _, _ = build_random_init_model(checkpoint, seed=7)
+    second, _, _ = build_random_init_model(checkpoint, seed=7)
+    other, _, _ = build_random_init_model(checkpoint, seed=8)
+    assert all(
+        torch.equal(tensor, second.state_dict()[name])
+        for name, tensor in first.state_dict().items()
+    )
+    assert any(
+        not torch.equal(tensor, other.state_dict()[name])
+        for name, tensor in first.state_dict().items()
+        if name != "card_static_matrix"
+    )
+    # The seed fully determines the init: the caller's global RNG never leaks in.
+    torch.manual_seed(1)
+    third, _, _ = build_random_init_model(checkpoint, seed=7)
+    torch.manual_seed(999)
+    fourth, _, _ = build_random_init_model(checkpoint, seed=7)
+    assert all(
+        torch.equal(tensor, fourth.state_dict()[name])
+        for name, tensor in third.state_dict().items()
+    )
 
 
 def test_empty_card_and_space_sets_no_nan():

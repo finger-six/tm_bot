@@ -34,7 +34,7 @@ decision; every field is overridable from the CLI.
 | Dev evaluation | 100 `dev-*` games vs B1 and 100 vs previous best | seat-swapped pairs; selected on `dev-*` only |
 | Plateau | 12 checkpoints without a new best | |
 | Collapse (win rate) | >15 points below best for 3 checkpoints | |
-| Collapse (entropy) | <10% of warm-start network entropy within 2 h | |
+| Collapse (entropy) | <10% of the initial network's entropy within 2 h | |
 | Determinism spot check | every 1,000 self-play games | replay seed + action history |
 
 Resource limits live in `ResourceLimits`: learner + buffer <= 10 GB RSS and
@@ -45,7 +45,8 @@ it is bounded by the 16-worker default). When CUDA is available, VRAM is also
 soft-capped with `torch.cuda.set_per_process_memory_fraction`.
 
 Run outputs (`runs/<run-name>/`): `config.json`, `state.json` + `state.pt`
-(resume), `checkpoints/`, `best/`, `monitor/metrics.jsonl`, `monitor/summary.json`,
+(resume), `checkpoints/`, `init/` (random-init runs only), `best/`,
+`monitor/metrics.jsonl`, `monitor/summary.json`,
 `run_summary.json`, and `regression/` cases. `.gitignore` contains `/runs/`, so
 none of these are committed.
 
@@ -99,14 +100,17 @@ reported in the stop decision rather than swallowed).
 played twice with the candidate in opposite seats, so the paired bootstrap CI is
 valid. The schedule is rounded up to whole seat-swapped pairs (104 games for a
 requested 100). The candidate plays both B1 and the previous `best/` checkpoint;
-before the first `best/` exists, the resolved warm-start checkpoint (recorded in
-`config.json`) is the previous best, so the first checkpoint still gets a real
-second pairing. Win rate, 95% paired bootstrap CI, and mean VP margin are
-reported by the existing evaluation report code. Best is selected on `dev-*`
-results only (`is_new_best` in [`stopping.py`](../tm_bot/runs/stopping.py),
-shared with the plateau and collapse rules): a higher win rate vs B1 wins; on an
-exact tie (e.g. 0% vs B1 early in training) the checkpoint becomes the new best
-only if it beats the previous best with the 95% CI lower bound above 50%.
+before the first `best/` exists, the run's initial checkpoint is the previous
+best, so the first checkpoint still gets a real second pairing. That is the
+resolved warm-start checkpoint (recorded in `config.json`) for a normal run, and
+the saved random-init weights in `<run>/init/` for a `--random-init` run (see
+[Random initialisation](#random-initialisation-27)). Win rate, 95% paired
+bootstrap CI, and mean VP margin are reported by the existing evaluation report
+code. Best is selected on `dev-*` results only (`is_new_best` in
+[`stopping.py`](../tm_bot/runs/stopping.py), shared with the plateau and
+collapse rules): a higher win rate vs B1 wins; on an exact tie (e.g. 0% vs B1
+early in training) the checkpoint becomes the new best only if it beats the
+previous best with the 95% CI lower bound above 50%.
 `eval-*` seeds are never read or written by a run.
 
 ## Stopping rules
@@ -122,7 +126,7 @@ test in [`tests/test_runs.py`](../tests/test_runs.py):
 | `step_cap` | game exceeded `max_decisions_per_game` | hard stop, write regression case |
 | `nonfinite_loss` | NaN/Inf learner loss | roll back to last good checkpoint, stop |
 | `collapse_win_rate` | dev win rate vs B1 >15 points below best for 3 checkpoints | stop |
-| `collapse_entropy` | policy entropy <10% of warm-start value within 2 h | stop |
+| `collapse_entropy` | policy entropy <10% of the initial value within 2 h | stop |
 | `plateau` | no new best for 12 checkpoints | stop |
 | `max_steps` | optional learner step cap | stop |
 | `resource_limit` | RAM/VRAM ceiling or disk cap hit | stop, keep state for resume |
@@ -169,16 +173,59 @@ The entropy collapse rule uses exactly one quantity: the network policy entropy
 on the first cycle's fixed observation set (`probe_policy_entropy`). That probe
 is captured before any update, stored in `state.pt`, and re-evaluated with the
 current weights each cycle; the self-play target entropy is logged separately
-for information and never compared to the network probe.
+for information and never compared to the network probe. The baseline is
+therefore the **initial model's** entropy: the warm-start network for a normal
+run, and the random-init network for `--random-init` (the rule itself does not
+change; the initial model is simply the fresh one).
+
+## Random initialisation (#27)
+
+The pure self-play comparison run trains the main agent from random weights
+while keeping the same orchestration, budget, search settings, learner, and dev
+protocol as the warm-started run:
+
+```
+conda run -n tm_bot python -m tm_bot.runs --run-name milestone-pure --random-init --budget-hours 24 --sims 4 --worlds 4 --workers 16 --checkpoint-minutes 30 --dev-games 100 --device cuda
+```
+
+`--warmstart <checkpoint>` (or the default `TM_SEARCH_CHECKPOINT`) is still
+read: it supplies the `TMModelConfig`, the `CardVocab`, and the non-learned
+`card_static_matrix`, so the observation/action encoding and the network shape
+are identical. **No learned parameter is copied.** Every weight is
+re-initialised by `build_random_init_model`
+([`network.py`](../tm_bot/models/network.py)) from `RunConfig.seed` inside a
+`torch.random.fork_rng` context, so two runs with the same `--seed` start
+bit-identical even though checkpoint loading consumes the global RNG.
+`TMNetwork` has no non-learned `temperature` attribute; its `config` and
+`card_static_matrix` buffer are the only non-learned state, and both are kept.
+
+Differences from a warm-started run:
+
+- The fresh weights are saved once at run start to `<run>/init/` (metadata
+  `init: "random"`, `warmstart_checkpoint: null`, `architecture_from:
+  <checkpoint>`). `<run>/init/` sits outside `checkpoints/`, so
+  `keep_last_checkpoints` pruning and the disk cap never delete it.
+- Before the first `best/` exists, that `init/` checkpoint is the
+  previous-best dev opponent instead of the warm start.
+- `state.json` and `run_summary.json` record `init: "random"` and
+  `init_checkpoint`; `--resume` keeps using the recorded init reference.
+- `--random-init` is rejected for `--agent-kind comparator` (PPO requires its
+  warm start).
+
+Everything else — opponents, replay buffer, learner, checkpoint cadence,
+entropy-collapse baseline (now the random network's probe), stopping rules, and
+dev seeds — is shared with the warm-started run.
 
 ## Resume
 
 `state.json` stores the cycle, learner step, self-play game count, best dev win
 rate, elapsed wall clock, training time and dev-eval time, seed cursor, opponent pool, determinism-check counter,
-entropy probe baseline, and stopping-rule counters. `state.pt` stores the
+entropy probe baseline, stopping-rule counters, and the init provenance
+(`init` plus `init_checkpoint` for a random-init run). `state.pt` stores the
 model/optimizer and the replay buffer (plus the fixed entropy probe). `--resume`
 restores the model from the last good checkpoint (falling back to the newest
-numbered checkpoint, then `best/`), restores the optimizer and replay buffer
+numbered checkpoint, then `best/`, then a random-init run's `init/` when no
+periodic checkpoint exists yet), restores the optimizer and replay buffer
 independently (a missing optimizer state does not skip the buffer), reopens the
 metrics stream, restores the seed cursor and stopping counters, and continues
 the run. Checkpoints are named by a monotonic save counter (`ckpt-000000001`,

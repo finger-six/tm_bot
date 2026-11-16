@@ -100,6 +100,8 @@ class RunSummary:
     last_checkpoint: Path | None
     stop: StopDecision
     summary_path: Path
+    init: str = "warmstart"
+    init_checkpoint: Path | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -115,6 +117,8 @@ class RunSummary:
             "best_dev_win_rate": self.best_dev_win_rate,
             "best_checkpoint": str(self.best_checkpoint) if self.best_checkpoint else None,
             "last_checkpoint": str(self.last_checkpoint) if self.last_checkpoint else None,
+            "init": self.init,
+            "init_checkpoint": str(self.init_checkpoint) if self.init_checkpoint else None,
             "stop": self.stop.to_dict(),
         }
 
@@ -191,6 +195,13 @@ class SelfPlayRunner:
         self.last_checkpoint: Path | None = None
         self.last_checkpoint_training_s = 0.0
         self.last_checkpoint_step: int | None = None
+        # A random-init run saves its fresh weights in <run>/init and uses them
+        # as the first previous-best opponent (#27); warm-started runs use the
+        # recorded warm-start checkpoint instead.
+        self.init_checkpoint: Path | None = None
+        self.previous_best_fallback: Path | None = (
+            Path(config.warmstart_checkpoint) if config.warmstart_checkpoint else None
+        )
         self._elapsed_base = 0.0
         # Wall clock spent in in-run dev evaluation; it is off the training clock (#26).
         self.dev_eval_s = 0.0
@@ -202,7 +213,7 @@ class SelfPlayRunner:
     @classmethod
     def create(cls, config: RunConfig) -> SelfPlayRunner:
         """Build the real engine, learner, model, and dev evaluator for `config`."""
-        from tm_bot.models.network import load_checkpoint
+        from tm_bot.models.network import build_random_init_model, load_checkpoint
         from tm_bot.search.agent import DEFAULT_WARMSTART_CHECKPOINT
 
         if config.agent_kind == "comparator" and not config.warmstart_checkpoint:
@@ -225,7 +236,16 @@ class SelfPlayRunner:
         if config.agent_kind == "comparator":
             return cls._create_comparator(config, device=device)
 
-        model, vocab, _meta = load_checkpoint(config.warmstart_checkpoint, map_location=device)
+        if config.random_init:
+            # The warm start supplies architecture, vocab, and the card static
+            # matrix only; every learned weight is re-drawn from config.seed.
+            model, vocab, _meta = build_random_init_model(
+                config.warmstart_checkpoint, seed=config.seed, map_location=device
+            )
+        else:
+            model, vocab, _meta = load_checkpoint(
+                config.warmstart_checkpoint, map_location=device
+            )
         model.eval()
         learner = AlphaZeroLearner(config, model, device=device)
         engine = SelfPlayEngine(
@@ -371,7 +391,17 @@ class SelfPlayRunner:
         state = self.manager.load_state()
         if state is None:
             return False
+        init = state.get("init_checkpoint")
+        if init:
+            # Resume must keep comparing against the run's own init checkpoint,
+            # not the warm start it borrowed its architecture from (#27).
+            self.init_checkpoint = _resolve(str(init), self.manager.run_dir)
+            self.previous_best_fallback = self.init_checkpoint
         checkpoint = self.manager.resolve_resume_checkpoint(state)
+        if checkpoint is None and self.init_checkpoint is not None:
+            # A random-init run records init from the start, so a crash before
+            # the first periodic checkpoint still has something to resume from.
+            checkpoint = self.init_checkpoint
         if checkpoint is None:
             raise RunResumeError(
                 f"Run {self.config.run_name} has state but no loadable checkpoint"
@@ -437,6 +467,12 @@ class SelfPlayRunner:
                 if self.last_checkpoint is not None
                 else None
             ),
+            "init": "random" if self.config.random_init else "warmstart",
+            "init_checkpoint": (
+                _rel(self.init_checkpoint, self.manager.run_dir)
+                if self.init_checkpoint is not None
+                else None
+            ),
             "pool": [_rel(Path(p), self.manager.run_dir) for p in pool],
             "seed_cursor": getattr(self.engine, "seed_cursor", None),
             "determinism_checks_done": self._determinism_checks_done,
@@ -457,6 +493,41 @@ class SelfPlayRunner:
             buffer=self.buffer if len(self.buffer) else None,
             entropy_probe=self.entropy_probe,
         )
+
+    def _init_metadata(self) -> dict[str, Any]:
+        """Checkpoint provenance: warm start, or random weights seeded from config."""
+        if self.config.random_init:
+            return {
+                "init": "random",
+                "warmstart_checkpoint": None,
+                "architecture_from": self.config.warmstart_checkpoint,
+            }
+        return {
+            "init": "warmstart",
+            "warmstart_checkpoint": self.config.warmstart_checkpoint,
+        }
+
+    def _prepare_random_init(self) -> None:
+        """Save the fresh weights as the first previous-best opponent (#27)."""
+        if not self.config.random_init or self.model is None or self.vocab is None:
+            return
+        self.init_checkpoint = self.manager.save_init(
+            model=self.model,
+            vocab=self.vocab,
+            metadata={
+                "version": f"selfplay-{self.config.run_name}",
+                "agent_kind": self.config.agent_kind,
+                "cycle": 0,
+                "step": 0,
+                "selfplay_games": 0,
+                "seed": self.config.seed,
+                "temperature": getattr(self.model, "temperature", None),
+                **self._init_metadata(),
+            },
+        )
+        self.previous_best_fallback = self.init_checkpoint
+        # Record the reference immediately so an early crash still resumes with it.
+        self._save_state()
 
     # --- pre-update measurements --------------------------------------
     def _measure_pre_update(
@@ -634,8 +705,8 @@ class SelfPlayRunner:
         if self.model is None or self.vocab is None:
             return
         previous_best = self.manager.best_checkpoint()
-        if previous_best is None and self.config.warmstart_checkpoint:
-            previous_best = Path(self.config.warmstart_checkpoint)
+        if previous_best is None:
+            previous_best = self.previous_best_fallback
 
         try:
             self.last_checkpoint = self.manager.save(
@@ -650,8 +721,8 @@ class SelfPlayRunner:
                     "selfplay_games": self.selfplay_games,
                     "num_simulations": self.config.num_simulations,
                     "num_worlds": self.config.num_worlds,
-                    "warmstart_checkpoint": self.config.warmstart_checkpoint,
                     "temperature": getattr(self.model, "temperature", None),
+                    **self._init_metadata(),
                 },
             )
         except RunResourceError as exc:
@@ -696,6 +767,7 @@ class SelfPlayRunner:
                             "selfplay_games": self.selfplay_games,
                             "dev_win_rate_vs_b1": win_rate,
                             "temperature": getattr(self.model, "temperature", None),
+                            **self._init_metadata(),
                         },
                     )
                 except RunResourceError as exc:
@@ -756,6 +828,8 @@ class SelfPlayRunner:
                 f"Run {self.config.run_name} already exists in {self.manager.run_dir}; "
                 "pass resume=True or choose a new run name"
             )
+        else:
+            self._prepare_random_init()
 
         if self.model is not None and self.vocab is not None:
             setter = getattr(self.engine, "set_opponent_pool", None)
@@ -974,6 +1048,8 @@ class SelfPlayRunner:
             last_checkpoint=self.last_checkpoint,
             stop=self._stop,
             summary_path=summary_path,
+            init="random" if self.config.random_init else "warmstart",
+            init_checkpoint=self.init_checkpoint,
         )
         (self.manager.run_dir / "run_summary.json").write_text(
             json.dumps(run_summary.to_dict(), indent=2, sort_keys=True) + "\n",
