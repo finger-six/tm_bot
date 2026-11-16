@@ -199,8 +199,17 @@ class RecordingSearchAgent(RecordingAgent):
             raise RuntimeError(
                 f"act_batch_with_samplers returned {len(indices)} actions for {len(agents)} requests"
             )
-        for agent, observation, choice, index in zip(agents, observations, choices, indices):
-            agent._record(observation, choice, int(index))
+        # The engine applies none of these actions if recording raises, so undo every
+        # entry this batch recorded before propagating (the runner retries or fails them).
+        marks = [(len(a.recorder.actions), len(a.recorder.decisions)) for a in agents]
+        try:
+            for agent, observation, choice, index in zip(agents, observations, choices, indices):
+                agent._record(observation, choice, int(index))
+        except BaseException:
+            for agent, (n_actions, n_decisions) in zip(agents, marks):
+                del agent.recorder.actions[n_actions:]
+                del agent.recorder.decisions[n_decisions:]
+            raise
         return [int(i) for i in indices]
 
 

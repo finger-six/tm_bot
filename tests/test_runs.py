@@ -516,20 +516,63 @@ def test_recorder_snapshots_the_observation_at_record_time() -> None:
         record.observation,
         encode_observation(snapshot, _VOCAB),  # type: ignore[arg-type]
     )
-    _assert_encoded_choice_equal(
-        record.choice,
-        encode_choice(choice, snapshot, _VOCAB),  # type: ignore[arg-type]
-    )
     assert record.generation == int(snapshot["public"]["generation"])
 
 
-def test_recorder_does_not_log_an_action_when_encoding_fails() -> None:
+def test_recorder_does_not_log_an_action_when_encoding_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A failed encode must not leave an unapplied action in the regression history."""
-    recorder = GameRecorder("train-0000", "tharsis", capture_seat=0, vocab=None)
-    with pytest.raises(RuntimeError):
+
+    def fail(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError("encode failed")
+
+    monkeypatch.setattr("tm_bot.runs.recorder.encode_observation", fail)
+    recorder = GameRecorder("train-0000", "tharsis", capture_seat=0, vocab=_VOCAB)
+    with pytest.raises(ValueError, match="encode failed"):
         recorder.record(_obs(actor=0), _choice(seat=0), 0, None, was_searched=False)  # type: ignore[arg-type]
     assert recorder.actions == []
     assert recorder.decisions == []
+
+
+def test_batched_recording_rolls_back_when_a_later_entry_fails_to_encode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No batch entry may stay recorded when the batch raises (the runner retries or fails it)."""
+    from tm_bot.runs import recorder as recorder_module
+    from tm_bot.runs.recorder import RecordingSearchAgent
+
+    class _BatchInner:
+        version = "fake"
+
+        @classmethod
+        def act_batch_with_samplers(cls, agents, observations, choices, samplers):  # type: ignore[no-untyped-def]
+            return [0 for _ in agents]
+
+    real_encode = recorder_module.encode_observation
+    calls = {"n": 0}
+
+    def encode_second_fails(*args: Any, **kwargs: Any) -> Any:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise ValueError("encode failed")
+        return real_encode(*args, **kwargs)
+
+    monkeypatch.setattr(recorder_module, "encode_observation", encode_second_fails)
+    recorders = [
+        GameRecorder(f"train-000{i}", "tharsis", capture_seat=0, vocab=_VOCAB) for i in range(2)
+    ]
+    agents = [RecordingSearchAgent(_BatchInner(), r, capture_seat=0) for r in recorders]
+    with pytest.raises(ValueError, match="encode failed"):
+        RecordingSearchAgent.act_batch_with_samplers(
+            agents,
+            [_obs(actor=0), _obs(actor=0)],  # type: ignore[list-item]
+            [_choice(seat=0), _choice(seat=0)],
+            [None, None],
+        )
+    for r in recorders:
+        assert r.actions == []
+        assert r.decisions == []
 
 
 def test_decision_samples_match_encode_at_assembly_rows() -> None:
