@@ -496,6 +496,42 @@ def test_recorder_retains_encoded_decisions_not_raw_observations() -> None:
     assert not any(isinstance(value, Choice) for value in stored)
 
 
+def test_recorder_snapshots_the_observation_at_record_time() -> None:
+    """Mutating the observation after `record` must not change the stored row."""
+    import copy
+
+    recorder = GameRecorder("train-0000", "tharsis", capture_seat=0, vocab=_VOCAB)
+    observation = _obs(actor=0)
+    choice = _choice(seat=0)
+    snapshot = copy.deepcopy(observation)
+    recorder.record(observation, choice, 0, [0.5, 0.5], was_searched=True)  # type: ignore[arg-type]
+
+    observation["public"]["generation"] = 99
+    for player in observation["public"]["players"]:
+        player["terraformRating"] = 63
+        player["megacredits"] = 400
+
+    record = recorder.decisions[0]
+    _assert_encoded_observation_equal(
+        record.observation,
+        encode_observation(snapshot, _VOCAB),  # type: ignore[arg-type]
+    )
+    _assert_encoded_choice_equal(
+        record.choice,
+        encode_choice(choice, snapshot, _VOCAB),  # type: ignore[arg-type]
+    )
+    assert record.generation == int(snapshot["public"]["generation"])
+
+
+def test_recorder_does_not_log_an_action_when_encoding_fails() -> None:
+    """A failed encode must not leave an unapplied action in the regression history."""
+    recorder = GameRecorder("train-0000", "tharsis", capture_seat=0, vocab=None)
+    with pytest.raises(RuntimeError):
+        recorder.record(_obs(actor=0), _choice(seat=0), 0, None, was_searched=False)  # type: ignore[arg-type]
+    assert recorder.actions == []
+    assert recorder.decisions == []
+
+
 def test_decision_samples_match_encode_at_assembly_rows() -> None:
     """Rows assembled from encoded records equal the old encode-at-assembly rows."""
     from tm_bot.runs.selfplay import SelfPlayEngine

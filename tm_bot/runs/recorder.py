@@ -58,8 +58,8 @@ class GameRecorder:
         was_searched: bool,
     ) -> None:
         seat = int(observation["actor"])  # type: ignore[index]
-        self.actions.append((seat, int(candidate_index)))
         if self.capture_seat is None or seat != self.capture_seat:
+            self.actions.append((seat, int(candidate_index)))
             return
         if self.vocab is None:
             raise RuntimeError(
@@ -86,6 +86,9 @@ class GameRecorder:
                 num_candidates=n,
             )
         )
+        # Log the action only after encoding succeeded, so a failed encode never
+        # leaves an unapplied action in a regression case's history.
+        self.actions.append((seat, int(candidate_index)))
 
     @property
     def num_searched(self) -> int:
