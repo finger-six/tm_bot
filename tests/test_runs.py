@@ -561,9 +561,12 @@ def test_batched_recording_rolls_back_when_a_later_entry_fails_to_encode(
     recorders = [
         GameRecorder(f"train-000{i}", "tharsis", capture_seat=0, vocab=_VOCAB) for i in range(2)
     ]
-    # History recorded before the batch must survive the rollback.
-    for r in recorders:
-        r.record(_obs(actor=1), _choice(seat=1), 1, None, was_searched=False)  # type: ignore[arg-type]
+    # History recorded before the batch (one decision, then 1 or 2 opponent actions so the
+    # recorders' marks differ) must survive the rollback.
+    for depth, r in enumerate(recorders, start=1):
+        r.record(_obs(actor=0), _choice(seat=0), 0, None, was_searched=False)  # type: ignore[arg-type]
+        for _ in range(depth):
+            r.record(_obs(actor=1), _choice(seat=1), 1, None, was_searched=False)  # type: ignore[arg-type]
     monkeypatch.setattr(recorder_module, "encode_observation", encode_second_fails)
     # Both seats of one game share a recorder in self-play; agents 0 and 1 do here too.
     agents = [
@@ -578,9 +581,9 @@ def test_batched_recording_rolls_back_when_a_later_entry_fails_to_encode(
             [_choice(seat=0), _choice(seat=0), _choice(seat=0)],
             [None, None, None],
         )
-    for r in recorders:
-        assert r.actions == [(1, 1)]
-        assert r.decisions == []
+    for depth, r in enumerate(recorders, start=1):
+        assert r.actions == [(0, 0)] + [(1, 1)] * depth
+        assert [(d.seat, d.candidate_index) for d in r.decisions] == [(0, 0)]
 
 
 def test_decision_samples_match_encode_at_assembly_rows() -> None:
