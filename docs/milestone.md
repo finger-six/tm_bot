@@ -110,8 +110,9 @@ frequency (0 vs B1, 0.127 vs warm start). The head does far worse than that cons
 against both opponents, and temperature scaling changes almost nothing because T ≈ 1.
 
 The head is **badly overconfident**. Against the warm start, 95k of 148k decisions
-predict ≥ 0.9 win probability, but the observed win rate in that bin is 13.7%. Against
-B1, 9.8k decisions predict ≥ 0.9 and the comparator never wins.
+predict ≥ 0.9 win probability, but the observed win rate in that bin is 13.8% (13.7%
+after temperature scaling). Against B1, 9.8k decisions predict ≥ 0.9 and the comparator
+never wins.
 
 This matches the self-play anomaly below. In training, the learner won 89% of its games
 (5,465-685), mostly against greedy copies of itself. The head therefore learned "I am
@@ -160,14 +161,14 @@ never applied.
 | Parameters | 4,459,330 | 2,501,026 |
 | Per-decision latency, eval vs B1 (p50 / p95) | 16.9 / 28.6 ms (searched only: 19.8 / 30.4 ms) | 4.8 / 6.1 ms |
 | Warm start cost | 3,295 s (4 epochs, [warmstart.md](warmstart.md)) | 1,310 s (4 epochs) |
-| Final eval wall (5 pairings + 2 context + 2 calibration) | | about 5.0 h total |
+| Final eval wall, both agents combined (5 pairings + 2 context + 2 calibration) | about 5.0 h (17,860 s) | (combined) |
 
 The two clocks follow the #26 decision (issuecomment-6892016073). The 24 h budget, the
 30-min checkpoint interval and the entropy window count training time only. The table
 reports the wall clock alongside it.
 
 The main agent's wall clock is 2.6× its training time because each IS-MCTS dev
-evaluation (208 games) took about 62 min, against about 33 min of training between
+evaluation (208 games) took about 62 min, against about 39 min of training between
 checkpoints.
 
 **Throughput gate:** this is the reported negative result (#26 decision,
@@ -178,21 +179,26 @@ cause is game length (mean 23-54 generations per cycle), not search cost.
 ### Memory
 
 These figures come from the memory logs `runs/milestone-*.mem.csv`, sampled every
-120 s.
-- Comparator attempt 2: Python private memory held steady at 11-12 GB and peaked at
-  17.0 GB.
-- Main run: 15-21 GB steady, with spikes up to 33.3 GB. Free commit memory never fell
-  below 34.2 GB.
-- Neither run leaked memory, and neither hit the 10 GB learner + buffer RSS or 12 GB
-  VRAM run limits.
+120 s by an external sampler (not in the repo), for the run's Python process. All
+figures are decimal GB (MB / 1000).
+- Comparator attempt 2: private memory median 11.0 GB, p95 14.4 GB, peak 17.0 GB;
+  working set (RSS) at most 4.7 GB. Free commit memory never fell below 59.4 GB.
+- Main run: private memory median 17.9 GB, p95 22.9 GB, peak 33.3 GB; working set
+  median 6.1 GB, p95 11.2 GB, peak 18.5 GB. Free commit memory never fell below 34.2 GB.
+- Main-run memory grew while the replay buffer filled and then stayed in that band,
+  and neither run failed for lack of memory. We did not test separately for a slow leak.
+- **The 10 GB learner RAM limit was never enforced.** The main run's working set was above
+  10 GiB in 171 of 855 samples. The run did not stop, because the Windows RSS probe
+  `current_rss_bytes()` returns `None` on this host, so the RAM half of the guard never
+  fires (filed as #35). The 12 GB VRAM half (`torch.cuda.memory_allocated`) works, and
+  neither run stopped on it.
 
 ### Dev-checkpoint history
 
 Dev win rate vs `b1-v1` (see the B1 bug below) per checkpoint, and vs the previous best:
 
-| Main agent | | | Comparator | | |
+| Main: cycle (training h) | vs B1 | vs prev best | Comparator: cycle (training h) | vs B1 | vs prev best |
 | --- | --- | --- | --- | --- | --- |
-| Cycle (training h) | vs B1 | vs prev best | Cycle (training h) | vs B1 | vs prev best |
 | 4 (0.51) | 7.7% | 0.42 | 4 (0.51) | 7.7% | 0.62 |
 | 15 (3.03) **best** | 8.7% | 0.38 | 23 (2.72) | 7.7% | 0.26 |
 | 25 (6.30) | 8.7% (tie) | 0.48 | 40 (5.10) | 7.7% | 0.06 |
@@ -216,8 +222,9 @@ generations as attempt 1's (53.68).
 
 The comparator run was restarted from scratch with the same settings. Attempt 1 is kept
 at `runs/milestone-comparator-oom-attempt1`. Both milestone runs used the #33 code
-frozen at 2fb4921 (a worktree, so main could move on). The #33 review follow-ups merged
-later do not change training behavior.
+frozen at 2fb4921 (a worktree, so main could move on). The run artifacts do not record
+a git SHA; this comes from the launch setup (cwd and `PYTHONPATH` pointed at that
+worktree). The #33 review follow-ups merged later do not change training behavior.
 
 ### #34: B1 never took a corporation's first action (`b1-v1`)
 
@@ -230,8 +237,8 @@ the milestone. Its regression tests are
 
 **Effect on in-run dev evaluation:** both runs had started before the fix, so their
 in-run dev evaluation used `b1-v1`.
-- On `dev-0006` and `dev-0009`, `b1-v1` holds the affected corporation and loses on every
-  map and seat. That is **8 free games out of 104** for any opponent; B0 also scores
+- On `dev-0006` and `dev-0009` with B1 in seat 0, `b1-v1` holds the affected corporation
+  and loses on every map. That is **8 free games out of 104** for any opponent; B0 also scores
   exactly 8/104.
 - So the main agent's best (9/104) has **1** genuine dev win against B1.
 - The comparator's best (12/104) has **4** (dev-0004, dev-0007).
@@ -240,6 +247,8 @@ in-run dev evaluation used `b1-v1`.
 **Decision:** the running main-agent run was not restarted. The offset is a constant 8
 games, so it does not change the checkpoint ranking, and B1 is only 10% of self-play
 opponents. All final evaluation and calibration use **`b1-v2`**, from main @ 1dce4e9.
+The eval reports record `b1-v2` as the agent version. The calibration reports record only
+`opponent: "b1"`, but they ran from the same commit.
 
 ### Checkpoint selection sat at the floor
 
@@ -252,26 +261,32 @@ one genuine dev game above the other checkpoints, and the plateau rule stopped i
 - Final evaluation confirms it: 11.5% against its own warm start.
 
 So when the win rate vs B1 sits at the floor, best-checkpoint selection mostly picks
-noise, and the vs-previous-best signal, which the rules do not use, was the more
-informative one. We recorded this and changed no rule (#10).
+noise. The vs-previous-best signal was the more informative one, but the rules use it
+only as a tie-break when win rates vs B1 are exactly equal (`is_new_best` in
+`tm_bot/runs/stopping.py`). In the main run, that tie-break kept the cycle-15 checkpoint
+against the two later ties (cycles 25 and 35: vs-previous-best CI lower bounds 0.375 and
+0.288). We recorded this and changed no rule (#10).
 
 ### Comparator long-game anomaly (cycles 42-43)
 
 **What happened:**
-- Comparator self-play mean generations went from 50-60 (cycles 31-40) to 136 and 106
+- Comparator self-play mean generations went from 50-73 (cycles 31-40) to 136 and 106
   (cycles 42-43).
-- The longest game reached 275 generations and 3,326 decisions.
-- Generations then settled back to 52-82 for the rest of the run.
+- The longest game reached 275 generations (cycle 42). The largest decision count
+  among the recorded shape flags (capped at 20 per cycle) was 3,326, in a 240-generation
+  game in cycle 43.
+- Generations then dropped to 91 (cycle 44) and stayed at 52-82 from cycle 46 on.
 
 Across the run, 5,408 of 6,150 games fall outside the 6-25 generation shape window. No
 game hit the 20,000-decision step cap.
 
-**Cause:** the training seat samples its policy (temperature 1), but its comparator
-opponents (latest and pool) act greedily ([comparator.md](comparator.md)). Greedy
-comparators stall terraforming, which is the looping failure that made greedy dev
-evaluation unusable in #25. The sampling learner beats these stalled copies by large
-margins (89% of self-play games; median per-cycle mean VP margin +83.7, and negative in only 1 of 82 cycles). The PPO reward
-therefore mostly measures exploiting a stalling opponent.
+**Likely cause** (inferred from the setup; we traced no game from cycles 42-43): the
+training seat samples its policy (temperature 1), but its comparator opponents (latest
+and pool) act greedily ([comparator.md](comparator.md)). Greedy comparators stall
+terraforming, which is the looping failure that made greedy dev evaluation unusable in
+#25. The sampling learner beats these stalled copies by large margins (89% of self-play
+games; median per-cycle mean VP margin +83.7, and negative in only 1 of 82 cycles). The
+PPO reward therefore mostly measures exploiting a stalling opponent.
 
 This fits the drop against the warm start and the overconfident win-probability head.
 Per #10, game-shape anomalies trigger an investigation, not a training change; it is
@@ -307,7 +322,9 @@ CMPWS="tm_bot.comparator:make_comparator_agent?checkpoint=runs/comparator-warmst
 python -m tm_bot.eval --a "$MAIN" --b b1 --games 400 --namespace eval --workers 16 \
   --max-decisions 20000 --a-training-seeds 1 --out data/reports/milestone/main_vs_b1
 # likewise: main_vs_ws ($MAIN vs $MAINWS), cmp_vs_b1, cmp_vs_ws ($CMP vs $CMPWS),
-# main_vs_cmp ($MAIN vs $CMP), and the context rows mainws_vs_b1, cmpws_vs_b1.
+# main_vs_cmp ($MAIN vs $CMP), and the context rows mainws_vs_b1, cmpws_vs_b1;
+# pass --a-training-seeds 1 for every learned A and --b-training-seeds 1 for every
+# learned B, so each report carries the fewer-than-3-seeds warning.
 python -m tm_bot.comparator.calibration --checkpoint runs/milestone-comparator/best \
   --opponent b1 --games 400 --workers 16 --device cuda \
   --out data/reports/milestone/calibration --name dev_vs_b1
