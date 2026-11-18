@@ -3,7 +3,8 @@
 This report covers the 24 h milestone runs of the main agent (IS-MCTS + policy/value
 network, [selfplay.md](selfplay.md)) and of the Jev-inspired comparator (typed-candidate
 scorer + PPO, [comparator.md](comparator.md)), then the final evaluation of both best
-checkpoints on `eval-*` seeds.
+checkpoints on `eval-*` seeds. [Pure self-play (#27)](#pure-self-play-27) adds the
+main agent trained from random initialisation as a comparison.
 
 **Verdict: the milestone is NOT met by either agent.** Neither agent won a single one of
 400 `eval-*` games against B1. Both also lose to their own warm-start checkpoint, so
@@ -310,6 +311,126 @@ maximum of 155, and 950 of 1,248 games were shape-flagged. Policy entropy went f
 to 1.27, so it did not collapse. The run never hit the step cap and never stopped on a
 collapse rule.
 
+## Pure self-play (#27)
+
+The third-priority experiment from #13: the main agent trained from **random
+initialisation** (no human-data warm start) under the same orchestration, budget,
+search settings and stopping rules as the main run, then evaluated on the same `eval-*`
+seeds. The flag and its semantics are in [selfplay.md](selfplay.md#random-initialisation-27).
+
+**Result:** the pure agent also never beats B1 (0 of 400), so it does not meet the
+milestone either. It does beat the warm-started main agent's best checkpoint, 63.50%
+[58.75, 68.25], and its own random initialisation, 66.88% [62.38, 71.25].
+Against the human-data warm start of the main agent it is level: 53.00% [47.75, 58.25].
+
+### Setup
+
+- Run `runs/milestone-pure`, started 2026-11-17 11:53 CST, from main @ 1dce4e9 (frozen
+  worktree, as for the other runs). This code has the #34 fix, so in-run dev evaluation
+  used **`b1-v2`**: no 8-free-game offset, unlike the main run.
+- Same command as the main run plus `--random-init --run-name milestone-pure`:
+  `--warmstart runs/warmstart/best --budget-hours 24 --sims 4 --worlds 4 --workers 16
+  --checkpoint-minutes 30 --dev-games 100 --device cuda`, seed 42. `--warmstart` only
+  supplies the architecture, vocab and card static matrix; `best/config.json` and
+  `init/config.json` record `init: "random"` and `warmstart_checkpoint: null`.
+- Same network (4,459,330 parameters). The random weights are saved in
+  `runs/milestone-pure/init/`, which was the previous-best dev opponent until the first
+  `best/` existed.
+- 1 training seed (fewer than 3), as for the other agents.
+
+### Final evaluation
+
+Same protocol and search settings as the main agent (`eval-*`, 400 games, b1-v2, main
+@ ab2c267, which has the same play code as 1dce4e9). Win rate is for the pure agent.
+
+| Pairing | Games | Failures | Record | Win rate [95% CI] | Mean VP margin | Mean gens | Wall |
+| --- | ---: | ---: | --- | --- | ---: | ---: | ---: |
+| Pure best vs B1 | 400 | 0 | 0-400-0 | **0.00%** [0.00, 0.00] | -82.38 (41.3 vs 123.7) | 13.04 | 1,222 s |
+| Pure best vs **main best** (warm-started, `runs/milestone-main/best`) | 400 | 0 | 254-146-0 | **63.50%** [58.75, 68.25] | +10.76 (89.6 vs 78.9) | 25.11 | 4,338 s |
+| Pure best vs **main warm start** (`runs/warmstart/best`) | 400 | 0 | 212-188-0 | **53.00%** [47.75, 58.25] | +0.10 (83.5 vs 83.4) | 22.32 | 3,647 s |
+| Pure best vs its random init (`runs/milestone-pure/init`) | 400 | 0 | 267-132-1 | **66.88%** [62.38, 71.25] | +14.12 (83.7 vs 69.6) | 21.89 | 3,204 s |
+
+Per map (100 games each, 0 failures; Amazonis Planitia not supported):
+
+| Map | vs B1 (VP margin) | vs main best | vs main warm start | vs random init |
+| --- | --- | --- | --- | --- |
+| Tharsis | 0.00% (-75.65) | 61.00% [51.00, 71.00] | 54.00% [44.00, 63.00] | 57.00% [48.00, 66.00] |
+| Elysium | 0.00% (-86.10) | 63.00% [53.00, 73.00] | 56.00% [47.00, 65.00] | 81.00% [74.00, 88.00] |
+| Hellas | 0.00% (-84.44) | 65.00% [56.00, 74.00] | 51.00% [41.00, 61.00] | 60.50% [51.00, 69.50] |
+| Vastitas Borealis Nova | 0.00% (-83.31) | 65.00% [55.00, 75.00] | 51.00% [41.00, 61.00] | 69.00% [59.00, 79.00] |
+| Amazonis Planitia | not supported | not supported | not supported | not supported |
+
+Decision latency vs B1: p50 15.8 ms, p95 25.1 ms (searched decisions only: 18.6 / 26.4
+ms).
+
+### Run
+
+| | Pure self-play | Main agent (for comparison) |
+| --- | ---: | ---: |
+| Stop | **plateau**: 12 checkpoints without a new best, cycle 86 | plateau, cycle 39 |
+| Best checkpoint | cycle 24 (2.17 h training, step 384, 768 games), dev vs `b1-v2` 0/104 | cycle 15, dev vs `b1-v1` 9/104 |
+| Training clock | **8.67 h** (31,209 s) | 10.96 h |
+| Total wall clock (= GPU-hours on 1 × RTX 4080 SUPER) | **15.38 h** (55,382 s) | 28.54 h |
+| In-run dev evaluation | 6.71 h (24,173 s; 16 checkpoints, about 25 min each) | 17.58 h |
+| Self-play games | 2,752 (317 per training hour) | 1,248 (114 per training hour) |
+| Decisions generated | 1,614,399 (32.0% searched) | 1,282,932 |
+| Learner steps | 1,376 (16 updates × 86 cycles) | 624 |
+| Learner seat W-L-T | 1,247-1,504-1 | 569-679 |
+| Mean generations per cycle | 18.5-24.6 (max 69); 350 of 2,752 games shape-flagged | 23-54 (max 155); 950 of 1,248 flagged |
+| Policy entropy (first → last cycle) | 1.259 → 1.219 | 1.19 → 1.27 |
+
+The run stopped under a documented rule; the 72 h extension did not apply. There were
+0 failures and 0 adapter rejections in 2,752 self-play games, `regression/` is empty,
+and both determinism spot checks (train-1023 and train-2015, Vastitas Borealis Nova)
+replayed identically. Entropy fell by 3%, far from the collapse rule. Pure self-play
+games are shorter than the main run's and stayed in a narrow band all run, so the pure
+run reached 2.8× the main run's throughput, still far below the 1,000 games/hour gate.
+
+**Memory** (`runs/milestone-pure.mem.csv`, same sampler and units as above, 461
+samples): private memory median 15.9 GB, p95 20.1 GB, peak 26.6 GB; working set median
+7.4 GB, p95 8.8 GB, peak 17.4 GB. The working set was above 10 GiB in 7 samples; the
+inert RAM guard (#35) again did not stop the run. Free commit memory never fell below
+42.4 GB.
+
+### Dev-checkpoint history
+
+Every one of the 16 checkpoints won **0 of 104** dev games against `b1-v2` (mean VP
+margin -80.9 to -87.0), so the best checkpoint was chosen only by the tie-break on the
+previous best (`is_new_best`, `tm_bot/runs/stopping.py`):
+
+| Cycle (training h) | vs B1 | vs previous best [95% CI] | New best |
+| --- | --- | --- | --- |
+| 7 (0.56) | 0/104 | 0.548 [0.433, 0.663] vs `init/` | yes (first checkpoint) |
+| 13 (1.07) | 0/104 | 0.529 [0.413, 0.654] | no |
+| 19 (1.64) | 0/104 | 0.490 [0.375, 0.606] | no |
+| 24 (2.17) | 0/104 | **0.654 [0.538, 0.769]** | **yes** (CI lower bound > 0.5) |
+| 29-86 (12 checkpoints) | 0/104 | 0.231-0.471 | no |
+
+None of the 12 checkpoints after cycle 24 beat it on dev (all below 0.5 against it).
+The plateau rule then stopped the run, so the selected agent is the cycle-24 network
+after 768 self-play games.
+
+### Interpretation
+
+- **Against B1, random initialisation made no difference.** The pure agent, the
+  warm-started main agent and its warm start all score 0 of 400 against `b1-v2`, with
+  similar VP margins (-82.4, -88.8, -87.6).
+- **Self-play improved the random network**: 66.88% against its own initialisation.
+  The warm-started agents instead got worse than their starting point.
+- **The pure agent beats the warm-started main agent's best** (63.50%, lower bound
+  58.75%). That mostly reflects the main agent's own regression: against the main
+  agent's **warm start**, the stronger of the two warm-started checkpoints (it beats
+  the main best 70.00%), the pure agent is level at 53.00% [47.75, 58.25], with a mean
+  VP margin of +0.10. So 2.17 h of pure self-play from random weights reached roughly
+  the strength of 4 epochs of human-data warm start at these search settings, and
+  neither is close to B1.
+- With one training seed per agent and a single run each, none of this says how much
+  is the initialisation and how much is run-to-run variance.
+
+#27 acceptance: the run used the same orchestration with the warm start disabled
+(`--random-init`), and it was evaluated on the same `eval-*` seeds against B1 and the
+warm-started agent (this section).
+
 ## Reproduce
 
 ```bash
@@ -331,6 +452,15 @@ python -m tm_bot.comparator.calibration --checkpoint runs/milestone-comparator/b
 python -m tm_bot.comparator.calibration --checkpoint runs/milestone-comparator/best \
   --opponent runs/comparator-warmstart-full/best --games 400 --workers 16 --device cuda \
   --out data/reports/milestone/calibration --name dev_vs_warmstart
+# Pure self-play (#27): run (from main @ 1dce4e9), then 4 pairings like the ones above.
+python -m tm_bot.runs --run-name milestone-pure --random-init --warmstart runs/warmstart/best \
+  --budget-hours 24 --sims 4 --worlds 4 --workers 16 --checkpoint-minutes 30 \
+  --dev-games 100 --device cuda
+PURE="tm_bot.search:make_warmstart_search_agent?checkpoint=runs/milestone-pure/best&$S"
+INIT="tm_bot.search:make_warmstart_search_agent?checkpoint=runs/milestone-pure/init&$S"
+# pure_vs_b1 ($PURE vs b1), pure_vs_main ($PURE vs $MAIN), pure_vs_mainws ($PURE vs
+# $MAINWS), pure_vs_init ($PURE vs $INIT), each with --a-training-seeds 1 and
+# --b-training-seeds 1 for a learned B, --out data/reports/milestone/<name>.
 ```
 
 Training commands: [selfplay.md](selfplay.md) and the #26 run-settings comment
