@@ -382,9 +382,11 @@ ms).
 The run stopped under a documented rule; the 72 h extension did not apply. There were
 0 failures and 0 adapter rejections in 2,752 self-play games, `regression/` is empty,
 and both determinism spot checks (train-1023 and train-2015, Vastitas Borealis Nova)
-replayed identically. Entropy fell by 3%, far from the collapse rule. Pure self-play
-games are shorter than the main run's and stayed in a narrow band all run, so the pure
-run reached 2.8× the main run's throughput, still far below the 1,000 games/hour gate.
+replayed identically. Entropy fell by 3%, far from the collapse rule. The pure run
+reached 2.8× the main run's throughput, still far below the 1,000 games/hour gate.
+Its games are shorter and stayed in a narrow band all run (587 decisions per game
+against 1,028), which accounts for about 1.75× of that; the rest is less training time
+per decision.
 
 **Memory** (`runs/milestone-pure.mem.csv`, same sampler and units as above, 461
 samples): private memory median 15.9 GB, p95 20.1 GB, peak 26.6 GB; working set median
@@ -395,8 +397,9 @@ inert RAM guard (#35) again did not stop the run. Free commit memory never fell 
 ### Dev-checkpoint history
 
 Every one of the 16 checkpoints won **0 of 104** dev games against `b1-v2` (mean VP
-margin -80.9 to -87.0), so the best checkpoint was chosen only by the tie-break on the
-previous best (`is_new_best`, `tm_bot/runs/stopping.py`):
+margin -80.9 to -87.0). After the first checkpoint, which becomes the best
+automatically, a new best could only come from the tie-break on the previous best
+(95% CI lower bound above 0.5; `is_new_best`, `tm_bot/runs/stopping.py`):
 
 | Cycle (training h) | vs B1 | vs previous best [95% CI] | New best |
 | --- | --- | --- | --- |
