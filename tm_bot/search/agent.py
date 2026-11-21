@@ -65,14 +65,89 @@ def _select_from_probs(
 
 
 def search_agent_version(config: SearchConfig, policy_version: str) -> str:
-    """`ismcts-s16-k4-tau1g4-0.3g10-u0.15-<net>`; v1 configs keep `ismcts-sN-kK-<net>`."""
+    """`ismcts-s16-k4-tau1g4-0.3g10-u0.15-cq3-<net>`; v1 configs keep `ismcts-sN-kK-<net>`.
+
+    `cq<β>` marks the completed-Q root rule (#60); the visit-count rule adds no tag.
+    """
     parts = [f"ismcts-s{config.num_simulations}-k{config.num_worlds}"]
     if config.play_temperature is not None:
         parts.append(config.play_temperature.spec)
     if config.margin_weight > 0.0:
         parts.append(f"u{config.margin_weight:g}")
+    if config.root_rule == "completed_q":
+        parts.append(f"cq{config.completed_q_beta:g}")
     parts.append(policy_version)
     return "-".join(parts)
+
+
+def completed_q_policy(
+    priors: np.ndarray, visits: np.ndarray, value_sums: np.ndarray, *, beta: float
+) -> np.ndarray:
+    """Completed-Q improved policy π′ ∝ prior · exp(β·Q̂) of a searched root (#58, #60).
+
+    Q̂ is a child's mean backed-up utility W/N from the root actor's view; unvisited children
+    get the plain mean Q of the visited ones. Without visits π′ is the prior.
+    """
+    p = np.asarray(priors, dtype=np.float64)
+    n = np.asarray(visits, dtype=np.float64)
+    visited = n > 0.0
+    if not visited.any():
+        return p.copy()
+    q_visited = np.asarray(value_sums, dtype=np.float64)[visited] / n[visited]
+    q = np.full(p.shape, float(q_visited.mean()))
+    q[visited] = q_visited
+    w = p * np.exp(beta * (q - q.max()))
+    return w / w.sum()
+
+
+def _root_decision(
+    root: _TreeNode,
+    *,
+    rule: str,
+    beta: float,
+    temperature: float,
+    rng: random.Random,
+) -> tuple[int, np.ndarray]:
+    """`(chosen index, root policy)` of a finished search; the policy is the self-play target.
+
+    A root without visits (0 simulations, failed world sampling) plays and records the prior
+    under either rule. `"completed_q"` samples π′^(1/τ) (argmax π′ at τ = 0, ties by prior);
+    `"visits"` samples N^(1/τ) (most visits at τ = 0, ties by mean Q, then prior).
+    """
+    if root.total_N <= 0.0 or float(root.N.max()) <= 0.0:
+        chosen = _select_from_probs(root.priors, root.num_actions, temperature=temperature, rng=rng)
+        return chosen, np.asarray(root.priors, dtype=np.float64).copy()
+    if rule == "completed_q":
+        policy = completed_q_policy(root.priors, root.N, root.W, beta=beta)
+        if temperature > 0.0:
+            return _select_from_probs(policy, root.num_actions, temperature=temperature, rng=rng), policy
+        tied = np.flatnonzero(np.isclose(policy, policy.max(), rtol=1e-9, atol=0.0))
+        chosen = int(max(tied.tolist(), key=lambda a: (float(root.priors[a]), -a)))
+        return chosen, policy
+    visits = np.asarray(root.N, dtype=np.float64)
+    policy = visits / float(visits.sum())
+    if temperature <= 0.0:
+        best_n = root.N.max()
+        tied = np.flatnonzero(root.N == best_n)
+        if len(tied) == 1:
+            return int(tied[0]), policy
+        chosen = int(
+            max(
+                tied.tolist(),
+                key=lambda a: (
+                    float(root.W[a] / max(1.0, root.N[a])),
+                    float(root.priors[a]),
+                    -a,
+                ),
+            )
+        )
+        return chosen, policy
+    scaled = np.power(np.maximum(root.N, 0.0), 1.0 / temperature)
+    total_s = float(scaled.sum())
+    if total_s <= 0.0 or not np.isfinite(total_s):
+        return int(np.argmax(root.N)), policy
+    probs_s = (scaled / total_s).tolist()
+    return int(rng.choices(range(root.num_actions), weights=probs_s, k=1)[0]), policy
 
 
 def _terminal_utility(gres: Any, root_actor: Seat, margin_weight: float) -> float:
@@ -186,9 +261,10 @@ class ISMCTSAgent:
         # Temperature the last decision was sampled with: τ(g) at action-phase decisions,
         # 0.0 for argmax, None for forced single-candidate choices.
         self.last_decision_temperature: float | None = None
-        # Candidate distribution behind the last decision: root visit distribution at searched
-        # decisions, policy-head probabilities at policy decisions, one-hot when forced. Used as
-        # the self-play policy target and for entropy monitoring (#24).
+        # Candidate distribution behind the last decision: the root policy at searched decisions
+        # (π′ under the completed-Q rule, N/ΣN under the visit rule, the prior without visits),
+        # policy-head probabilities at policy decisions, one-hot when forced. Used as the
+        # self-play policy target and for entropy monitoring (#24).
         self.last_decision_policy: np.ndarray | None = None
         # Root statistics `(priors, visit counts N, value sums W)` of the last searched
         # decision (None before one). Measurement only (#57); actions never read it.
@@ -672,53 +748,19 @@ class ISMCTSAgent:
             for st in search_states:
                 root = st.root
                 temp = st.root_temperature
-                if root.total_N <= 0.0 or float(root.N.max()) <= 0.0:
-                    chosen = _select_from_probs(
-                        root.priors,
-                        root.num_actions,
-                        temperature=temp,
-                        rng=st.agent._rng,
-                    )
-                elif temp <= 0.0:
-                    best_n = root.N.max()
-                    tied = np.flatnonzero(root.N == best_n)
-                    if len(tied) == 1:
-                        chosen = int(tied[0])
-                    else:
-                        chosen = int(
-                            max(
-                                tied.tolist(),
-                                key=lambda a: (
-                                    float(root.W[a] / max(1.0, root.N[a])),
-                                    float(root.priors[a]),
-                                    -a,
-                                ),
-                            )
-                        )
-                else:
-                    scaled = np.power(np.maximum(root.N, 0.0), 1.0 / temp)
-                    total_s = float(scaled.sum())
-                    if total_s <= 0.0 or not np.isfinite(total_s):
-                        chosen = int(np.argmax(root.N))
-                    else:
-                        probs_s = (scaled / total_s).tolist()
-                        chosen = int(
-                            st.agent._rng.choices(
-                                range(root.num_actions), weights=probs_s, k=1
-                            )[0]
-                        )
-
+                cfg = st.agent.config
+                chosen, policy = _root_decision(
+                    root,
+                    rule=cfg.root_rule,
+                    beta=cfg.completed_q_beta,
+                    temperature=temp,
+                    rng=st.agent._rng,
+                )
                 outputs[st.req_idx] = chosen
                 st.agent.last_decision_was_searched = not st.sampling_failed
                 st.agent.last_decision_latency_ms = st.elapsed_ms
                 st.agent.last_decision_temperature = float(temp)
-                visits = np.asarray(root.N, dtype=np.float64)
-                total_visits = float(visits.sum())
-                st.agent.last_decision_policy = (
-                    visits / total_visits
-                    if total_visits > 0.0
-                    else np.asarray(root.priors, dtype=np.float64).copy()
-                )
+                st.agent.last_decision_policy = policy
                 st.agent.last_root_stats = (root.priors.copy(), root.N.copy(), root.W.copy())
 
         finally:
@@ -757,6 +799,7 @@ def make_warmstart_search_agent(
     play_temperature: str | None = None,
     margin_weight: float | None = None,
     search_fallback: bool | None = None,
+    root_rule: str | None = None,
 ) -> ISMCTSAgent:
     """Factory loading and caching the warm-start checkpoint for eval/search runs.
 
@@ -765,10 +808,14 @@ def make_warmstart_search_agent(
 
     `play_temperature` picks the play rules (env `TM_SEARCH_PLAY_TEMP`):
 
-    - `"v2"` (#39/#48): τ(g) at action-phase decisions, utility U = o + 0.15·m, and
-      16 simulations x K = 4 (8 x 4 with `search_fallback`, env `TM_SEARCH_FALLBACK=1`).
+    - `"v2"` (#39/#48): τ(g) at action-phase decisions, utility U = o + 0.15·m,
+      16 simulations x K = 4 (8 x 4 with `search_fallback`, env `TM_SEARCH_FALLBACK=1`),
+      and the completed-Q root rule (#60).
     - `"flat"` (v1): a flat `action_temperature` (default 1.0), outcome-only utility
-      unless `margin_weight` is given, and 8 x 4.
+      unless `margin_weight` is given, 8 x 4, and the visit-count root rule.
+
+    `root_rule` (env `TM_SEARCH_ROOT_RULE`) overrides the rules' root rule; the #47 gate plays
+    `"flat"` with `"completed_q"`.
 
     When unset it is `"flat"` if an action temperature was given (argument or
     `TM_SEARCH_ACTION_TEMP`), so v1 milestone specs reproduce unchanged, else `"v2"`.
@@ -853,5 +900,10 @@ def make_warmstart_search_agent(
         wave_size=wsize,
         play_temperature=V2_PLAY_TEMPERATURE if v2 else None,
         margin_weight=float(weight),
+        root_rule=(
+            root_rule
+            or os.environ.get("TM_SEARCH_ROOT_RULE")
+            or ("completed_q" if v2 else "visits")
+        ),
     )
     return ISMCTSAgent(pv, config=cfg, seed=seed)

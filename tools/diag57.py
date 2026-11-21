@@ -250,7 +250,9 @@ def vp_breakdown(obs: dict[str, Any], score: int, seat: int) -> dict[str, int]:
 
 
 def _settings(args: argparse.Namespace) -> dict[str, Any]:
-    return {**LIGHT_SEARCH, "num_simulations": args.sims, "num_worlds": args.worlds, "wave_size": args.wave_size}
+    # The #57 base is the pre-#60 gate: visit-count root rule (`--root prior_q` re-chooses on top).
+    return {**LIGHT_SEARCH, "root_rule": "visits", "num_simulations": args.sims, "num_worlds": args.worlds,
+            "wave_size": args.wave_size}
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -282,7 +284,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         logs.append(log)
         return DiagAgent(base, opts, log)
 
-    opp_settings = {**LIGHT_SEARCH, "num_simulations": args.opp_sims}
+    opp_settings = {**LIGHT_SEARCH, "root_rule": "visits", "num_simulations": args.opp_sims}
     opponents: dict[str, Callable[[], Any]] = {
         "b1": resolve_agent_factory("b1"),
         "self": lambda: make_warmstart_search_agent(checkpoint=str(args.checkpoint), device=device, **opp_settings),

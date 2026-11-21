@@ -17,6 +17,10 @@ from tm_bot.env.types import ActorObservation, Choice
 V2_NUM_SIMULATIONS = 16
 FALLBACK_NUM_SIMULATIONS = 8
 V2_NUM_WORLDS = 4
+# Root output rules (#60): "completed_q" is the improved policy π′ ∝ prior · exp(β·Q̂) of #58,
+# "visits" the v1 visit distribution N/ΣN, kept so v1 artifacts reproduce.
+ROOT_RULES = ("completed_q", "visits")
+COMPLETED_Q_BETA = 3.0
 
 _ACTION_ROOT_PROMPTS = frozenset(
     {"take your first action", "take your next action"}
@@ -30,8 +34,11 @@ class SearchConfig:
     Defaults are the v2 self-play rules (#48): 16 simulations x K = 4, τ(g) at
     action-phase decisions (`play_temperature`), and leaf/terminal utility
     U = o + `margin_weight`·m. `temperature` is the non-action root temperature
-    (0 = most-visited). `action_temperature` is the v1 flat action-phase temperature,
-    used only when `play_temperature` is None.
+    (0 = argmax of the root policy). `action_temperature` is the v1 flat action-phase
+    temperature, used only when `play_temperature` is None.
+
+    `root_rule` picks the root policy that is sampled and recorded as the self-play target:
+    `"completed_q"` (#60) π′ ∝ prior · exp(`completed_q_beta`·Q̂), or `"visits"` (v1) N/ΣN.
     """
 
     num_simulations: int = V2_NUM_SIMULATIONS
@@ -46,6 +53,8 @@ class SearchConfig:
     max_nested_steps: int = 32
     play_temperature: PlayTemperatureSchedule | None = V2_PLAY_TEMPERATURE
     margin_weight: float = MARGIN_UTILITY_WEIGHT
+    root_rule: str = "completed_q"
+    completed_q_beta: float = COMPLETED_Q_BETA
 
     def __post_init__(self) -> None:
         if self.num_simulations < 0:
@@ -66,6 +75,10 @@ class SearchConfig:
             raise ValueError(f"max_nested_steps must be >= 1, got {self.max_nested_steps}")
         if not (0.0 <= self.margin_weight < 1.0 / 1.2):
             raise ValueError(f"margin_weight must be in [0, 1/1.2), got {self.margin_weight}")
+        if self.root_rule not in ROOT_RULES:
+            raise ValueError(f"root_rule must be one of {ROOT_RULES}, got {self.root_rule!r}")
+        if self.completed_q_beta < 0.0:
+            raise ValueError(f"completed_q_beta must be >= 0, got {self.completed_q_beta}")
 
     @classmethod
     def v2(cls, *, fallback: bool = False, **overrides: Any) -> SearchConfig:

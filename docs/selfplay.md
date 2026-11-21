@@ -82,8 +82,10 @@ run config without it raises, so a v1 run cannot be resumed under v2 code.
   `PlayTemperatureSchedule`): 1.0 through generation 4, linear to 0.3 at
   generation 10, 0.3 after, never 0. Every learned seat (learner, `latest`,
   pool, anchor, and the `dev-*`/`eval-*` agents) samples action-phase decisions
-  at τ(g). Outside the action phase the main agent takes the most-visited root
-  or the policy argmax, and the comparator samples at τ 1. No learned seat
+  at τ(g); the main agent samples its searched roots from the completed-Q
+  policy π′ (#60, [search.md](search.md)). Outside the action phase the main
+  agent takes the argmax of π′ or of the policy head, and the comparator samples
+  at τ 1. No learned seat
   plays greedily in the action phase.
 - **Utility** U = o + 0.15·m, with o ∈ {+1, 0, -1} and
   m = clip(my_vp - opp_vp, -60, 60) / 50, so any win outranks any loss. Search
@@ -113,7 +115,8 @@ checks the encoding is seat-scoped).
 
 ### Targets
 
-- **Policy**: normalized root visit counts at searched decisions. Decisions
+- **Policy**: the root policy at searched decisions, the completed-Q π′ ∝
+  prior · exp(3·Q̂) since #60 (normalized root visit counts before). Decisions
   handled by the policy head (nested payments, spaces, players, amounts,
   initial corporation/prelude picks) are kept and targeted from the policy
   head's own distribution; forced single-candidate decisions are one-hot. This
@@ -141,7 +144,7 @@ from the replay buffer (v1 buffer, batch, LR and updates per cycle) and minimise
 the v2 loss (#39 §1c-1d, §3; #49):
 
 ```
-CE(policy, visits) + 1.0·BCE(win_logit, o) + 0.3·SmoothL1(vp_margin_pred, m)
+CE(policy, π′) + 1.0·BCE(win_logit, o) + 0.3·SmoothL1(vp_margin_pred, m)
   + λ_h·L_human + 0.05·KL(π_θ ‖ π_anchor)
 ```
 

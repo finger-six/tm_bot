@@ -708,10 +708,14 @@ def test_warmstart_checkpoint_search_smoke_if_present() -> None:
     assert len(res.searched_decision_latencies_ms[0]) > 0
 
 
-def test_search_records_root_stats_of_the_last_searched_decision() -> None:
-    """`last_root_stats` holds the root priors, visits and value sums (#57 measurement hook)."""
+@pytest.mark.parametrize("root_rule", ["completed_q", "visits"])
+def test_search_records_root_stats_of_the_last_searched_decision(root_rule: str) -> None:
+    """`last_root_stats` holds the root priors, visits and value sums (#57 measurement hook);
+    `last_decision_policy` is π′ under the completed-Q rule (#60) and N/ΣN under the visit rule."""
+    from tm_bot.search.agent import completed_q_policy
+
     pv = _make_tiny_policy_value_agent(seed=11)
-    agent = ISMCTSAgent(pv, config=SearchConfig(num_simulations=4, num_worlds=2), seed=5)
+    agent = ISMCTSAgent(pv, config=SearchConfig(num_simulations=4, num_worlds=2, root_rule=root_rule), seed=5)
     agent.reset(3)
     assert agent.last_root_stats is None
     b0 = B0Agent(seed=1)
@@ -734,7 +738,12 @@ def test_search_records_root_stats_of_the_last_searched_decision() -> None:
     n = len(choice.candidates)
     assert priors.shape == visits.shape == value_sums.shape == (n,)
     assert visits.sum() == pytest.approx(4.0)
-    assert agent.last_decision_policy == pytest.approx(visits / visits.sum())
+    if root_rule == "visits":
+        assert agent.last_decision_policy == pytest.approx(visits / visits.sum())
+    else:
+        expected = completed_q_policy(priors, visits, value_sums, beta=3.0)
+        assert agent.last_decision_policy == pytest.approx(expected)
+        assert agent.last_decision_policy.sum() == pytest.approx(1.0)
     assert 0 <= idx < n
     agent.reset(4)
     assert agent.last_root_stats is None

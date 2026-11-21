@@ -40,9 +40,16 @@ For a searched decision the agent:
    game. The leaf is scored by the value head (or the exact terminal result), from the
    root actor's perspective. Under the v2 rules the leaf is (2p - 1) + 0.15·m̂ and a
    terminal is U = o + 0.15·m (see below).
-4. Picks the root action: most visits at temperature 0, otherwise sampled from
-   visits^(1/T). In the action phase T is τ(g) (`play_temperature`), or the flat v1
-   `action_temperature` when no schedule is set.
+4. Picks the root action from the root policy at temperature T: its argmax at T = 0,
+   otherwise sampled from policy^(1/T). In the action phase T is τ(g)
+   (`play_temperature`), or the flat v1 `action_temperature` when no schedule is set.
+   The root policy (`root_rule`) is, by default, the completed-Q improved policy
+   π′ ∝ prior · exp(β·Q̂) with β = 3 (#58, #60): Q̂ is each child's mean backed-up
+   utility from the root actor's view, unvisited children get the plain mean Q of the
+   visited ones, and T = 0 ties go to the higher prior. The v1 rule `"visits"` uses
+   N/ΣN (T = 0 ties by mean Q, then prior). A root without visits (0 simulations,
+   failed world sampling) plays the prior under either rule. The root policy is
+   recorded as `last_decision_policy`, the self-play policy target.
 
 Neural evaluation is batched on the GPU across all concurrent games: the runner groups
 searched decisions from every active game into one `act_batch_with_samplers` call, and
@@ -78,7 +85,8 @@ policy-head choice for that decision instead of failing the game (see
 
 `SearchConfig` fields: `num_simulations`, `num_worlds` (K), `c_puct`, `fpu_value`,
 `temperature`, `action_temperature`, `wave_size`, `max_nested_steps`,
-`play_temperature`, `margin_weight`.
+`play_temperature`, `margin_weight`, `root_rule` (`"completed_q"` default, or
+`"visits"`), `completed_q_beta` (3).
 
 ### v2 rules (#48)
 
@@ -87,15 +95,18 @@ policy-head choice for that decision instead of failing the game (see
 picks (`play_temperature`: 1.0 through generation 4, linear to 0.3 at generation
 10, 0.3 after), and utility weight `margin_weight = 0.15`.
 `SearchConfig.v2(fallback=True)` is the 8 x 4 fallback. Non-action roots keep
-`temperature` (0 = most visits). The agent records the τ it used in
-`last_decision_temperature`, and its version tag gains the τ spec and `-u0.15`
-(for example `ismcts-s16-k4-tau1g4-0.3g10-u0.15-warmstart-v3`).
+`temperature` (0 = argmax of the root policy). The root rule is completed-Q (#60).
+The agent records the τ it used in `last_decision_temperature`, and its version tag
+gains the τ spec, `-u0.15` and `-cq3` (for example
+`ismcts-s16-k4-tau1g4-0.3g10-u0.15-cq3-warmstart-v3`); the visit rule adds no tag.
 
 `make_warmstart_search_agent` plays v2 by default, at 16 x 4, or 8 x 4 with
 `search_fallback=True` or `TM_SEARCH_FALLBACK=1`. Passing an
 `action_temperature` (argument or `TM_SEARCH_ACTION_TEMP`) without
-`play_temperature` selects the v1 `"flat"` rules, so the v1 spec strings below
-reproduce unchanged. The #47 gate pins `"flat"`.
+`play_temperature` selects the v1 `"flat"` rules with the `"visits"` root rule, so
+the v1 spec strings below reproduce unchanged. `root_rule` (or
+`TM_SEARCH_ROOT_RULE`) overrides the root rule; the #47 gate pins `"flat"` with
+`"completed_q"`.
 
 ### v1 evaluated setting
 

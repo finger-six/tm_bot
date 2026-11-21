@@ -140,6 +140,25 @@ def test_eval_search_agent_defaults_to_v2_rules(
     _assert_search_agent_samples_at_tau(agent)
     fallback = make_warmstart_search_agent(checkpoint=ckpt, device="cpu", search_fallback=True)
     assert (fallback.config.num_simulations, fallback.config.num_worlds) == (8, 4)
+    assert agent.config.root_rule == fallback.config.root_rule == "completed_q"
+
+
+def test_eval_search_agent_root_rule_follows_the_play_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v1 `flat` specs keep the visit-count root rule (#60); `root_rule` overrides either."""
+    for var in ("TM_SEARCH_ACTION_TEMP", "TM_SEARCH_PLAY_TEMP", "TM_SEARCH_ROOT_RULE"):
+        monkeypatch.delenv(var, raising=False)
+    ckpt = save_checkpoint(tmp_path / "eval.pt", _tiny_model(seed=3), _VOCAB)
+    v1 = make_warmstart_search_agent(checkpoint=ckpt, device="cpu", action_temperature=1.0)
+    assert v1.config.root_rule == "visits"
+    assert v1.version == "ismcts-s8-k4-" + v1.policy_agent.version
+    gate = make_warmstart_search_agent(
+        checkpoint=ckpt, device="cpu", play_temperature="flat", root_rule="completed_q"
+    )
+    assert gate.config.root_rule == "completed_q" and "-cq3-" in gate.version
+    monkeypatch.setenv("TM_SEARCH_ROOT_RULE", "visits")
+    assert make_warmstart_search_agent(checkpoint=ckpt, device="cpu").config.root_rule == "visits"
 
 
 def test_no_learned_comparator_seat_runs_at_tau_zero(tmp_path: Path) -> None:
