@@ -49,7 +49,7 @@ from tm_bot.runs.monitoring import (
     latency_summary,
     vp_margin_bucket,
 )
-from tm_bot.runs.resources import check_learner_memory
+from tm_bot.runs.resources import check_learner_memory, current_rss_bytes
 from tm_bot.runs.selfplay import (
     SelfPlayBatch,
     SelfPlayEngine,
@@ -143,6 +143,12 @@ def _rel(path: Path, base: Path) -> str:
         return os.path.relpath(path, base)
     except ValueError:  # pragma: no cover - different drives on Windows
         return str(path)
+
+
+def _rss_gb() -> float | None:
+    """Learner process RSS in GiB, the quantity `check_learner_memory` guards."""
+    rss = current_rss_bytes()
+    return None if rss is None else rss / 1024**3
 
 
 def _resolve(path: str, base: Path) -> Path:
@@ -647,8 +653,12 @@ class SelfPlayRunner:
         games = batch.games
         completed = [g for g in games if g.ok]
         generations = [int(g.generations) for g in completed if g.generations is not None]
+        generation_counts: dict[str, int] = {}
+        for gen in generations:
+            generation_counts[str(gen)] = generation_counts.get(str(gen), 0) + 1
         margins: list[float] = []
         wins = losses = ties = 0
+        by_opponent: dict[str, dict[str, int]] = {}
         for i, g in enumerate(games):
             if not g.ok or g.scores is None:
                 continue
@@ -656,10 +666,18 @@ class SelfPlayRunner:
             margins.append(float(g.scores[seat] - g.scores[1 - seat]))
             if g.tie:
                 ties += 1
+                result = "ties"
             elif g.winner == seat:
                 wins += 1
+                result = "wins"
             else:
                 losses += 1
+                result = "losses"
+            if i < len(batch.opponent_kinds):
+                counts = by_opponent.setdefault(
+                    batch.opponent_kinds[i], {"wins": 0, "losses": 0, "ties": 0}
+                )
+                counts[result] += 1
         histogram: dict[str, int] = {}
         for margin in margins:
             label = vp_margin_bucket(margin)
@@ -695,6 +713,9 @@ class SelfPlayRunner:
             min_generations=(int(min(generations)) if generations else None),
             max_generations=(int(max(generations)) if generations else None),
             median_generations=(float(np.median(generations)) if generations else None),
+            generation_counts=generation_counts,
+            results_by_opponent=by_opponent,
+            rss_gb=_rss_gb(),
             mean_vp_margin=(float(np.mean(margins)) if margins else None),
             vp_histogram=histogram,
             opponent_kinds=kinds,
@@ -974,6 +995,8 @@ class SelfPlayRunner:
             new_best_route=route,
             dev_eval_wall_s=eval_wall_s,
             dev_eval_interval_s=self.dev_eval_interval_s,
+            dev_eval_baseline_s=baseline_s,
+            rss_gb=_rss_gb(),
         )
         self.logger.log_checkpoint(record)
         decision = self.stopping.observe_checkpoint(record)

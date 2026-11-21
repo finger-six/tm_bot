@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -32,6 +32,11 @@ from tm_bot.search.config import (
 
 DEFAULT_RUNS_DIR = Path("runs")
 WARMSTART_CHECKPOINT_ENV = "TM_SEARCH_CHECKPOINT"
+
+# The 1 h development gate before a 24 h run (#40 section 3, #52): 1 h of training
+# clock, dev evaluation at 30 and 60 min. The 24 h runs keep the 60-min cadence.
+DEV_GATE_BUDGET_S = 3600.0
+DEV_GATE_DEV_EVAL_INTERVAL_S = 30.0 * 60.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +165,8 @@ class RunConfig:
     dev_eval_interval_s: float = 60.0 * 60.0
     dev_eval_cost_fraction: float = 0.40
     dev_anchor_games: int = 56
+    # True for a 1 h development gate run (`dev_gate_config`, #52).
+    dev_gate: bool = False
 
     # Stopping rules (#40 section 1).
     entropy_collapse_fraction: float = 0.10
@@ -348,3 +355,17 @@ class RunConfig:
     @classmethod
     def load(cls, path: str | Path) -> RunConfig:
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def dev_gate_config(config: RunConfig) -> RunConfig:
+    """`config` as a 1 h development gate run (#40 section 3, #52).
+
+    Only the training-clock budget and the dev cadence change: search, rules,
+    opponents and checkpoint come from `config`, as they will for the 24 h run.
+    """
+    return replace(
+        config,
+        wall_clock_budget_s=DEV_GATE_BUDGET_S,
+        dev_eval_interval_s=DEV_GATE_DEV_EVAL_INTERVAL_S,
+        dev_gate=True,
+    )

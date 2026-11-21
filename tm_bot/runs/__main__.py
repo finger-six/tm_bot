@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from tm_bot.runs.config import ResourceLimits, RunConfig
+from tm_bot.runs.config import ResourceLimits, RunConfig, dev_gate_config
 from tm_bot.runs.orchestrator import SelfPlayRunner
+from tm_bot.search.config import V2_NUM_SIMULATIONS, V2_NUM_WORLDS
 
 
-def main(argv: list[str] | None = None) -> int:
+def parse_config(argv: list[str] | None = None) -> tuple[RunConfig, argparse.Namespace]:
+    """Parse the CLI into the run config (and the remaining run options)."""
     parser = argparse.ArgumentParser(
         description="Self-play training run for the Terraforming Mars main agent."
     )
@@ -24,13 +26,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--budget-hours", type=float, default=24.0, help="Training-time budget (wall clock minus in-run dev eval).")
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--sims", type=int, default=16, help="Simulations per searched decision.")
+    parser.add_argument(
+        "--sims", type=int, default=V2_NUM_SIMULATIONS, help="Simulations per searched decision."
+    )
     parser.add_argument(
         "--search-fallback",
         action="store_true",
         help="Use the #39 fallback search budget: 8 simulations x K = 4.",
     )
-    parser.add_argument("--worlds", type=int, default=4, help="Determinizations (K).")
+    parser.add_argument(
+        "--worlds", type=int, default=V2_NUM_WORLDS, help="Determinizations (K)."
+    )
     parser.add_argument("--games-per-cycle", type=int, default=32)
     parser.add_argument("--updates-per-cycle", type=int, default=16)
     parser.add_argument("--learner-batch-size", type=int, default=256)
@@ -62,6 +68,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--disk-gb", type=float, default=50.0)
     parser.add_argument("--vram-gb", type=float, default=12.0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--gate-1h",
+        action="store_true",
+        help=(
+            "1 h development gate (#52): 1 h of training clock with dev evaluation at "
+            "30 and 60 min; overrides --budget-hours and --dev-eval-minutes. Check the "
+            "finished run with `python -m tm_bot.runs.dev_gate runs/<run-name>`."
+        ),
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--max-cycles", type=int, default=None)
     args = parser.parse_args(argv)
@@ -103,6 +118,13 @@ def main(argv: list[str] | None = None) -> int:
         ppo_entropy_coef=args.ppo_entropy_coef,
         limits=ResourceLimits(disk_gb=args.disk_gb, vram_gb=args.vram_gb),
     )
+    if args.gate_1h:
+        config = dev_gate_config(config)
+    return config, args
+
+
+def main(argv: list[str] | None = None) -> int:
+    config, args = parse_config(argv)
     runner = SelfPlayRunner.create(config)
     summary = runner.run(resume=args.resume, max_cycles=args.max_cycles)
     print(summary.to_dict())

@@ -1996,3 +1996,113 @@ def test_game_shape_stop_fires_after_two_training_hours_of_long_games(tmp_path: 
     assert runner.logger.cycles[-1].median_generations == pytest.approx(30.0)
     # Calibration stops the comparator only; for main it is a diagnostic.
     assert runner.stopping.calibration_stops is False
+
+
+# --- 11. 1 h development gate (#52) ------------------------------------------
+_GATE_KINDS = ("pool", "pool", "anchor", "anchor", "latest", "latest", "b1", "b1")
+
+
+class _GateEngine(_ClockedEngine):
+    """Every opponent kind in seat-swapped pairs: the learner seat wins half of each."""
+
+    def play_batch(self, num_games: int, *, stop_when=None) -> SelfPlayBatch:
+        batch = super().play_batch(num_games, stop_when=stop_when)
+        batch.games = [
+            dataclasses.replace(g, generations=14 + (i % 3)) for i, g in enumerate(batch.games)
+        ]
+        batch.training_seats = [i % 2 for i in range(num_games)]
+        batch.opponent_kinds = [_GATE_KINDS[i % len(_GATE_KINDS)] for i in range(num_games)]
+        return batch
+
+
+def test_gate_run_logs_what_the_checker_needs_and_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from tm_bot.runs import dev_gate, orchestrator
+    from tm_bot.runs.config import dev_gate_config
+
+    monkeypatch.setattr(orchestrator, "current_rss_bytes", lambda: int(3.0 * 1024**3))
+    now = [0.0]
+    config = dev_gate_config(
+        _run_config(
+            tmp_path,
+            "gate",
+            warmstart_checkpoint=str(tmp_path / "warmstart"),
+            games_per_cycle=48,
+            checkpoint_interval_s=1800.0,
+            dev_eval_cost_fraction=0.40,
+            keep_last_checkpoints=10,
+        )
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_GateEngine(now, 600.0),
+        learner=_FakeLearner(),
+        evaluator=_clocked_dev(now, 100.0),
+        model=_tiny_model(seed=31),
+        vocab=_VOCAB,
+        clock=lambda: now[0],
+    )
+    summary = runner.run()
+    assert summary.stop.kind is StopKind.BUDGET
+    # Dev evaluation at 30 and 60 min of training clock.
+    evals = runner.logger.checkpoints
+    assert [e.training_s for e in evals] == pytest.approx([1800.0, 3600.0])
+    # The first evaluation also measures the anchor's own D vs b1-v2, once.
+    assert [e.dev_eval_baseline_s for e in evals] == pytest.approx([100.0, 0.0])
+    assert summary.anchor_dev_score is not None
+    assert all(e.rss_gb == pytest.approx(3.0) for e in evals)
+    cycle = runner.logger.cycles[0]
+    assert cycle.generation_counts == {"14": 16, "15": 16, "16": 16}
+    assert cycle.results_by_opponent["pool"] == {"wins": 6, "losses": 6, "ties": 0}
+    assert cycle.rss_gb == pytest.approx(3.0)
+
+    gate = dev_gate.load_gate_summary(config.run_dir)
+    assert gate.dev_gate is True
+    assert gate.selfplay_games == 6 * 48
+    assert gate.generation_counts == {14: 96, 15: 96, 16: 96}
+    assert gate.results_by_opponent["anchor"] == {"wins": 36, "losses": 36, "ties": 0}
+    assert gate.dev_eval_s == pytest.approx(300.0 + 200.0)
+    assert gate.rss_gb_max == pytest.approx(3.0)
+    report = dev_gate.evaluate_gate(gate)
+    assert report.passed, dev_gate.render_markdown(report)
+
+    assert dev_gate.main([str(config.run_dir)]) == 0
+    assert "**PASS**" in capsys.readouterr().out
+
+
+def test_gate_checker_exits_nonzero_on_a_failed_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from tm_bot.runs import dev_gate, orchestrator
+    from tm_bot.runs.config import dev_gate_config
+
+    # No RSS reading (an inert guard) and 8 games per 10 min (48/h) both fail.
+    monkeypatch.setattr(orchestrator, "current_rss_bytes", lambda: None)
+    now = [0.0]
+    config = dev_gate_config(
+        _run_config(
+            tmp_path,
+            "gate-fail",
+            warmstart_checkpoint=str(tmp_path / "warmstart"),
+            games_per_cycle=8,
+            checkpoint_interval_s=1800.0,
+            dev_eval_cost_fraction=0.40,
+        )
+    )
+    SelfPlayRunner(
+        config,
+        engine=_GateEngine(now, 600.0),
+        learner=_FakeLearner(),
+        evaluator=_clocked_dev(now, 100.0),
+        model=_tiny_model(seed=32),
+        vocab=_VOCAB,
+        clock=lambda: now[0],
+    ).run()
+    out = tmp_path / "gate-fail.md"
+    assert dev_gate.main([str(config.run_dir), "--out", str(out)]) == 1
+    text = capsys.readouterr().out
+    assert out.read_text(encoding="utf-8") == text
+    failed = [line for line in text.splitlines() if "| **FAIL** |" in line]
+    assert [line.split("|")[2].strip() for line in failed] == ["Throughput", "Resources"]
+    assert "--search-fallback" in text

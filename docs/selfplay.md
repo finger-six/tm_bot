@@ -379,6 +379,54 @@ metrics stream, restores the seed cursor and stopping counters, and continues
 the run. Checkpoints are named by a monotonic save counter (`ckpt-000000001`,
 `ckpt-000000002`, ...) so two saves with the same learner step never collide.
 
+## 1 h development gate (#52)
+
+Before a 24 h run, each agent runs 1 h of training clock under the full v2
+rules with `--gate-1h` (`dev_gate_config` in
+[`config.py`](../tm_bot/runs/config.py)): the budget becomes 1 h and dev
+evaluation runs at 30 and 60 min (this 30-min cadence is for the gate only; the
+24 h runs keep the 60-min cost-capped cadence). Search, rules, opponents and
+the checkpoint come from the same flags as the 24 h run, so a later change to
+them carries through. Then
+[`tm_bot/runs/dev_gate.py`](../tm_bot/runs/dev_gate.py) reads the finished run
+directory, prints a Markdown report and exits 1 if any check fails (#40
+section 3):
+
+| # | Check | Pass when |
+| ---: | --- | --- |
+| 1 | Legality | 0 failures (self-play and dev), 0 adapter rejections, 0 step-cap hits |
+| 2 | Game shape | self-play median <= 18 generations, p95 <= 25, no game > 40 |
+| 3 | Throughput | self-play games per training hour: main >= 250, comparator >= 800 |
+| 4 | Symmetry | learner-seat win share vs the pool and vs the anchor each in [35%, 65%] (a tie counts half) |
+| 5 | Cost | cumulative dev-eval wall time <= 40% of the training clock |
+| 6 | Positive signal at 60 min | evaluations at 30 and 60 min; at 60 min `a >= 0.45` and `D` >= the anchor's own `D` vs `b1-v2`; the run stopped on `budget` |
+| 7 | Resources | max learner RSS <= the 20.0 GiB guard, read every cycle and after every dev evaluation, and no `resource_limit` stop |
+
+The anchor's `D` is the existing one-time baseline: the first dev evaluation
+plays the warm-start anchor against `b1-v2` on the same 104 `dev-*` seeds
+(`anchor_dev_score` in `run_summary.json`). Its wall time counts toward check 5
+and is also reported separately (`dev_eval_baseline_s`). For the gate, cycle
+records add per-generation game counts (`generation_counts`), the learner
+seat's W/L/T per opponent kind (`results_by_opponent`) and `rss_gb`.
+
+```bash
+# Main agent at 16/4. Use the main warm start that passed #47.
+conda run -n tm_bot python -m tm_bot.runs --gate-1h --run-name gate-main-v2 --warmstart runs/warmstart-v3/best
+conda run -n tm_bot python -m tm_bot.runs.dev_gate runs/gate-main-v2 --out runs/gate-main-v2/dev_gate.md
+
+# If check 3 fails at 16/4: the 8/4 fallback.
+conda run -n tm_bot python -m tm_bot.runs --gate-1h --run-name gate-main-v2-8x4 --search-fallback --warmstart runs/warmstart-v3/best
+conda run -n tm_bot python -m tm_bot.runs.dev_gate runs/gate-main-v2-8x4 --out runs/gate-main-v2-8x4/dev_gate.md
+```
+
+Pass `--warmstart` explicitly: without it the main agent falls back to the v1
+warm start (`runs/warmstart/best`). `--json` prints the report as JSON. The
+comparator's gate is in [comparator.md](comparator.md#1-h-development-gate-52).
+Each gate run takes 1 h of training clock plus its dev evaluation: 312 dev
+games at 30 min (anchor baseline, `b1-v2`, incumbent = anchor) and 208 at
+60 min (264 if the 30-min checkpoint became the best). Check 5 therefore needs at least
+about 1,300 dev games per wall hour.
+
 ## Results
 
 ### Development run (2026-11-14)

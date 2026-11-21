@@ -92,6 +92,12 @@ class CycleMetrics:
     dev_eval_s: float | None = None
     # Self-play game-shape stop rule input (#40 section 1).
     median_generations: float | None = None
+    # 1 h development gate inputs (#52): completed games per generation count
+    # (keys are str(generations)), the learner seat's wins/losses/ties per opponent
+    # kind, and the learner process RSS in GiB read at the end of the cycle.
+    generation_counts: dict[str, int] = field(default_factory=dict)
+    results_by_opponent: dict[str, dict[str, int]] = field(default_factory=dict)
+    rss_gb: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -139,6 +145,10 @@ class CheckpointMetrics:
     # Wall clock of this evaluation and the cadence it leaves (#40 section 2).
     dev_eval_wall_s: float | None = None
     dev_eval_interval_s: float | None = None
+    # Wall clock of the one-time anchor `b1-v2` baseline inside this evaluation, and
+    # the learner process RSS in GiB right after it (#52).
+    dev_eval_baseline_s: float = 0.0
+    rss_gb: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)

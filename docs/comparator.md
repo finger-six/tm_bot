@@ -314,6 +314,18 @@ conda run -n tm_bot python -m tm_bot.comparator.calibration \
 #   tm_bot.comparator:make_comparator_agent?checkpoint=<dir>&device=cuda
 ```
 
+## 1 h development gate (#52)
+
+The comparator runs the same 1 h gate as the main agent before its 24 h run
+(checks and thresholds in [selfplay.md](selfplay.md#1-h-development-gate-52)),
+with a throughput floor of 800 self-play games per training hour. The 8/4
+search fallback does not apply: the comparator scores candidates directly.
+
+```bash
+conda run -n tm_bot python -m tm_bot.runs --gate-1h --run-name gate-comparator-v2 --agent-kind comparator --warmstart runs/comparator-warmstart-v2/best
+conda run -n tm_bot python -m tm_bot.runs.dev_gate runs/gate-comparator-v2 --out runs/gate-comparator-v2/dev_gate.md
+```
+
 ## Acceptance evidence
 
 - No shared parameters: `tests/test_comparator.py::test_comparator_shares_no_parameters_with_main_agent`.
