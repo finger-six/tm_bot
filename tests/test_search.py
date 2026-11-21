@@ -706,3 +706,35 @@ def test_warmstart_checkpoint_search_smoke_if_present() -> None:
         assert client.ping()["games"] == 0
     assert res.ok is True
     assert len(res.searched_decision_latencies_ms[0]) > 0
+
+
+def test_search_records_root_stats_of_the_last_searched_decision() -> None:
+    """`last_root_stats` holds the root priors, visits and value sums (#57 measurement hook)."""
+    pv = _make_tiny_policy_value_agent(seed=11)
+    agent = ISMCTSAgent(pv, config=SearchConfig(num_simulations=4, num_worlds=2), seed=5)
+    agent.reset(3)
+    assert agent.last_root_stats is None
+    b0 = B0Agent(seed=1)
+    with WorkerClient() as client:
+        with client.open("search-root-stats-1", "tharsis") as live:
+            while seats := live.pending():
+                seat = seats[0]
+                obs, choice = live.observe(seat), live.choice(seat)
+                if seat == 0 and is_search_decision(obs, choice):
+                    sampler = open_world_samplers(client, [(live.game_id, 0)])[0]
+                    try:
+                        idx = agent.act_with_sampler(obs, choice, sampler)
+                    finally:
+                        release_samplers([sampler])
+                    break
+                live.choose(seat, b0.act(obs, choice))
+
+    assert agent.last_root_stats is not None
+    priors, visits, value_sums = agent.last_root_stats
+    n = len(choice.candidates)
+    assert priors.shape == visits.shape == value_sums.shape == (n,)
+    assert visits.sum() == pytest.approx(4.0)
+    assert agent.last_decision_policy == pytest.approx(visits / visits.sum())
+    assert 0 <= idx < n
+    agent.reset(4)
+    assert agent.last_root_stats is None

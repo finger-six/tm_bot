@@ -190,6 +190,9 @@ class ISMCTSAgent:
         # decisions, policy-head probabilities at policy decisions, one-hot when forced. Used as
         # the self-play policy target and for entropy monitoring (#24).
         self.last_decision_policy: np.ndarray | None = None
+        # Root statistics `(priors, visit counts N, value sums W)` of the last searched
+        # decision (None before one). Measurement only (#57); actions never read it.
+        self.last_root_stats: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
 
     @property
     def model(self) -> TMNetwork:
@@ -209,6 +212,7 @@ class ISMCTSAgent:
         self.last_decision_latency_ms = 0.0
         self.last_decision_policy = None
         self.last_decision_temperature = None
+        self.last_root_stats = None
 
     def __deepcopy__(self, memo: dict[int, Any]) -> ISMCTSAgent:
         cls = self.__class__
@@ -224,6 +228,7 @@ class ISMCTSAgent:
         clone.last_decision_latency_ms = 0.0
         clone.last_decision_policy = None
         clone.last_decision_temperature = None
+        clone.last_root_stats = None
         return clone
 
     def search_batch_key(self) -> tuple[int, int, str]:
@@ -714,6 +719,7 @@ class ISMCTSAgent:
                     if total_visits > 0.0
                     else np.asarray(root.priors, dtype=np.float64).copy()
                 )
+                st.agent.last_root_stats = (root.priors.copy(), root.N.copy(), root.W.copy())
 
         finally:
             close_pairs = [
