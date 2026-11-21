@@ -375,7 +375,8 @@ class PPOStats:
     """Aggregated learner metrics for one cycle.
 
     Loss terms are unweighted cycle means (`total_loss` is the weighted sum including
-    λ_h·L_human). Terms that never applied are None.
+    λ_h·L_human). `entropy` and `mean_ratio` are the last update's values. Terms that
+    never applied are None.
     """
 
     updates: int = 0
