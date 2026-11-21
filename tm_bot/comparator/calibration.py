@@ -92,6 +92,28 @@ def fit_temperature(
     }
 
 
+def fit_midgame_temperature(
+    logits: Sequence[float],
+    targets: Sequence[float],
+    generations: Sequence[int],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Fit the temperature on generation 2+ value logits only (#38 §4, #46).
+
+    Generation-1 setup-outcome rows are excluded: the calibrated win probability serves mid-game
+    play, and post-setup outcomes are a different, much less predictable regime.
+    """
+    gen = np.asarray(generations, dtype=np.int64)
+    logit_arr = np.asarray(logits, dtype=np.float64)
+    target_arr = np.asarray(targets, dtype=np.float64)
+    if not (gen.size == logit_arr.size == target_arr.size):
+        raise ValueError("logits, targets and generations must have the same length")
+    keep = gen >= 2
+    fit = fit_temperature(logit_arr[keep], target_arr[keep], **kwargs)
+    fit["excluded_gen1"] = int((~keep).sum())
+    return fit
+
+
 def calibration_metrics(
     probs: Sequence[float],
     targets: Sequence[float],

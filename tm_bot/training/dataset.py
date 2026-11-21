@@ -135,6 +135,8 @@ class SetupOutcomesTable:
     chosen_proj_len: np.ndarray  # uint8[K]
     won: np.ndarray  # float32[K]
     split_indices: dict[str, np.ndarray]
+    # Final `my_vp - opp_vp`; NaN when the table predates the column (v1).
+    vp_margin: np.ndarray | None = None  # float32[K]
 
     @property
     def num_rows(self) -> int:
@@ -378,18 +380,17 @@ def _load_draft_picks(
 
 
 def _load_setup_outcomes(path: Path, vocab: CardVocab) -> SetupOutcomesTable:
-    table = pq.read_table(
-        path,
-        columns=[
-            "map",
-            "seat",
-            "split",
-            "chosen_corporation",
-            "chosen_preludes",
-            "chosen_projects",
-            "won",
-        ],
-    )
+    columns = [
+        "map",
+        "seat",
+        "split",
+        "chosen_corporation",
+        "chosen_preludes",
+        "chosen_projects",
+        "won",
+    ]
+    has_margin = "vp_margin" in pq.read_schema(path).names
+    table = pq.read_table(path, columns=columns + (["vp_margin"] if has_margin else []))
     k = table.num_rows
     map_id = np.empty(k, dtype=np.uint8)
     seat = np.empty(k, dtype=np.uint8)
@@ -423,6 +424,12 @@ def _load_setup_outcomes(path: Path, vocab: CardVocab) -> SetupOutcomesTable:
             chosen_projects[i, : len(cj_ids)] = cj_ids[:10]
         won[i] = 1.0 if bool(wons[i]) else 0.0
 
+    vp_margin = np.full(k, np.nan, dtype=np.float32)
+    if has_margin:
+        for i, m in enumerate(table["vp_margin"].to_pylist()):
+            if m is not None:
+                vp_margin[i] = float(m)
+
     return SetupOutcomesTable(
         map_id=map_id,
         seat=seat,
@@ -433,6 +440,7 @@ def _load_setup_outcomes(path: Path, vocab: CardVocab) -> SetupOutcomesTable:
         chosen_proj_len=chosen_proj_len,
         won=won,
         split_indices=_split_dict(split),
+        vp_margin=vp_margin,
     )
 
 

@@ -14,7 +14,6 @@ from tm_bot.training.dataset import (
 from tm_bot.training.train_warmstart import (
     TrainConfig,
     compute_multitask_step_losses,
-    format_comparison_report,
     run_warmstart_training,
     soft_cross_entropy,
     train_one_step,
@@ -45,7 +44,6 @@ __all__ = [
     "build_setup_outcome_observation",
     "compute_multitask_step_losses",
     "evaluate_model",
-    "format_comparison_report",
     "load_map_templates",
     "load_warmstart_corpus",
     "normalize_map_name",

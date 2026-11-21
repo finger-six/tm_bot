@@ -139,3 +139,50 @@ Numbers are from the `warmstart-v2` run (draft rows carry draft history, opponen
 - **Player-holdout**: `N/A` (corpus contributors appear in all splits)
 - **Model parameters**: `4,459,330`
 - **Training wall-clock**: `3,295.4s` (`54.92 min`, 4 epochs on RTX 4080 Super)
+
+## 5. v2 Warm Start (#46)
+
+Both agents' v2 warm starts (`warmstart-v3` for `TMNetwork`, `comparator-warmstart-v2` for `ComparatorNetwork`) run one shared trainer, [`tm_bot/training/multitask.py`](../tm_bot/training/multitask.py), with one `WarmstartConfig` (decisions in #38 §4). The v1 sections above stay as the record of the v1 runs.
+
+```
+python -m tm_bot.training.encoded_cache --data-dir data/warmstart          # optional: the trainers build it on demand
+python -m tm_bot.training.train_warmstart --data-dir data/warmstart --out-dir runs/warmstart-v3
+python -m tm_bot.comparator.warmstart --data-dir data/warmstart --out-dir runs/comparator-warmstart-v2
+```
+
+### Tasks, sampling and loss
+
+| Task | Source | Minibatch / step | Loss | Weight |
+| --- | --- | ---: | --- | ---: |
+| Corporation | `setup_choices` (gen 1) | 256 (one shared encoding) | CE | 0.40 |
+| Prelude | `setup_choices` | same rows | soft CE (sequential) | 0.40 |
+| Initial project buy | `setup_choices` | same rows | soft CE (sequential, `done`) | 0.30 |
+| Draft pick (gen 2+ state) | `draft_picks` | 512 | CE | 0.80 |
+| Research buy | `research_buys` | 512 | soft CE (sequential, `done`) | 0.70 |
+| Root branch | `action_branches` | 512 | CE | 1.00 |
+| Project card play | `action_project_cards` | 512 | CE | 1.00 |
+| Standard project | `action_standard_projects` | 256 | CE | 0.40 |
+| Card action | `action_card_actions` | 256 | CE | 0.40 |
+| Value: win | 512 = 102 `setup_outcomes` + 205 `midgame_values` research + 205 action | 512 | BCE on `win_logit` | 0.80 |
+| Value: VP margin | same rows | | SmoothL1 (β 0.2) on `clip(margin, ±60) / 50` | 0.30 |
+
+- The two gen 2+ value kinds are told apart by the `midgame_values.phase` column (`research` at a generation boundary, `action` for the strided action points). Every v2 value row carries `vp_margin`; a row without one (e.g. the v1 `setup_outcomes` backup) gets no margin loss.
+- Research buys use the adapter's sequential `multi_card` frame like the initial project buy: each sample picks a uniform number of the bought cards, the target is uniform over the unpicked bought cards, or `done` once all are picked.
+- Each task walks its own shuffled train permutation, so the 6M+ action rows can't crowd out setup, research buys or value. Each forward group is back-propagated as soon as it is computed (same gradient as the summed loss, one group's activations alive at a time).
+- Budget, identical for both agents: 6 epochs × 2,500 = 15,000 AdamW steps, `lr 5e-4 → 3e-5` cosine after 500 warmup steps, weight decay `2e-4`, grad clip 1.0, bf16 autocast. `tests/test_warmstart_v2.py` asserts both agents' CLI configs are equal and pins every number above.
+
+### Encoded cache (throughput)
+
+The reference builders (`warmstart_builder.build_*`) plus `encode_observation`/`encode_choice` cost 0.42–0.46 ms per gen 2+ row on one core (measured on a 1,000-file sample, 70–97 card tokens per row). A step draws ~3,000 gen 2+ rows, so on-the-fly encoding would be ~1.35 CPU-s per step: ~5.6 CPU-hours per agent, 11 h for both.
+
+Instead [`encoded_cache.py`](../tm_bot/training/encoded_cache.py) encodes every row once (16 worker processes, ~10k rows/s) into flat memory-mapped arrays under `<data-dir>_cache/` (default `data/warmstart_cache/`; ~1.5 KB per row on disk). Both agents share it; a cache is rebuilt automatically when its parquet file, the encoder version or the card vocabulary changes. Gathering a padded batch from it costs ~0.01 ms per row (the whole step's sampling, setup batches included, ~34 ms), so training is GPU-bound. Only small per-row fields sit in RAM; observation scalars, card tokens and candidates are read through `np.memmap`.
+
+Exactness: the cache stores the encoder's own outputs, with the board taken from the per-map template (asserted identical on every row) and candidate features restricted to the columns those prompt kinds can set (asserted zero elsewhere). `tests/test_warmstart_v2.py` checks, for every row of every task of the golden table pair (research buys: every picked subset), that the cached batch equals `collate_encoded_batch(encode_*(build_*(row)))`; a one-off check on 1,500 random real rows per task (10,500 rows) also matched exactly.
+
+### Selection, metrics and calibration
+
+- Checkpoint selection after each 2,500-step epoch on the val split: `0.25 · mean(corp, prelude step-0, draft, research-buy step-0) + 0.50 · mean(branch, project play, standard project, card action) + 0.25 · max(0, 1 − gen 2+ value Brier / 0.25)`. Research-buy accuracy is step-0 accuracy (the top candidate is one of the bought cards); done-stop accuracy is reported alongside.
+- Reports give per-task top-1 overall, per map and per generation bucket (`gen 1`, `2–5`, `6–9`, `10+`), and value accuracy / Brier / ECE per bucket, per phase and per map, for both agents.
+- The comparator's temperature is fit on gen 2+ val value logits only (`calibration.fit_midgame_temperature`); its report adds the calibrated value table.
+- The test split is not evaluated by these runs; it stays reserved for the pre-self-play gate (#47).
+- Checkpoints carry `version`, `warmstart_data_version: 2`, `encoder_version`, the model config (whose `encoder_version` the loaders check), the full train config, table sizes, the composite inputs and the Markdown report; `best/report.md` and `metrics.json` sit beside them.
