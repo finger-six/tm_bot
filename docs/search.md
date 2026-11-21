@@ -141,11 +141,27 @@ Sampler fallbacks (`world sampling failed` / `belief root sampling failed` warni
   (and nested action-phase sub-choices from the policy head) instead of taking the
   argmax. With an untrained action policy, argmax play tends to repeat the same
   low-value actions; sampling keeps games progressing.
-- **Belief sampler failures.** In rare search-agent trajectories the actor-consistent
-  belief became unsatisfiable (`Not enough unseen projects`, `opponentHand exceeded
-  opponentHandSize`): 2 of 400 games in the first run vs B0, not reproducible from the
-  same seeds in later runs (batch composition changes the GPU numerics and therefore
-  the trajectory). Random-play fuzzing (734,878 sampler calls on all 50 `eval-*` seeds,
-  plus `npm run fuzz:determinize`) never hits it. The agent now falls back to the policy
-  head for such a decision instead of failing the game; the unseen-pool bookkeeping bug
-  itself is tracked in #31 (replaying the 80 logged search games: 201,504 sampler calls, 0 failures).
+- **Belief sampler failures (fixed, #31).** In the first run vs B0, which used a
+  pre-commit version of #23, the actor-consistent belief became unsatisfiable in 2 of
+  400 games (`Not enough unseen projects: need 169, have 151`; related:
+  `opponentHand exceeded opponentHandSize`). Root cause: two paths left stale cards in
+  `knownProjectDiscardPile` after the deck reshuffled the discard pile, so the belief
+  claimed more known discards than the pile held. (1) Drafted cards the actor did not
+  buy were counted as actor-acquired, so after a reshuffle they stayed in the known
+  discard pile. (2) A `Discarded N cards` batch that spans a reshuffle was credited to
+  the new pile (the `spansReshuffle` guard in `adapter/src/determinize.ts`). Both were
+  fixed in the #23 commit (ea97aa5), before the reported runs above.
+  - Regression tests: the two reshuffle tests in `adapter/test/clone.test.ts` make the
+    post-reshuffle belief exactly tight and sweep 64 sampler seeds
+    (`assertSamplesEverySeed`). With either stale path restored, they throw the original
+    `Not enough unseen projects` error.
+  - `npm run fuzz:determinize` checks at every truth check that the belief contains the
+    truth (`beliefViolations`: deck cards unseen, known discards in the discard pile,
+    known and possible opponent cards placed correctly): 7,316 checks, 0 violations.
+  - A fresh 400-game search-vs-B0 eval on the fixed code
+    (`data/reports/issue31_search_vs_b0/`): 400/400 completed, 0 failures, 0 sampler
+    fallback warnings (stderr empty). Its headline numbers match the reported run above
+    (62.00% [56.75%, 67.25%], +6.87 VP, 23.69 generations per game); #31's commit
+    (b5e3215) changed only tests and the fuzz script, not the runtime.
+  - The agent keeps the policy-head fallback for a decision with no sampleable world, as
+    a safety net; it is no longer expected to fire.
