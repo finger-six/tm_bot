@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
+from pathlib import Path
 
+import pyarrow.parquet as pq
+
+from tm_bot.data.extract import run_extraction
+from tm_bot.data.inventory import run_inventory
 from tm_bot.data.splits import assign_split, compute_player_holdout_tables
+
+_GOLDEN = Path(__file__).resolve().parent / "fixtures" / "golden_v2"
+_REPO = Path(__file__).resolve().parents[1]
 
 
 def test_assign_split_is_deterministic_and_independent_of_pythonhashseed() -> None:
@@ -54,3 +63,45 @@ def test_compute_player_holdout_tables() -> None:
 
     holdout = compute_player_holdout_tables(table_players, table_splits)
     assert holdout == {"t_test_holdout"}
+
+
+def _table_ids_covering_all_splits() -> list[str]:
+    found: dict[str, str] = {}
+    tid = 920000000
+    while len(found) < 3:
+        split = assign_split(str(tid))
+        found.setdefault(split, str(tid))
+        tid += 1
+    return sorted(found.values())
+
+
+def test_split_determinism_over_v2_tables(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    table_ids = _table_ids_covering_all_splits()
+    for tid in table_ids:
+        for pid in ("10000001", "10000002"):
+            data = json.loads((_GOLDEN / pid / f"game_900000001_{pid}.json").read_text(encoding="utf-8"))
+            data["table_id"] = data["replay_id"] = tid
+            dest = archive / pid
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / f"game_{tid}_{pid}.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    index = tmp_path / "index.sqlite"
+    run_inventory(archive, index, progress_interval=0)
+
+    runs = []
+    for name in ("run1", "run2"):
+        run_extraction(archive, index, tmp_path / name,
+                       card_registry_path=_REPO / "data" / "card_registry.json", progress_interval=0)
+        runs.append(tmp_path / name)
+
+    for table in ("draft_picks", "research_buys", "midgame_values"):
+        rows1 = pq.read_table(runs[0] / f"{table}.parquet").to_pylist()
+        rows2 = pq.read_table(runs[1] / f"{table}.parquet").to_pylist()
+        assert rows1 and rows1 == rows2, table
+        assert {r["table_id"] for r in rows1} == set(table_ids), table
+        for r in rows1:
+            assert r["split"] == assign_split(r["table_id"]), (table, r["table_id"])
+        flags: dict[str, set[bool]] = {}
+        for r in rows1:
+            flags.setdefault(r["table_id"], set()).add(r["is_player_holdout"])
+        assert all(len(v) == 1 for v in flags.values()), table

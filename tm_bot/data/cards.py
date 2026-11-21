@@ -12,6 +12,7 @@ DEFAULT_CARD_REGISTRY_PATH = Path("data") / "card_registry.json"
 # Verified spelling differences between BGA/TFMStats logs and the pinned engine CardName enum.
 # Aliases only resolve when their canonical target exists in the loaded registry.
 _BGA_ALIASES: dict[str, str] = {
+    "allied banks": "Allied Bank",
     "biolabs": "Biolab",
     "ceo's favourite project": "CEO's Favorite Project",
     "excentric sponsor": "Eccentric Sponsor",

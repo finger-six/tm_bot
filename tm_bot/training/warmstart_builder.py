@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tm_bot.agents.card_data import CardSpec, load_card_data
+from tm_bot.data.logstate import SNAPSHOT_TAGS
 from tm_bot.env.types import (
     SUPPORTED_MAPS,
     ActorHistory,
     ActorObservation,
     Candidate,
+    CardSelectionHistoryEntry,
     Choice,
     DraftHistoryEntry,
     HandCardObservation,
@@ -20,6 +22,7 @@ from tm_bot.env.types import (
     PrivateObservation,
     PublicObservation,
     PublicPlayerObservation,
+    ResearchBuyHistoryEntry,
     Seat,
     TableauCardObservation,
 )
@@ -528,3 +531,180 @@ def build_setup_outcome_observation(
         private=priv,
         history=_empty_history(),
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# v2: generation 2+ rows carrying the reconstructed snapshot column group (`tm_bot.data.logstate`)
+# ---------------------------------------------------------------------------------------------
+
+_STOCK_FIELDS: tuple[tuple[str, str], ...] = (
+    ("mc", "megacredits"), ("steel", "steel"), ("titanium", "titanium"), ("plants", "plants"),
+    ("energy", "energy"), ("heat", "heat"),
+)
+_PROD_FIELDS: tuple[tuple[str, str], ...] = (
+    ("mc_prod", "megacreditProduction"), ("steel_prod", "steelProduction"),
+    ("titanium_prod", "titaniumProduction"), ("plants_prod", "plantProduction"),
+    ("energy_prod", "energyProduction"), ("heat_prod", "heatProduction"),
+)
+
+
+def _apply_snapshot_player(p: PublicPlayerObservation, row: Mapping[str, Any], prefix: str) -> None:
+    p["terraformRating"] = int(row[f"{prefix}_tr"])
+    for col, key in _STOCK_FIELDS + _PROD_FIELDS:
+        p[key] = int(row[f"{prefix}_{col}"])  # type: ignore[literal-required]
+    p["cardsInHandCount"] = int(row[f"{prefix}_hand_count"])
+    p["citiesCount"] = int(row[f"{prefix}_cities"])
+    tags = _empty_tags()
+    for tag, count in zip(SNAPSHOT_TAGS, row[f"{prefix}_tags"]):
+        tags[tag] = int(count)
+    p["tags"] = tags
+    p["tableau"] = [
+        TableauCardObservation(name=str(nm), resources=0, isDisabled=False) for nm in row[f"{prefix}_tableau"]
+    ]
+
+
+def build_state_observation(
+    row: Mapping[str, Any],
+    *,
+    phase: str | None = None,
+    cards_by_name: Mapping[str, CardSpec] | None = None,
+    templates: Mapping[str, dict[str, Any]] | None = None,
+) -> ActorObservation:
+    """Reconstruct a gen 2+ `ActorObservation` from one v2 snapshot-group row.
+
+    Populates globals, both seats' TR/stocks/productions/tags/cities/hand counts and public tableaus,
+    milestone `claimedBy` and award `fundedBy`, the actor's tracked hand, and its setup and
+    research-buy history. Unrecoverable fields (deck sizes, milestone/award scores, per-card
+    resources, board spaces, used actions) stay at their map-template / neutral defaults (#38 2D).
+    """
+    actor = _validate_seat(row["seat"])
+    specs = cards_by_name if cards_by_name is not None else load_card_data()
+    gen = int(row["generation"])
+    pub = _base_public_observation(
+        row["map"], generation=gen, phase=phase or str(row["phase"]), templates=templates
+    )
+    temp, oxy, oceans = int(row["temperature"]), int(row["oxygen"]), int(row["oceans"])
+    pub["globalParameters"] = {
+        "temperature": temp,
+        "oxygenLevel": oxy,
+        "oceans": oceans,
+        "isTerraformed": temp >= 8 and oxy >= 14 and oceans >= 9,
+    }
+    _apply_snapshot_player(pub["players"][actor], row, "me")
+    _apply_snapshot_player(pub["players"][1 - actor], row, "opp")
+    claimed = {str(n): int(s) for n, s in zip(row["milestone_names"], row["milestone_seats"]) if int(s) in (0, 1)}
+    funded = {str(n): int(s) for n, s in zip(row["award_names"], row["award_seats"]) if int(s) in (0, 1)}
+    for ms in pub["milestones"]:
+        if ms["name"] in claimed:
+            ms["claimedBy"] = _validate_seat(claimed[ms["name"]])
+    for aw in pub["awards"]:
+        if aw["name"] in funded:
+            aw["fundedBy"] = _validate_seat(funded[aw["name"]])
+
+    corp = str(row["me_corporation"])
+    preludes = sorted(str(p) for p in row["me_setup_preludes"])
+    bought = sorted(str(p) for p in row["me_setup_projects_bought"])
+    corps_disc = sorted(str(c) for c in row["me_setup_corps_discarded"])
+    prel_disc = sorted(str(p) for p in row["me_setup_preludes_discarded"])
+    proj_disc = sorted(str(p) for p in row["me_setup_projects_discarded"])
+    hand = [str(c) for c in row["me_hand"]] if bool(row["me_hand_exact"]) else []
+    priv = PrivateObservation(
+        cardsInHand=_make_hand_cards(hand, specs),
+        dealtCorporationCards=sorted([corp, *corps_disc]),
+        dealtPreludeCards=sorted([*preludes, *prel_disc]),
+        dealtProjectCards=sorted([*bought, *proj_disc]),
+        pickedCorporationCard=corp,
+        preludeCardsInHand=sorted(str(p) for p in row["me_preludes_in_hand"]),
+        draftedCards=sorted(str(c) for c in row["me_drafted_this_round"]),
+        currentDraftPacket=[],
+        pendingCardSelection=[],
+    )
+    research = [
+        ResearchBuyHistoryEntry(
+            generation=int(g),
+            offered=sorted(str(c) for c in off),
+            bought=sorted(str(c) for c in kept),
+            discarded=sorted(str(c) for c in disc),
+        )
+        for g, off, kept, disc in zip(
+            row["me_research_generations"],
+            row["me_research_offered"],
+            row["me_research_kept"],
+            row["me_research_discarded"],
+        )
+    ]
+    seen = sorted(str(c) for c in row["me_discarded_seen"])
+    selections = (
+        [CardSelectionHistoryEntry(generation=gen, phase="action", offered=seen, selected=[], unselected=seen)]
+        if seen
+        else []
+    )
+    history = ActorHistory(
+        initialBuy=InitialBuyHistory(
+            corporationsOffered=sorted([corp, *corps_disc]),
+            corporationChosen=corp,
+            corporationsDiscarded=corps_disc,
+            preludesOffered=sorted([*preludes, *prel_disc]),
+            preludesChosen=preludes,
+            preludesDiscarded=prel_disc,
+            projectsOffered=sorted([*bought, *proj_disc]),
+            projectsBought=bought,
+            projectsDiscarded=proj_disc,
+        ),
+        drafts=[],
+        researchBuys=research,
+        cardSelections=selections,
+    )
+    return ActorObservation(actor=actor, public=pub, private=priv, history=history)
+
+
+def build_draft_pick_state_choice(
+    row: Mapping[str, Any],
+    *,
+    cards_by_name: Mapping[str, CardSpec] | None = None,
+    templates: Mapping[str, dict[str, Any]] | None = None,
+) -> tuple[ActorObservation, Choice]:
+    """Gen 2+ draft pick with the reconstructed pre-pick state and the tracked `cardsInHand`."""
+    obs = build_state_observation(row, phase="drafting", cards_by_name=cards_by_name, templates=templates)
+    packet = sorted(str(c) for c in row["packet_cards"])
+    obs["private"]["currentDraftPacket"] = packet
+    opp_color = _SEAT_COLORS[1 - obs["actor"]]
+    choice = Choice(
+        seat=obs["actor"],
+        kind="card",
+        prompt=f"Select a card to keep and pass the rest to {opp_color}",
+        candidates=tuple(Candidate(id=c, label=c) for c in packet),
+    )
+    return obs, choice
+
+
+def build_research_buy_choice(
+    row: Mapping[str, Any],
+    *,
+    picked: Sequence[str] = (),
+    cards_by_name: Mapping[str, CardSpec] | None = None,
+    templates: Mapping[str, dict[str, Any]] | None = None,
+) -> tuple[ActorObservation, Choice]:
+    """Gen 2+ research buy as the adapter's sequential `multi_card` frame (`adapter/src/factor.ts`).
+
+    Candidates are the unpicked cards of the 4-card drafted packet plus `done` (min 0 at 3 M€ per
+    card, so `done` is always legal); `picked` are the cards already selected in this decision.
+    """
+    obs = build_state_observation(row, phase="research", cards_by_name=cards_by_name, templates=templates)
+    packet = sorted(str(c) for c in row["packet_cards"])
+    obs["private"]["draftedCards"] = packet
+    picked_set = {str(p) for p in picked}
+    cands = [Candidate(id=c, label=c) for c in packet if c not in picked_set]
+    cands.append(Candidate(id="done", label=f"Done ({len(picked_set)} selected)"))
+    choice = Choice(seat=obs["actor"], kind="multi_card", prompt="Select card(s) to buy", candidates=tuple(cands))
+    return obs, choice
+
+
+def build_midgame_value_observation(
+    row: Mapping[str, Any],
+    *,
+    cards_by_name: Mapping[str, CardSpec] | None = None,
+    templates: Mapping[str, dict[str, Any]] | None = None,
+) -> ActorObservation:
+    """Gen 2+ value point (`phase` research at a deal boundary, or action) for the value heads."""
+    return build_state_observation(row, cards_by_name=cards_by_name, templates=templates)

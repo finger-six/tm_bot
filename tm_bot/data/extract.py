@@ -35,6 +35,7 @@ from tm_bot.data.gates import (
     evaluate_record,
 )
 from tm_bot.data.inventory import DEFAULT_INDEX_PATH, _get_peak_rss_bytes, normalize_map
+from tm_bot.data.logstate import LogDecision, LogStateResult, reconstruct_log_state
 from tm_bot.data.splits import SplitName, assign_split
 
 DEFAULT_WARMSTART_DIR = Path("data") / "warmstart"
@@ -60,6 +61,67 @@ _SETUP_CHOICES_SCHEMA = pa.schema(
     ]
 )
 
+_STR_LIST = pa.list_(pa.string())
+_INT_LIST = pa.list_(pa.int32())
+
+
+def _snapshot_fields() -> list[tuple[str, pa.DataType]]:
+    """The shared snapshot column group of the gen 2+ v2 rows (see `tm_bot.data.logstate`)."""
+    fields: list[tuple[str, pa.DataType]] = [
+        ("phase", pa.string()),
+        ("temperature", pa.int32()),
+        ("oxygen", pa.int32()),
+        ("oceans", pa.int32()),
+    ]
+    stocks = ("mc", "steel", "titanium", "plants", "energy", "heat")
+    for prefix in ("me", "opp"):
+        fields.append((f"{prefix}_tr", pa.int32()))
+        fields += [(f"{prefix}_{stock}", pa.int32()) for stock in stocks]
+        fields += [(f"{prefix}_{stock}_prod", pa.int32()) for stock in stocks]
+        fields += [
+            (f"{prefix}_tags", _INT_LIST),
+            (f"{prefix}_cities", pa.int32()),
+            (f"{prefix}_greeneries", pa.int32()),
+            (f"{prefix}_hand_count", pa.int32()),
+            (f"{prefix}_tableau", _STR_LIST),
+        ]
+    fields += [
+        ("me_hand_exact", pa.bool_()),
+        ("me_hand", _STR_LIST),
+        ("me_preludes_in_hand", _STR_LIST),
+        ("me_drafted_this_round", _STR_LIST),
+        ("milestone_names", _STR_LIST),
+        ("milestone_seats", _INT_LIST),
+        ("award_names", _STR_LIST),
+        ("award_seats", _INT_LIST),
+        ("me_corporation", pa.string()),
+        ("me_setup_preludes", _STR_LIST),
+        ("me_setup_projects_bought", _STR_LIST),
+        ("me_setup_corps_discarded", _STR_LIST),
+        ("me_setup_preludes_discarded", _STR_LIST),
+        ("me_setup_projects_discarded", _STR_LIST),
+        ("me_research_generations", _INT_LIST),
+        ("me_research_offered", pa.list_(_STR_LIST)),
+        ("me_research_kept", pa.list_(_STR_LIST)),
+        ("me_research_discarded", pa.list_(_STR_LIST)),
+        ("me_discarded_seen", _STR_LIST),
+    ]
+    return fields
+
+
+_SNAPSHOT_FIELDS = _snapshot_fields()
+_TABLE_KEY_FIELDS: list[tuple[str, pa.DataType]] = [
+    ("path", pa.string()),
+    ("content_hash", pa.string()),
+    ("table_id", pa.string()),
+    ("perspective_player", pa.string()),
+    ("scraper_version", pa.string()),
+    ("map", pa.string()),
+    ("seat", pa.int32()),
+    ("player_id", pa.string()),
+]
+_SPLIT_FIELDS: list[tuple[str, pa.DataType]] = [("split", pa.string()), ("is_player_holdout", pa.bool_())]
+
 _DRAFT_PICKS_SCHEMA = pa.schema(
     [
         ("path", pa.string()),
@@ -78,6 +140,35 @@ _DRAFT_PICKS_SCHEMA = pa.schema(
         ("chosen_card", pa.string()),
         ("split", pa.string()),
         ("is_player_holdout", pa.bool_()),
+        ("has_snapshot", pa.bool_()),
+        *_SNAPSHOT_FIELDS,
+    ]
+)
+
+_RESEARCH_BUYS_SCHEMA = pa.schema(
+    [
+        *_TABLE_KEY_FIELDS,
+        ("generation", pa.int32()),
+        ("move_number", pa.int32()),
+        ("packet_cards", _STR_LIST),
+        ("kept_cards", _STR_LIST),
+        ("paid_mc", pa.int32()),
+        *_SPLIT_FIELDS,
+        *_SNAPSHOT_FIELDS,
+    ]
+)
+
+_MIDGAME_VALUES_SCHEMA = pa.schema(
+    [
+        *_TABLE_KEY_FIELDS,
+        ("generation", pa.int32()),
+        ("move_number", pa.int32()),
+        ("won", pa.bool_()),
+        ("vp_margin", pa.int32()),
+        ("my_final_vp", pa.int32()),
+        ("opp_final_vp", pa.int32()),
+        *_SPLIT_FIELDS,
+        *_SNAPSHOT_FIELDS,
     ]
 )
 
@@ -96,6 +187,7 @@ _SETUP_OUTCOMES_SCHEMA = pa.schema(
         ("chosen_projects", pa.list_(pa.string())),
         ("won", pa.bool_()),
         ("final_vp", pa.int32()),
+        ("vp_margin", pa.int32()),
         ("generations", pa.int32()),
         ("split", pa.string()),
         ("is_player_holdout", pa.bool_()),
@@ -108,6 +200,39 @@ class _EvaluatedPerspective:
     path: str
     content_hash: str | None
     evaluation: RecordEvaluation
+    logstate: LogStateResult | None = None
+
+
+_NEW_TABLES: tuple[tuple[str, pa.Schema], ...] = (
+    ("research_buys", _RESEARCH_BUYS_SCHEMA),
+    ("midgame_values", _MIDGAME_VALUES_SCHEMA),
+)
+_ALL_KINDS: tuple[str, ...] = ("setup_choices", "draft_picks", "setup_outcomes", "research_buys", "midgame_values")
+
+
+def _v2_clean(persp: _EvaluatedPerspective) -> bool:
+    return persp.logstate is not None and persp.logstate.table_reason is None
+
+
+def _decision_row(
+    persp: _EvaluatedPerspective, table_id: str, map_name: str, d: LogDecision, split: SplitName
+) -> dict[str, Any]:
+    ev = persp.evaluation
+    return {
+        "path": persp.path,
+        "content_hash": persp.content_hash,
+        "table_id": table_id,
+        "perspective_player": ev.perspective_player,
+        "scraper_version": ev.scraper_version,
+        "map": map_name,
+        "seat": d.seat,
+        "player_id": d.player_id,
+        "generation": d.generation,
+        "move_number": d.move_number,
+        "split": split,
+        "is_player_holdout": False,
+        **d.snapshot,
+    }
 
 
 def _loads_json_bytes(raw: bytes) -> Any:
@@ -222,13 +347,17 @@ def format_yield_report_markdown(report: dict[str, Any]) -> str:
         f"- `setup_choices`: {examples['setup_choices']:,}",
         f"- `draft_picks`: {examples['draft_picks']:,} (dropped unverified/undone draft rows: {draft_diag['dropped_count']:,})",
         f"- `setup_outcomes`: {examples['setup_outcomes']:,}",
+        f"- `research_buys`: {examples.get('research_buys', 0):,}",
+        f"- `midgame_values`: {examples.get('midgame_values', 0):,}",
+        f"- `draft_picks` without a gen 2+ snapshot (table-level v2 gate failed): "
+        f"{examples.get('draft_picks_without_snapshot', 0):,}",
         "",
         "## Split Sizes",
         "",
         "| Kind | Train | Val | Test | Test (Player Holdout) |",
         "| --- | ---: | ---: | ---: | ---: |",
     ]
-    for kind in ("setup_choices", "draft_picks", "setup_outcomes"):
+    for kind in [k for k in _ALL_KINDS if k in splits]:
         sp = splits[kind]
         lines.append(
             f"| `{kind}` | {sp['train']:,} | {sp['val']:,} | {sp['test']:,} | {sp['test_player_holdout']:,} |"
@@ -266,6 +395,17 @@ def format_yield_report_markdown(report: dict[str, Any]) -> str:
     else:
         lines.append("- (none)")
 
+    v2 = report.get("v2_quarantine") or {}
+    lines.extend(["", "## v2 Gates and Quarantines (per player, from that player's chosen perspective)", ""])
+    if v2:
+        lines.append("Keys are `<task or gate>:<reason>`. `table:<reason>` counts players whose chosen perspective")
+        lines.append("failed a table-level v2 gate; their draft picks keep only the v1 columns.")
+        lines.append("")
+        for reason, cnt in sorted(v2.items()):
+            lines.append(f"- `{reason}`: {cnt:,}")
+    else:
+        lines.append("- (none)")
+
     if draft_diag["dropped_by_reason"]:
         lines.extend(["", "## Dropped Draft Rows by Reason", ""])
         for reason, cnt in sorted(draft_diag["dropped_by_reason"].items(), key=lambda kv: (-kv[1], kv[0])):
@@ -283,6 +423,7 @@ def run_extraction(
     excluded_versions: Collection[str | None] = DEFAULT_EXCLUDED_SCRAPER_VERSIONS,
     progress_interval: int = 2000,
     limit_tables: int | None = None,
+    limit_files: int | None = None,
     batch_tables: int = 1000,
     max_seconds: float | None = None,
     resume: bool = False,
@@ -321,6 +462,7 @@ def run_extraction(
         outcome_quarantine = Counter[str](saved["outcome_quarantine"])
         draft_dropped_reasons = Counter[str](saved["draft_dropped_reasons"])
         example_counts = Counter[str](saved["example_counts"])
+        v2_counts = Counter[str](saved.get("v2_counts", {}))
         by_map: dict[str, dict[str, Any]] = {}
         for m in map_buckets:
             ms = saved["by_map"][m]
@@ -354,6 +496,7 @@ def run_extraction(
         outcome_quarantine = Counter[str]()
         draft_dropped_reasons = Counter[str]()
         example_counts = Counter[str]()
+        v2_counts = Counter[str]()
         by_map = {
             m: {
                 "index_files": 0,
@@ -361,7 +504,7 @@ def run_extraction(
                 "passed_setup_tables": 0,
                 "passed_outcome_tables": 0,
                 "quarantined_tables_by_reason": Counter(),
-                "examples": {"setup_choices": 0, "draft_picks": 0, "setup_outcomes": 0},
+                "examples": {k: 0 for k in _ALL_KINDS},
             }
             for m in map_buckets
         }
@@ -375,6 +518,12 @@ def run_extraction(
     setup_writer = pq.ParquetWriter(setup_part, _SETUP_CHOICES_SCHEMA, compression="snappy")
     draft_writer = pq.ParquetWriter(draft_part, _DRAFT_PICKS_SCHEMA, compression="snappy")
     outcome_writer = pq.ParquetWriter(outcome_part, _SETUP_OUTCOMES_SCHEMA, compression="snappy")
+
+    new_writers = {
+        name: pq.ParquetWriter(ckpt_dir / f"{name}.part_{part_index:04d}.parquet", schema, compression="snappy")
+        for name, schema in _NEW_TABLES
+    }
+    new_bufs: dict[str, list[dict[str, Any]]] = {name: [] for name, _ in _NEW_TABLES}
 
     setup_buf: list[dict[str, Any]] = []
     draft_buf: list[dict[str, Any]] = []
@@ -463,12 +612,21 @@ def run_extraction(
             example_counts["setup_choices"] += 1
             by_map[group_map_bucket]["examples"]["setup_choices"] += 1
 
-        # Emit verified draft_picks per player from that player's preferred perspective
+        # Emit verified draft_picks (and gen 2+ research_buys) per player from that player's preferred
+        # perspective, preferring perspectives that pass the table-level v2 gates.
+        v2_passing = [p for p in setup_passing if _v2_clean(p)] or setup_passing
         counted_draft_persps: set[str] = set()
         for p_setup in canon_players:
             pid = p_setup.player_id
-            chosen_persp = _pick_best_perspective(setup_passing, prefer_player_id=pid)
+            chosen_persp = _pick_best_perspective(v2_passing, prefer_player_id=pid)
             ev = chosen_persp.evaluation
+            ls = chosen_persp.logstate
+            decisions: dict[tuple[str, int], LogDecision] = {}
+            if ls is not None and ls.table_reason is None:
+                v2_counts.update(ls.counts_by_player.get(pid) or {})
+                decisions = {(d.kind, d.move_number): d for d in ls.decisions if d.player_id == pid}
+            else:
+                v2_counts[f"table:{ls.table_reason if ls is not None else 'not_reconstructed'}"] += 1
             if chosen_persp.path not in counted_draft_persps:
                 counted_draft_persps.add(chosen_persp.path)
                 for reason in ev.drafts.dropped_reasons:
@@ -476,8 +634,15 @@ def run_extraction(
             for pick in ev.drafts.picks:
                 if pick.player_id != pid:
                     continue
+                state = decisions.get(("draft_pick", pick.move_number))
+                if state is not None and state.drop_reason is not None:
+                    continue  # hand-lost or income-quarantined seat (counted in v2_counts)
+                if state is None:
+                    example_counts["draft_picks_without_snapshot"] += 1
                 draft_buf.append(
                     {
+                        **(state.snapshot if state is not None else {}),
+                        "has_snapshot": state is not None,
                         "path": chosen_persp.path,
                         "content_hash": chosen_persp.content_hash,
                         "table_id": current_tid,
@@ -499,6 +664,15 @@ def run_extraction(
                 example_counts["draft_picks"] += 1
                 by_map[group_map_bucket]["examples"]["draft_picks"] += 1
 
+            for d in decisions.values():
+                if d.kind != "research_buy" or d.drop_reason is not None:
+                    continue
+                row = _decision_row(chosen_persp, current_tid, ev.map_name or group_map_bucket, d, split)
+                row.update(d.payload)
+                new_bufs["research_buys"].append(row)
+                example_counts["research_buys"] += 1
+                by_map[group_map_bucket]["examples"]["research_buys"] += 1
+
         # Emit setup_outcomes only if an outcome-passing perspective exists
         outcome_passing = [p for p in setup_passing if p.evaluation.outcome.passed]
         if outcome_passing:
@@ -508,8 +682,10 @@ def run_extraction(
             out_ev = out_persp.evaluation
             out_res = out_ev.outcome
             assert out_res.scores_by_player is not None
+            scores = out_res.scores_by_player
             for p_setup in out_ev.setup.players:
                 pid = p_setup.player_id
+                opp_vp = next(v for k, v in scores.items() if k != pid)
                 outcome_buf.append(
                     {
                         "path": out_persp.path,
@@ -525,6 +701,7 @@ def run_extraction(
                         "chosen_projects": list(p_setup.chosen_projects),
                         "won": pid == out_res.winner_player_id,
                         "final_vp": out_res.scores_by_player[pid],
+                        "vp_margin": scores[pid] - opp_vp,
                         "generations": out_res.generations,
                         "split": split,
                         "is_player_holdout": False,
@@ -532,6 +709,25 @@ def run_extraction(
                 )
                 example_counts["setup_outcomes"] += 1
                 by_map[group_map_bucket]["examples"]["setup_outcomes"] += 1
+                # Mid-game value points from this player's own preferred v2-clean perspective.
+                val_persp = _pick_best_perspective(v2_passing, prefer_player_id=pid)
+                if val_persp.logstate is None or val_persp.logstate.table_reason is not None:
+                    continue
+                for d in val_persp.logstate.decisions:
+                    if d.player_id != pid or d.kind not in ("deal_boundary", "action") or d.drop_reason is not None:
+                        continue
+                    row = _decision_row(
+                        val_persp, current_tid, val_persp.evaluation.map_name or group_map_bucket, d, split
+                    )
+                    row.update(
+                        won=pid == out_res.winner_player_id,
+                        vp_margin=scores[pid] - opp_vp,
+                        my_final_vp=scores[pid],
+                        opp_final_vp=opp_vp,
+                    )
+                    new_bufs["midgame_values"].append(row)
+                    example_counts["midgame_values"] += 1
+                    by_map[group_map_bucket]["examples"]["midgame_values"] += 1
         else:
             out_reason = setup_passing[0].evaluation.outcome.reason or "outcome_failed"
             outcome_quarantine[out_reason] += 1
@@ -540,6 +736,8 @@ def run_extraction(
             _flush_buffer(setup_writer, setup_buf, _SETUP_CHOICES_SCHEMA)
             _flush_buffer(draft_writer, draft_buf, _DRAFT_PICKS_SCHEMA)
             _flush_buffer(outcome_writer, outcome_buf, _SETUP_OUTCOMES_SCHEMA)
+            for name, schema in _NEW_TABLES:
+                _flush_buffer(new_writers[name], new_bufs[name], schema)
 
     _select_cols = (
         "path, size, content_hash, status, error_type, "
@@ -593,7 +791,9 @@ def run_extraction(
                     _finalize_table_group()
                     group_index_failures.clear()
                     group_perspectives.clear()
-                    if limit_tables is not None and tables_processed >= limit_tables:
+                    if (limit_tables is not None and tables_processed >= limit_tables) or (
+                        limit_files is not None and file_counts["passed_index"] >= limit_files
+                    ):
                         current_tid = None
                         break
                     if max_seconds is not None and (time.perf_counter() - chunk_start) >= max_seconds:
@@ -639,6 +839,11 @@ def run_extraction(
                 card_registry=registry,
                 excluded_versions=excluded_versions,
             )
+            logstate = (
+                reconstruct_log_state(data, setup=ev.setup, drafts=ev.drafts, card_registry=registry)
+                if ev.eligibility.passed and ev.setup.passed
+                else None
+            )
             del data
             if (row_dict.get("size") or 0) >= 10_000_000:
                 gc.collect()
@@ -661,6 +866,7 @@ def run_extraction(
                     path=rel_path,
                     content_hash=row_dict.get("content_hash"),
                     evaluation=ev,
+                    logstate=logstate,
                 )
             )
 
@@ -679,11 +885,15 @@ def run_extraction(
         _flush_buffer(setup_writer, setup_buf, _SETUP_CHOICES_SCHEMA)
         _flush_buffer(draft_writer, draft_buf, _DRAFT_PICKS_SCHEMA)
         _flush_buffer(outcome_writer, outcome_buf, _SETUP_OUTCOMES_SCHEMA)
+        for name, schema in _NEW_TABLES:
+            _flush_buffer(new_writers[name], new_bufs[name], schema)
     finally:
         conn.close()
         setup_writer.close()
         draft_writer.close()
         outcome_writer.close()
+        for writer in new_writers.values():
+            writer.close()
 
     total_elapsed = prior_elapsed + (time.perf_counter() - chunk_start)
     chunk_rss = _get_peak_rss_bytes()
@@ -707,6 +917,7 @@ def run_extraction(
             "outcome_quarantine": dict(outcome_quarantine),
             "draft_dropped_reasons": dict(draft_dropped_reasons),
             "example_counts": dict(example_counts),
+            "v2_counts": dict(v2_counts),
             "by_map": {
                 m: {
                     "index_files": s["index_files"],
@@ -757,6 +968,15 @@ def run_extraction(
         _SETUP_OUTCOMES_SCHEMA,
         holdout_tables,
     )
+    new_splits: dict[str, dict[str, int]] = {}
+    for name, schema in _NEW_TABLES:
+        sp, holdout = _apply_holdout_postpass(
+            [ckpt_dir / f"{name}.part_{i:04d}.parquet" for i in part_indices],
+            out_root / f"{name}.parquet",
+            schema,
+            holdout_tables,
+        )
+        new_splits[name] = {**sp, "test_player_holdout": holdout}
     shutil.rmtree(ckpt_dir, ignore_errors=True)
 
     report: dict[str, Any] = {
@@ -787,11 +1007,16 @@ def run_extraction(
             "setup_choices": example_counts["setup_choices"],
             "draft_picks": example_counts["draft_picks"],
             "setup_outcomes": example_counts["setup_outcomes"],
+            "research_buys": example_counts["research_buys"],
+            "midgame_values": example_counts["midgame_values"],
+            "draft_picks_without_snapshot": example_counts["draft_picks_without_snapshot"],
         },
+        "v2_quarantine": dict(sorted(v2_counts.items())),
         "splits": {
             "setup_choices": {**setup_splits, "test_player_holdout": setup_holdout},
             "draft_picks": {**draft_splits, "test_player_holdout": draft_holdout},
             "setup_outcomes": {**outcome_splits, "test_player_holdout": outcome_holdout},
+            **new_splits,
         },
         "draft_diagnostics": {
             "dropped_count": sum(draft_dropped_reasons.values()),
@@ -863,6 +1088,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional cap on number of distinct table_ids to process (for debugging).",
     )
     parser.add_argument(
+        "--limit-files",
+        type=int,
+        default=None,
+        help="Optional cap on opened (index-passing) files; stops at the next table_id boundary (small samples).",
+    )
+    parser.add_argument(
         "--max-seconds",
         type=float,
         default=None,
@@ -892,6 +1123,7 @@ def main(argv: list[str] | None = None) -> int:
         excluded_versions=excluded,
         progress_interval=args.progress_interval,
         limit_tables=args.limit_tables,
+        limit_files=args.limit_files,
         max_seconds=args.max_seconds,
         resume=args.resume,
     )

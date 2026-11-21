@@ -19,9 +19,11 @@ from tm_bot.data.inventory import (
 SUPPORTED_MAPS: tuple[str, ...] = ("Tharsis", "Elysium", "Hellas", "Vastitas Borealis")
 _SUPPORTED_MAP_SET: frozenset[str] = frozenset(SUPPORTED_MAPS)
 
-# Scraper versions observed to lack structured starting_hand/cards_kept/draft fields.
+# Scraper versions observed to lack structured starting_hand/cards_kept/draft fields, plus
+# `v2025.08.15.1706`, which strips the `M€` payment text the v2 income and research-buy gates need.
 DEFAULT_EXCLUDED_SCRAPER_VERSIONS: frozenset[str] = frozenset(
     {
+        "v2025.08.15.1706",
         "2025july30",
         "v2025.07.29.0100",
         "v2025.07.29.1618",
