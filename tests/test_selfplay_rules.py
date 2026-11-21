@@ -21,7 +21,7 @@ from tm_bot.agents.play_rules import (
     game_utility,
 )
 from tm_bot.comparator.agent import comparator_eval_factory
-from tm_bot.comparator.ppo import PPOBuffer, PPOSample
+from tm_bot.comparator.ppo import PPOBuffer, PPOSample, compute_gae
 from tm_bot.comparator.selfplay import ComparatorSelfPlayEngine
 from tm_bot.models.encode import collate_encoded_batch, encode_choice, encode_observation
 from tm_bot.models.network import save_checkpoint
@@ -294,12 +294,20 @@ def test_comparator_mirror_runs_gae_per_seat() -> None:
     batch = engine.assemble_batch([_outcome((50, 62), 1)], [recorder], [1])
     samples = batch.ppo_samples
     assert samples is not None and len(samples) == 4
+    _stats = engine._behavior_stats
     for seat, won in ((1, True), (0, False)):
         rows = [s for s in samples if s.seat == seat]
         assert len(rows) == 2
-        assert rows[-1].return_ == pytest.approx(1.0 if won else 0.0)
+        utility = (1.0 if won else -1.0) + 0.15 * (12 if won else -12) / 50
+        assert rows[-1].return_ == pytest.approx(utility)
         assert all(r.value_target == (1.0 if won else -1.0) for r in rows)
         assert all(r.margin_target == pytest.approx((12 if won else -12) / 50) for r in rows)
+        # GAE runs over this seat's own decisions only (#50): its baselines and its U.
+        seat_records = [r for r in recorder.decisions if int(r.seat) == seat]
+        _, _, baselines = _stats(seat_records)
+        advantages, returns = compute_gae(baselines, utility)
+        np.testing.assert_allclose([r.advantage for r in rows], advantages, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose([r.return_ for r in rows], returns, rtol=1e-5, atol=1e-6)
 
 
 # --- utility U -----------------------------------------------------------------------

@@ -130,7 +130,8 @@ class ComparatorAgent:
             logits = np.log(np.clip(probs, 1e-12, None)) / temperature
             logits -= logits.max()
             weights = np.exp(logits)
-            # Sample at τ but record the τ = 1 policy, matching `old_log_prob`.
+            # Sample at τ but record the τ = 1 policy (the policy target). PPO's
+            # `old_log_prob` is under this τ-scaled distribution (`scaled_log_probs`).
             sampled = weights / weights.sum()
             index = int(self._rng.choices(range(n), weights=sampled.tolist(), k=1)[0])
         else:

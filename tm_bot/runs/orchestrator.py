@@ -358,7 +358,20 @@ class SelfPlayRunner:
             config.warmstart_checkpoint, map_location=device
         )
         model.eval()
-        learner = PPOLearner(config, model, device=device)
+        # Same warm-start retention as the main learner (#39 §1d, #50). Comparator runs
+        # always warm start (`random_init` is main-only), so the human sample always loads.
+        from tm_bot.training.human_aux import HumanAuxLoss, load_human_aux_sample
+
+        human_aux = HumanAuxLoss(
+            load_human_aux_sample(
+                config.human_aux_data_dir,
+                config.human_aux_cache_dir,
+                max_rows=config.human_aux_max_rows,
+                seed=config.seed,
+            ),
+            rng=np.random.default_rng(config.seed + 1),
+        )
+        learner = PPOLearner(config, model, device=device, human_aux=human_aux)
         engine = ComparatorSelfPlayEngine(
             config,
             model=model,
@@ -381,6 +394,7 @@ class SelfPlayRunner:
             clock=time.monotonic,
         )
         runner.optimizer = learner.optimizer
+        learner.training_clock = runner.training_s
 
         def comparator_factory(checkpoint: Path):
             cmp_model, cmp_vocab, _ = load_comparator_checkpoint(

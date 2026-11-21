@@ -174,7 +174,8 @@ CE(policy, visits) + 1.0·BCE(win_logit, o) + 0.3·SmoothL1(vp_margin_pred, m)
   file-backed and released with the maps. Human rows only, never `b1-v2` (#36).
 - The shared pieces (`HumanAuxSchedule`, `pad_anchor_logits`, `kl_to_anchor` in
   [`anchor_loss.py`](../tm_bot/models/anchor_loss.py); `load_human_aux_sample`,
-  `HumanAuxLoss` in `human_aux.py`) are for the comparator's PPO learner too (#50).
+  `HumanAuxLoss` in `human_aux.py`) are also used by the comparator's PPO learner
+  (#50; see [comparator.md](comparator.md#ppo-self-play)).
 - A `--random-init` run is pure self-play: it drops both anchor terms (no human
   sample is loaded, β = 0), per #39 §4.
 

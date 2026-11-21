@@ -72,20 +72,42 @@ comparator warm start (the anchor), 15% B1. Every comparator seat (learner,
 latest, pool, anchor) samples the masked policy at τ(g) in the action phase and
 at τ 1 elsewhere (see [selfplay.md](selfplay.md#v2-self-play-rules-48)). No seat
 plays greedily. Mirror games against latest record both seats, and GAE runs on
-each seat's trajectory separately. PPO still recomputes the behavior
-log-probabilities at τ 1, with dropout off so the ratio compares the same
-deterministic policy. Each row records the τ it was sampled at
-(`play_temperature`), so #50 can rescale the ratio.
+each seat's trajectory separately.
 
-Each recorded training-seat decision stores the selected action, its behavior
-log-probability, the behavior value, and the terminal utility. GAE
-([`ppo.py:compute_gae`](../tm_bot/comparator/ppo.py)) computes advantages over
-the game with `gamma=1.0` and `lambda=0.95` in win-probability space: the
-bootstrap values are the win-probability head's outputs, so the terminal outcome
-enters as loss 0 / tie 0.5 / win 1 and the returns are the head's BCE targets.
-Advantages are standardized per minibatch. The learner
-([`PPOLearner`](../tm_bot/comparator/ppo.py)) applies the clipped PPO surrogate
-(epsilon 0.2), the value-critic BCE loss, and an entropy bonus (coefficient 0.01).
+v2 PPO (#39 §1c, §1d, §2; #50) in [`ppo.py`](../tm_bot/comparator/ppo.py):
+
+- **τ-scaled ratio and entropy.** Each row records the τ it was sampled at
+  (`play_temperature`). The behavior log-probability and the learner's new
+  log-probability both come from `scaled_log_probs`: softmax(logits / τ) over
+  the legal candidates, which is the policy the agent sampled from. Dropout is
+  off in both, so the ratio is exactly 1 before an update. The entropy bonus
+  uses the same scaled policy. An argmax row (τ 0) is rejected.
+- **Reward U, margin-aware baseline.** The terminal reward is
+  U = o + 0.15·m. GAE ([`compute_gae`](../tm_bot/comparator/ppo.py)) uses
+  `gamma=1.0` and `lambda=0.95` against the critic baseline (2p − 1) + 0.15·m̂
+  from the win and margin heads (`critic_baseline`). Advantages and returns are
+  in U units, within ±1.18. Advantages are standardized per minibatch.
+- **Outcome-only win head.** `win_logit` trains on BCE against (o + 1) / 2
+  (0 / 0.5 / 1), never on a return or U, so `P(win)`, the in-run calibration
+  (which reads the row's outcome) and the val-split temperature scaling stay
+  unshaped. `vp_margin_pred` trains on the terminal m (SmoothL1, β 0.2).
+- **Anchors**, shared with the main learner (see
+  [selfplay.md](selfplay.md)): β·KL(π_θ ‖ π_anchor) with β 0.05 on the raw τ 1
+  logits against the recorded anchor logits, and λ_h·L_human on the resident
+  human sample (`human_aux_*` settings, λ_h on the training clock).
+
+The learner ([`PPOLearner`](../tm_bot/comparator/ppo.py)) minimises, per
+minibatch update:
+
+```
+−clipped surrogate (ε 0.2) + 0.5·(BCE(win_logit, (o+1)/2) + 0.3·SmoothL1(m̂, m))
+  − 0.01·H(π_τ) + 0.05·KL(π_θ ‖ π_anchor) + λ_h·L_human
+```
+
+The value coefficient (0.5) scales the whole critic, and the margin term keeps the
+main learner's 0.3 weight (`w_margin`) relative to the win BCE. Each cycle record
+logs `policy_loss`, `value_loss`, `margin_loss`, `kl_anchor`, `human_aux_loss`,
+`human_aux_weight` and `total_loss`.
 
 Every cycle trains only on that cycle's fresh rollout. PPO is on-policy, so a
 comparator run keeps no decision buffer: older rows carry log-probabilities and

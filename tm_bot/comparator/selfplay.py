@@ -11,11 +11,18 @@ import numpy as np
 import torch
 
 from tm_bot.agents import B1Agent, load_card_data
+from tm_bot.agents.play_rules import game_utility
 from tm_bot.agents.protocol import Agent, GameRunResult
 from tm_bot.agents.runner import play_games
 from tm_bot.comparator.agent import ComparatorAgent
 from tm_bot.comparator.model import ComparatorNetwork, load_comparator_checkpoint
-from tm_bot.comparator.ppo import PPOSample, compute_gae
+from tm_bot.comparator.ppo import (
+    PPOSample,
+    compute_gae,
+    critic_baseline,
+    sampling_temperatures,
+    scaled_log_probs,
+)
 from tm_bot.models.encode import collate_encoded_batch
 from tm_bot.models.vocab import CardVocab
 from tm_bot.runs.anchor import anchor_policy_logits, check_anchor_compatible, freeze
@@ -173,10 +180,16 @@ class ComparatorSelfPlayEngine:
     @torch.inference_mode()
     def _behavior_stats(
         self, records: Sequence[Any]
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Recompute behavior log-probs and raw win probabilities from stored encodings."""
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Recompute behavior stats from stored encodings: `(log_probs, win_probs, baselines)`.
+
+        `log_probs` are under the τ-scaled policy each decision was sampled from (its
+        `play_temperature`), the same `scaled_log_probs` the learner uses. `baselines` are
+        the critic (2p − 1) + 0.15·m̂ in U units; `win_probs` are the raw p.
+        """
         if not records:
-            return np.zeros((0,), dtype=np.float64), np.zeros((0,), dtype=np.float64)
+            empty = np.zeros((0,), dtype=np.float64)
+            return empty, empty, empty
         batch = collate_encoded_batch(
             [r.observation for r in records],
             [r.choice for r in records],
@@ -184,13 +197,21 @@ class ComparatorSelfPlayEngine:
         tensors = {k: v.to(self.device) for k, v in batch.items()}
         self.model.eval()
         out = self.model(tensors, compute_policy=True, compute_value=True)
-        log_probs = torch.log_softmax(out["policy_logits"].float(), dim=-1)
+        log_probs = scaled_log_probs(
+            out["policy_logits"],
+            sampling_temperatures([r.play_temperature for r in records]),
+            tensors["cand_mask"],
+        )
         actions = torch.tensor(
             [r.candidate_index for r in records], dtype=torch.long, device=log_probs.device
         )
         chosen = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
-        values = out["win_prob"].float()
-        return chosen.detach().cpu().numpy(), values.detach().cpu().numpy()
+        win_prob = out["win_prob"].float().detach().cpu().numpy()
+        margin = out.get("vp_margin_pred")
+        baselines = critic_baseline(
+            win_prob, None if margin is None else margin.float().detach().cpu().numpy()
+        )
+        return chosen.detach().cpu().numpy(), win_prob, baselines
 
     def assemble_batch(
         self,
@@ -202,8 +223,8 @@ class ComparatorSelfPlayEngine:
         """Encode recorded decisions into PPO rows with GAE targets.
 
         Mirror games carry both seats; each seat is its own trajectory, with GAE run on
-        that seat's outcome. `old_log_prob` is the τ = 1 log-probability; the τ the
-        decision was sampled at is recorded in `play_temperature` for #50.
+        that seat's U = o + 0.15·m. `old_log_prob` is the log-probability under the
+        τ-scaled policy the decision was sampled from (`play_temperature`).
         """
         games = [game_summary(o) for o in outcomes]
         ppo_samples: list[PPOSample] = []
@@ -247,13 +268,13 @@ class ComparatorSelfPlayEngine:
     ) -> list[PPOSample]:
         utility = utility_for_seat(summary, seat)
         margin = margin_for_seat(summary, seat)
-        old_log_probs, behavior_values = self._behavior_stats(records)
+        old_log_probs, behavior_values, baselines = self._behavior_stats(records)
         anchor_logits = self._anchor_logits(records)
-        # The bootstrap values are win probabilities, so the outcome enters GAE as a win
-        # probability too (loss 0, tie 0.5, win 1), not as the -1/+1 utility.
+        # Reward U = o + 0.15·m against the critic baseline (2p − 1) + 0.15·m̂, both in U
+        # units. The win head's own target stays the outcome o (`value_target`).
         advantages, returns = compute_gae(
-            behavior_values,
-            (float(utility) + 1.0) * 0.5,
+            baselines,
+            game_utility(utility, summary.scores[seat], summary.scores[1 - seat]),
             gamma=self.config.ppo_gamma,
             gae_lambda=self.config.ppo_gae_lambda,
         )

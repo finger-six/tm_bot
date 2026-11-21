@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -264,39 +265,50 @@ def test_ppo_update_is_on_policy_before_the_first_step() -> None:
     assert stats.mean_ratio == pytest.approx(1.0, abs=1e-6)
 
 
-@pytest.mark.parametrize(("win_target", "lo", "hi"), [(0.0, 0.0, 0.8), (1.0, 0.8, 1.0)])
-def test_gae_value_targets_stay_in_win_probability_space(
-    win_target: float, lo: float, hi: float
+@pytest.mark.parametrize(("utility", "lo", "hi"), [(-1.06, -1.06, 0.6), (1.12, 0.6, 1.12)])
+def test_gae_targets_move_from_the_baseline_toward_the_utility(
+    utility: float, lo: float, hi: float
 ) -> None:
-    # Win-probability head predicts 0.8 everywhere. A lost game must pull every value target
-    # down (never above the prediction), a won game must pull every target up, and the
-    # terminal target equals the outcome in [0, 1] (issue #25 review: targets were biased up).
-    values = [0.8] * 50
-    advantages, returns = compute_gae(values, win_target)
-    assert returns[-1] == pytest.approx(win_target)
+    # The critic predicts U = 0.6 everywhere. A lost game must pull every return down (never
+    # above the baseline), a won game must pull every return up, and the terminal return
+    # equals the reward U = o + 0.15·m (issue #25 review: targets were biased up; #50: U units).
+    values = [0.6] * 50
+    advantages, returns = compute_gae(values, utility)
+    assert returns[-1] == pytest.approx(utility)
     assert np.all(returns >= lo - 1e-6) and np.all(returns <= hi + 1e-6)
-    if win_target == 0.0:
+    if utility < 0.0:
         assert np.all(advantages < 0.0)
     else:
         assert np.all(advantages > 0.0)
 
 
-def test_gae_rejects_utility_space_outcomes() -> None:
-    # The terminal outcome must be a win probability (loss 0, tie 0.5, win 1), the same space as
-    # the win-probability head's bootstrap values; a -1/+1 utility would bias every target.
+@pytest.mark.parametrize(
+    ("values", "utility"),
+    [([0.0, 0.0], 1.19), ([0.0, 0.0], -1.5), ([0.0, 0.0], float("nan")), ([1.3, 0.0], 1.0)],
+)
+def test_gae_rejects_rewards_and_baselines_outside_the_utility_range(
+    values: list[float], utility: float
+) -> None:
+    # U = o + 0.15·m and the baseline (2p - 1) + 0.15·m̂ both lie in [-1.18, 1.18].
     with pytest.raises(ValueError):
-        compute_gae([0.8, 0.8], -1.0)
+        compute_gae(values, utility)
+    compute_gae([1.18, -1.18], -1.18)  # the bounds themselves are valid
 
 
-def test_ppo_value_loss_targets_returns_directly() -> None:
+def test_ppo_value_loss_targets_the_outcome_not_the_returns() -> None:
+    # #50: returns are in U units; the win head's BCE target stays (o + 1) / 2.
     model = _tiny_comparator()
-    samples = _samples(model)
+    samples = [
+        replace(s, return_=0.3 * s.value_target - 0.1, margin_target=-0.4)
+        for s in _samples(model)
+    ]
     batch, ppo = collate_ppo_samples(samples)
     with torch.inference_mode():
         _, parts = ppo_policy_terms(model, batch, ppo, clip=0.2, value_coef=1.0, entropy_coef=0.0)
         out = model(batch, compute_policy=False, compute_value=True)
+    outcomes = torch.tensor([(s.value_target + 1.0) * 0.5 for s in samples])
     expected = torch.nn.functional.binary_cross_entropy_with_logits(
-        out["value_logit"].float(), ppo["returns"].float()
+        out["value_logit"].float(), outcomes
     )
     assert float(parts["value_loss"]) == pytest.approx(float(expected), rel=1e-5)
 
@@ -506,9 +518,9 @@ def test_comparator_run_trains_on_fresh_rollouts_and_keeps_none(tmp_path: Path) 
 
 
 def test_assemble_batch_targets_follow_each_training_seats_outcome() -> None:
-    """Seat 0 wins both games; the learner sat in seat 0 (win) then seat 1 (loss).
-    Value targets are the seat's utility; GAE returns stay in win-probability space
-    and end exactly on the outcome (1 for the win, 0 for the loss)."""
+    """Seat 0 wins both games 70-50; the learner sat in seat 0 (win) then seat 1 (loss).
+    Value targets are the seat's outcome o; GAE returns are in U units and end exactly on
+    U = o + 0.15·m (1.06 for the win, -1.06 for the loss)."""
     config = RunConfig(run_name="cmp-assemble", agent_kind="comparator")
     engine = ComparatorSelfPlayEngine(config, model=_tiny_comparator(), vocab=_VOCAB)
     base_obs, choice = _obs_choice()
@@ -544,9 +556,9 @@ def test_assemble_batch_targets_follow_each_training_seats_outcome() -> None:
     assert {s.seat for s in win} == {0} and {s.seat for s in loss} == {1}
     assert all(s.value_target == 1.0 for s in win)
     assert all(s.value_target == -1.0 for s in loss)
-    assert all(0.0 <= s.return_ <= 1.0 for s in samples)
-    assert win[-1].return_ == pytest.approx(1.0)
-    assert loss[-1].return_ == pytest.approx(0.0)
+    assert all(-1.18 <= s.return_ <= 1.18 for s in samples)
+    assert win[-1].return_ == pytest.approx(1.0 + 0.15 * 20 / 50)
+    assert loss[-1].return_ == pytest.approx(-1.0 - 0.15 * 20 / 50)
     assert [s.action for s in win] == [0, 1, 2]
 
 
@@ -593,9 +605,11 @@ def test_ppo_rows_match_encode_at_assembly_rows() -> None:
         actions = torch.tensor([index for _, _, index in cases], dtype=torch.long)
         expected_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
         expected_values = out["win_prob"].float()
+        baselines = 2.0 * expected_values + 0.15 * out["vp_margin_pred"].float() - 1.0
+    # These records report no play temperature (τ = 1); the reward is U = 1 + 0.15·20/50.
     expected_advantages, expected_returns = compute_gae(
-        expected_values.numpy(),
-        1.0,
+        baselines.numpy(),
+        1.06,
         gamma=config.ppo_gamma,
         gae_lambda=config.ppo_gae_lambda,
     )
