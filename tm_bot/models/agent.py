@@ -80,8 +80,13 @@ class PolicyValueAgent:
         choices: Sequence[Choice],
         *,
         compute_value: bool = True,
-    ) -> tuple[list[np.ndarray], np.ndarray]:
-        """Batched inference returning `(list_of_prob_arrays, values_array)`."""
+        return_margin: bool = False,
+    ) -> Any:
+        """Batched inference returning `(list_of_prob_arrays, values_array)`.
+
+        With `return_margin` a third array holds the VP-margin head's predictions
+        (zeros when the network has no margin head or `compute_value` is False).
+        """
         enc_obs = [encode_observation(o, self.vocab) for o in observations]
         ev = self.model.config.encoder_version
         enc_ch = [
@@ -98,7 +103,15 @@ class PolicyValueAgent:
             else np.zeros((len(observations),), dtype=np.float32)
         )
         probs_list = [probs_tensor[i, : len(c.candidates)].copy() for i, c in enumerate(choices)]
-        return probs_list, values
+        if not return_margin:
+            return probs_list, values
+        margin = out.get("vp_margin_pred") if compute_value else None
+        margins = (
+            margin.detach().float().cpu().numpy()
+            if margin is not None
+            else np.zeros((len(observations),), dtype=np.float32)
+        )
+        return probs_list, values, margins
 
     def act(self, observation: ActorObservation, choice: Choice) -> int:
         n = len(choice.candidates)

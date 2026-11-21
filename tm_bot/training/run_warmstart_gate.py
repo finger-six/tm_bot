@@ -57,6 +57,10 @@ LIGHT_SEARCH: dict[str, Any] = {
     "temperature": 0.0,
     "action_temperature": 1.0,
     "wave_size": 4,
+    # Pinned to the v1 play rules the gate was specified with (#48 made v2 the default):
+    # flat action temperature, outcome-only search utility.
+    "play_temperature": "flat",
+    "margin_weight": 0.0,
 }
 RAW_POLICY: dict[str, Any] = {**LIGHT_SEARCH, "num_simulations": 0}
 BASELINE_TASKS: tuple[tuple[str, str], ...] = (
@@ -271,7 +275,7 @@ def agent_factory(agent: str, checkpoint: Path, device: str, settings: Mapping[s
         return lambda: make_warmstart_search_agent(checkpoint=str(checkpoint), device=device, **dict(settings or {}))
     from tm_bot.comparator.agent import make_comparator_agent
 
-    return lambda: make_comparator_agent(checkpoint=str(checkpoint), device=device)
+    return lambda: make_comparator_agent(checkpoint=str(checkpoint), device=device, play_temperature="flat")
 
 
 def _recording(agent: str, factory: Callable[[], Agent], recorders: list[list[tuple[int, float]]]) -> Callable[[], Agent]:

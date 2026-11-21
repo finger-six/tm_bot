@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Any
 
+from tm_bot.agents.play_rules import (
+    MARGIN_UTILITY_WEIGHT,
+    V2_PLAY_TEMPERATURE,
+    PlayTemperatureSchedule,
+)
 from tm_bot.env.types import ActorObservation, Choice
+
+# #39 search budget for self-play, `dev-*` and `eval-*`: 16 simulations over K = 4 worlds,
+# with a fallback of 8 simulations (never below 8 / 4).
+V2_NUM_SIMULATIONS = 16
+FALLBACK_NUM_SIMULATIONS = 8
+V2_NUM_WORLDS = 4
 
 _ACTION_ROOT_PROMPTS = frozenset(
     {"take your first action", "take your next action"}
@@ -13,10 +25,17 @@ _ACTION_ROOT_PROMPTS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class SearchConfig:
-    """Hyperparameters controlling determinized IS-MCTS search."""
+    """Hyperparameters controlling determinized IS-MCTS search.
 
-    num_simulations: int = 32
-    num_worlds: int = 8
+    Defaults are the v2 self-play rules (#48): 16 simulations x K = 4, τ(g) at
+    action-phase decisions (`play_temperature`), and leaf/terminal utility
+    U = o + `margin_weight`·m. `temperature` is the non-action root temperature
+    (0 = most-visited). `action_temperature` is the v1 flat action-phase temperature,
+    used only when `play_temperature` is None.
+    """
+
+    num_simulations: int = V2_NUM_SIMULATIONS
+    num_worlds: int = V2_NUM_WORLDS
     c_puct: float = 1.5
     # First-play urgency: Q assigned to unvisited children, already in the perspective of the
     # player selecting at that node (visited Q values are sign-adjusted the same way).
@@ -25,6 +44,8 @@ class SearchConfig:
     action_temperature: float = 0.0
     wave_size: int | None = None
     max_nested_steps: int = 32
+    play_temperature: PlayTemperatureSchedule | None = V2_PLAY_TEMPERATURE
+    margin_weight: float = MARGIN_UTILITY_WEIGHT
 
     def __post_init__(self) -> None:
         if self.num_simulations < 0:
@@ -43,6 +64,29 @@ class SearchConfig:
             raise ValueError(f"wave_size must be >= 1, got {self.wave_size}")
         if self.max_nested_steps < 1:
             raise ValueError(f"max_nested_steps must be >= 1, got {self.max_nested_steps}")
+        if not (0.0 <= self.margin_weight < 1.0 / 1.2):
+            raise ValueError(f"margin_weight must be in [0, 1/1.2), got {self.margin_weight}")
+
+    @classmethod
+    def v2(cls, *, fallback: bool = False, **overrides: Any) -> SearchConfig:
+        """The #39 self-play/dev/eval search: 16 x 4, or 8 x 4 with `fallback`."""
+        sims = FALLBACK_NUM_SIMULATIONS if fallback else V2_NUM_SIMULATIONS
+        return replace(cls(num_simulations=sims, num_worlds=V2_NUM_WORLDS), **overrides)
+
+    def decision_temperature(self, observation: ActorObservation, default: float) -> float:
+        """Sampling temperature for one decision: τ(g) in the action phase, else `default`.
+
+        Without a schedule the v1 flat `action_temperature` applies in the action phase
+        when it is > 0.
+        """
+        if str(observation.get("public", {}).get("phase", "")) == "action":
+            if self.play_temperature is not None:
+                tau = self.play_temperature.for_observation(observation)
+                assert tau is not None
+                return tau
+            if self.action_temperature > 0.0:
+                return self.action_temperature
+        return default
 
 
 def is_search_decision(observation: ActorObservation, choice: Choice) -> bool:

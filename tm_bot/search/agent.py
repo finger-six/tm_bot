@@ -14,13 +14,20 @@ from typing import Any, Sequence
 import numpy as np
 import torch
 
+from tm_bot.agents.play_rules import V2_PLAY_TEMPERATURE, game_utility, search_utility
 from tm_bot.agents.protocol import WorldSampler
 from tm_bot.agents.sampler import batch_sample_worlds, batch_world_ops
 from tm_bot.env.types import ActorObservation, Choice, Op, Seat
 from tm_bot.models.agent import PolicyValueAgent
 from tm_bot.models.network import TMNetwork, check_encoder_version
 from tm_bot.models.vocab import CardVocab
-from tm_bot.search.config import SearchConfig, is_search_decision
+from tm_bot.search.config import (
+    FALLBACK_NUM_SIMULATIONS,
+    V2_NUM_SIMULATIONS,
+    V2_NUM_WORLDS,
+    SearchConfig,
+    is_search_decision,
+)
 
 DEFAULT_WARMSTART_CHECKPOINT = Path(r"C:\2026\tm_bot\runs\warmstart\best\checkpoint.pt")
 _CHECKPOINT_CACHE: dict[tuple[str, str], PolicyValueAgent] = {}
@@ -55,6 +62,38 @@ def _select_from_probs(
     else:
         w = clean
     return int(rng.choices(range(num_actions), weights=w.tolist(), k=1)[0])
+
+
+def _default_version(config: SearchConfig, policy_version: str) -> str:
+    """`ismcts-s16-k4-tau1g4-0.3g10-u0.15-<net>`; v1 configs keep `ismcts-sN-kK-<net>`."""
+    parts = [f"ismcts-s{config.num_simulations}-k{config.num_worlds}"]
+    if config.play_temperature is not None:
+        parts.append(config.play_temperature.spec)
+    if config.margin_weight > 0.0:
+        parts.append(f"u{config.margin_weight:g}")
+    parts.append(policy_version)
+    return "-".join(parts)
+
+
+def _terminal_utility(gres: Any, root_actor: Seat, margin_weight: float) -> float:
+    """U = o + w·m of a finished simulated game from `root_actor`'s view (0 if unknown)."""
+    if gres is None:
+        return 0.0
+    if gres.tie:
+        outcome = 0.0
+    elif gres.winner == root_actor:
+        outcome = 1.0
+    else:
+        outcome = -1.0
+    if margin_weight <= 0.0:
+        return outcome
+    scores = gres.scores
+    return game_utility(
+        outcome,
+        float(scores[root_actor]),
+        float(scores[1 - root_actor]),
+        weight=margin_weight,
+    )
 
 
 @dataclass
@@ -95,6 +134,7 @@ class _SearchState:
     sampler: WorldSampler
     root_actor: Seat
     root_phase: str
+    root_temperature: float
     root: _TreeNode
     num_simulations: int
     effective_k: int
@@ -140,11 +180,12 @@ class ISMCTSAgent:
         self._seed = seed
         self._rng = random.Random(seed)
         self._decision_counter = 0
-        self.version = version or (
-            f"ismcts-s{self.config.num_simulations}-k{self.config.num_worlds}-{policy_agent.version}"
-        )
+        self.version = version or _default_version(self.config, policy_agent.version)
         self.last_decision_was_searched: bool = False
         self.last_decision_latency_ms: float = 0.0
+        # Temperature the last decision was sampled with: τ(g) at action-phase decisions,
+        # 0.0 for argmax, None for forced single-candidate choices.
+        self.last_decision_temperature: float | None = None
         # Candidate distribution behind the last decision: root visit distribution at searched
         # decisions, policy-head probabilities at policy decisions, one-hot when forced. Used as
         # the self-play policy target and for entropy monitoring (#24).
@@ -167,6 +208,7 @@ class ISMCTSAgent:
         self.last_decision_was_searched = False
         self.last_decision_latency_ms = 0.0
         self.last_decision_policy = None
+        self.last_decision_temperature = None
 
     def __deepcopy__(self, memo: dict[int, Any]) -> ISMCTSAgent:
         cls = self.__class__
@@ -181,6 +223,7 @@ class ISMCTSAgent:
         clone.last_decision_was_searched = False
         clone.last_decision_latency_ms = 0.0
         clone.last_decision_policy = None
+        clone.last_decision_temperature = None
         return clone
 
     def search_batch_key(self) -> tuple[int, int, str]:
@@ -213,6 +256,7 @@ class ISMCTSAgent:
         """Fallback `Agent.act` using the neural policy head directly when no sampler is supplied."""
         t0 = time.perf_counter()
         idx = self.policy_agent.act(observation, choice)
+        self.last_decision_temperature = self.policy_agent.temperature
         self.last_decision_was_searched = False
         self.last_decision_latency_ms = (time.perf_counter() - t0) * 1000.0
         return idx
@@ -270,6 +314,7 @@ class ISMCTSAgent:
             one_hot = np.zeros((len(choices[idx].candidates),), dtype=np.float64)
             one_hot[0] = 1.0
             agents[idx].last_decision_policy = one_hot
+            agents[idx].last_decision_temperature = None
 
         gpu_indices = policy_indices + search_indices
         if not gpu_indices:
@@ -289,11 +334,8 @@ class ISMCTSAgent:
         for pos, idx in enumerate(policy_indices):
             ag = agents[idx]
             n_cand = len(choices[idx].candidates)
-            phase = str(observations[idx].get("public", {}).get("phase", ""))
-            eff_temp = (
-                ag.config.action_temperature
-                if phase == "action" and ag.config.action_temperature > 0.0
-                else ag.policy_agent.temperature
+            eff_temp = ag.config.decision_temperature(
+                observations[idx], ag.policy_agent.temperature
             )
             outputs[idx] = _select_from_probs(
                 probs_list[pos],
@@ -304,6 +346,7 @@ class ISMCTSAgent:
             ag.last_decision_was_searched = False
             ag.last_decision_latency_ms = per_init_ms
             ag.last_decision_policy = _normalize_priors(probs_list[pos], n_cand)
+            ag.last_decision_temperature = float(eff_temp)
 
         if not search_indices:
             return outputs
@@ -334,6 +377,7 @@ class ISMCTSAgent:
                 sampler=samplers[idx],
                 root_actor=int(obs["actor"]),
                 root_phase=str(obs.get("public", {}).get("phase", "")),
+                root_temperature=cfg.decision_temperature(obs, cfg.temperature),
                 root=root,
                 num_simulations=cfg.num_simulations,
                 effective_k=eff_k,
@@ -486,12 +530,11 @@ class ISMCTSAgent:
                                 for t, tr in zip(term_tasks, term_res):
                                     t.state.open_gids.discard(t.sim_gid)
                                     gres = tr[0]
-                                    if gres is None or gres.tie:
-                                        val = 0.0
-                                    elif gres.winner == t.state.root_actor:
-                                        val = 1.0
-                                    else:
-                                        val = -1.0
+                                    val = _terminal_utility(
+                                        gres,
+                                        t.state.root_actor,
+                                        t.state.agent.config.margin_weight,
+                                    )
                                     if t.expand_action not in t.parent_child_map:
                                         t.parent_child_map[t.expand_action] = _TreeNode(
                                             gid=None,
@@ -574,13 +617,22 @@ class ISMCTSAgent:
                                 stepping_pairs = []
 
                         if eval_leaves:
-                            leaf_probs, leaf_vals = pv_ref.predict_batch(
+                            leaf_probs, leaf_vals, leaf_margins = pv_ref.predict_batch(
                                 [t.obs for t in eval_leaves if t.obs is not None],
                                 [t.choice for t in eval_leaves if t.choice is not None],
                                 compute_value=True,
+                                return_margin=True,
                             )
-                            for t, lprobs, lval in zip(eval_leaves, leaf_probs, leaf_vals):
+                            for t, lprobs, lval, lmargin in zip(
+                                eval_leaves, leaf_probs, leaf_vals, leaf_margins
+                            ):
                                 assert t.choice is not None
+                                # Leaf utility (2p - 1) + w·m̂ from the leaf actor's view (#39).
+                                lval = search_utility(
+                                    float(lval),
+                                    float(lmargin),
+                                    weight=t.state.agent.config.margin_weight,
+                                )
                                 v_actor = (
                                     float(lval)
                                     if t.cur_seat_hint == t.state.root_actor
@@ -614,11 +666,7 @@ class ISMCTSAgent:
 
             for st in search_states:
                 root = st.root
-                temp = (
-                    st.agent.config.action_temperature
-                    if st.root_phase == "action" and st.agent.config.action_temperature > 0.0
-                    else st.agent.config.temperature
-                )
+                temp = st.root_temperature
                 if root.total_N <= 0.0 or float(root.N.max()) <= 0.0:
                     chosen = _select_from_probs(
                         root.priors,
@@ -658,6 +706,7 @@ class ISMCTSAgent:
                 outputs[st.req_idx] = chosen
                 st.agent.last_decision_was_searched = not st.sampling_failed
                 st.agent.last_decision_latency_ms = st.elapsed_ms
+                st.agent.last_decision_temperature = float(temp)
                 visits = np.asarray(root.N, dtype=np.float64)
                 total_visits = float(visits.sum())
                 st.agent.last_decision_policy = (
@@ -699,11 +748,24 @@ def make_warmstart_search_agent(
     wave_size: int | None = None,
     seed: int | None = None,
     encoder_version: int | None = None,
+    play_temperature: str | None = None,
+    margin_weight: float | None = None,
+    search_fallback: bool | None = None,
 ) -> ISMCTSAgent:
     """Factory loading and caching the warm-start checkpoint for eval/search runs.
 
     The agent encodes with the checkpoint's own encoder version, so a pre-#42 (v1)
     warm start plays as before; `encoder_version` additionally requires that version.
+
+    `play_temperature` picks the play rules (env `TM_SEARCH_PLAY_TEMP`):
+
+    - `"v2"` (#39/#48): τ(g) at action-phase decisions, utility U = o + 0.15·m, and
+      16 simulations x K = 4 (8 x 4 with `search_fallback`, env `TM_SEARCH_FALLBACK=1`).
+    - `"flat"` (v1): a flat `action_temperature` (default 1.0), outcome-only utility
+      unless `margin_weight` is given, and 8 x 4.
+
+    When unset it is `"flat"` if an action temperature was given (argument or
+    `TM_SEARCH_ACTION_TEMP`), so v1 milestone specs reproduce unchanged, else `"v2"`.
     """
     ckpt_path = str(
         checkpoint
@@ -725,15 +787,32 @@ def make_warmstart_search_agent(
     elif encoder_version is not None:
         check_encoder_version(pv.model.config.encoder_version, encoder_version, ckpt_path)
 
-    sims = (
-        num_simulations
-        if num_simulations is not None
-        else int(os.environ.get("TM_SEARCH_SIMS", "8"))
+    act_temp_env = os.environ.get("TM_SEARCH_ACTION_TEMP")
+    rules = play_temperature or os.environ.get("TM_SEARCH_PLAY_TEMP")
+    if rules is None:
+        rules = "flat" if (action_temperature is not None or act_temp_env) else "v2"
+    if rules not in ("v2", "flat"):
+        raise ValueError(f"play_temperature must be 'v2' or 'flat', got {rules!r}")
+    v2 = rules == "v2"
+    fallback = (
+        search_fallback
+        if search_fallback is not None
+        else os.environ.get("TM_SEARCH_FALLBACK", "") not in ("", "0")
     )
+
+    sims_env = os.environ.get("TM_SEARCH_SIMS")
+    if num_simulations is not None:
+        sims = num_simulations
+    elif sims_env:
+        sims = int(sims_env)
+    elif v2 and not fallback:
+        sims = V2_NUM_SIMULATIONS
+    else:
+        sims = FALLBACK_NUM_SIMULATIONS
     worlds = (
         num_worlds
         if num_worlds is not None
-        else int(os.environ.get("TM_SEARCH_WORLDS", "4"))
+        else int(os.environ.get("TM_SEARCH_WORLDS", str(V2_NUM_WORLDS)))
     )
     cpuct = (
         c_puct
@@ -748,13 +827,16 @@ def make_warmstart_search_agent(
     act_temp = (
         action_temperature
         if action_temperature is not None
-        else float(os.environ.get("TM_SEARCH_ACTION_TEMP", "1.0"))
+        else float(act_temp_env or "1.0")
     )
     wsize_env = os.environ.get("TM_SEARCH_WAVE_SIZE")
     wsize = (
         wave_size
         if wave_size is not None
         else (int(wsize_env) if wsize_env else 4)
+    )
+    weight = margin_weight if margin_weight is not None else (
+        SearchConfig().margin_weight if v2 else 0.0
     )
     cfg = SearchConfig(
         num_simulations=sims,
@@ -763,5 +845,7 @@ def make_warmstart_search_agent(
         temperature=temp,
         action_temperature=act_temp,
         wave_size=wsize,
+        play_temperature=V2_PLAY_TEMPERATURE if v2 else None,
+        margin_weight=float(weight),
     )
     return ISMCTSAgent(pv, config=cfg, seed=seed)
