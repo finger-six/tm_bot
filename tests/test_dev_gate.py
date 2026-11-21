@@ -50,8 +50,17 @@ def _passing(**overrides: Any) -> GateSummary:
             "latest": {"wins": 99, "losses": 1, "ties": 0},
         },
         dev_evals=(
-            DevEvalPoint(training_s=1800.0, anchor_win_rate=0.2, dev_score=-0.5),
-            DevEvalPoint(training_s=3600.0, anchor_win_rate=0.45, dev_score=-0.30),
+            # 24 min without the 10-min anchor baseline: the cost bound exactly.
+            DevEvalPoint(
+                training_s=1800.0,
+                anchor_win_rate=0.2,
+                dev_score=-0.5,
+                wall_s=2040.0,
+                baseline_s=600.0,
+            ),
+            DevEvalPoint(
+                training_s=3600.0, anchor_win_rate=0.45, dev_score=-0.30, wall_s=1000.0
+            ),
         ),
         anchor_dev_score=-0.30,
         stop_kind="budget",
@@ -127,6 +136,13 @@ def test_main_throughput_failure_points_at_the_8_4_fallback() -> None:
     assert "--search-fallback" in text
 
 
+def test_main_throughput_failure_at_the_fallback_says_stop_and_diagnose() -> None:
+    summary = _passing(selfplay_games=200, num_simulations=FALLBACK_NUM_SIMULATIONS)
+    text = render_markdown(evaluate_gate(summary))
+    assert "--search-fallback" not in text
+    assert "stop and diagnose" in text
+
+
 # --- 4. symmetry ----------------------------------------------------------------------
 @pytest.mark.parametrize("kind", ["pool", "anchor"])
 @pytest.mark.parametrize(
@@ -164,13 +180,40 @@ def test_symmetry_ignores_latest_and_b1() -> None:
 
 
 # --- 5. cost ----------------------------------------------------------------------------
-@pytest.mark.parametrize(("dev_eval_s", "passed"), [(1440.0, True), (1441.0, False)])
-def test_cost_at_most_40_percent_of_training_clock(dev_eval_s: float, passed: bool) -> None:
-    check = check_cost(_passing(dev_eval_s=dev_eval_s, dev_eval_baseline_s=600.0))
-    assert check.passed is passed
-    assert check.details["dev_eval_fraction_without_baseline"] == pytest.approx(
-        (dev_eval_s - 600.0) / 3600.0
+def _evals_with_walls(first_wall_s: float | None, second_wall_s: float | None):
+    return (
+        DevEvalPoint(1800.0, 0.2, -0.5, wall_s=first_wall_s, baseline_s=600.0),
+        DevEvalPoint(3600.0, 0.45, -0.30, wall_s=second_wall_s),
     )
+
+
+@pytest.mark.parametrize(
+    ("first_wall_s", "second_wall_s", "passed"),
+    [
+        (2040.0, 1440.0, True),  # both at 24 min without the baseline
+        (2041.0, 1000.0, False),  # the first is over once the baseline is removed
+        (1000.0, 1441.0, False),  # the 60-min evaluation is over
+        (1000.0, None, False),  # an untimed evaluation cannot pass
+    ],
+)
+def test_cost_each_evaluation_fits_40_percent_of_the_60_min_cadence(
+    first_wall_s: float, second_wall_s: float | None, passed: bool
+) -> None:
+    check = check_cost(_passing(dev_evals=_evals_with_walls(first_wall_s, second_wall_s)))
+    assert check.passed is passed
+    assert check.details["limit_s"] == pytest.approx(1440.0)
+
+
+def test_cost_ignores_the_gate_runs_own_cumulative_fraction() -> None:
+    # Two evaluations plus the baseline in a 1 h gate exceed 40% of its clock;
+    # that fraction is reported but does not decide the check.
+    check = check_cost(_passing(dev_eval_s=3000.0, dev_eval_baseline_s=600.0))
+    assert check.passed
+    assert check.details["dev_eval_fraction"] == pytest.approx(3000.0 / 3600.0)
+
+
+def test_cost_fails_without_dev_evaluations() -> None:
+    assert not check_cost(_passing(dev_evals=())).passed
 
 
 # --- 6. positive signal ---------------------------------------------------------------------

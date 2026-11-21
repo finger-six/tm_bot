@@ -2050,6 +2050,7 @@ def test_gate_run_logs_what_the_checker_needs_and_passes(
     assert [e.training_s for e in evals] == pytest.approx([1800.0, 3600.0])
     # The first evaluation also measures the anchor's own D vs b1-v2, once.
     assert [e.dev_eval_baseline_s for e in evals] == pytest.approx([100.0, 0.0])
+    assert [e.dev_eval_wall_s for e in evals] == pytest.approx([300.0, 200.0])
     assert summary.anchor_dev_score is not None
     assert all(e.rss_gb == pytest.approx(3.0) for e in evals)
     cycle = runner.logger.cycles[0]
@@ -2063,6 +2064,7 @@ def test_gate_run_logs_what_the_checker_needs_and_passes(
     assert gate.generation_counts == {14: 96, 15: 96, 16: 96}
     assert gate.results_by_opponent["anchor"] == {"wins": 36, "losses": 36, "ties": 0}
     assert gate.dev_eval_s == pytest.approx(300.0 + 200.0)
+    assert [e.baseline_s for e in gate.dev_evals] == pytest.approx([100.0, 0.0])
     assert gate.rss_gb_max == pytest.approx(3.0)
     report = dev_gate.evaluate_gate(gate)
     assert report.passed, dev_gate.render_markdown(report)
@@ -2106,3 +2108,28 @@ def test_gate_checker_exits_nonzero_on_a_failed_gate(
     failed = [line for line in text.splitlines() if "| **FAIL** |" in line]
     assert [line.split("|")[2].strip() for line in failed] == ["Throughput", "Resources"]
     assert "--search-fallback" in text
+
+
+def test_anchor_baseline_failures_count_as_dev_failures(tmp_path: Path) -> None:
+    # The one-time anchor-vs-b1-v2 baseline is the first evaluator call; a rule
+    # bug there must reach the checkpoint record (and so gate check 1).
+    calls = [0]
+
+    def evaluator(candidate: Path, opponent: Path | None, **kwargs: Any) -> DevResult:
+        calls[0] += 1
+        result = _fake_dev(candidate, opponent, **kwargs)
+        return dataclasses.replace(result, failures=1) if calls[0] == 1 else result
+
+    config = _run_config(
+        tmp_path, "baseline-failure", warmstart_checkpoint=str(tmp_path / "warmstart")
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_FakeEngine(),
+        learner=_FakeLearner(),
+        evaluator=evaluator,
+        model=_tiny_model(seed=33),
+        vocab=_VOCAB,
+    )
+    runner.run(max_cycles=1)
+    assert runner.logger.checkpoints[0].dev_failures == 1

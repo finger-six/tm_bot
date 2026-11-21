@@ -14,7 +14,10 @@ All seven checks must pass:
 2. Game shape: self-play median <= 18 generations, p95 <= 25, no game > 40.
 3. Throughput: self-play games per training hour, main >= 250, comparator >= 800.
 4. Symmetry: learner-seat win share vs the pool and vs the anchor in [35%, 65%].
-5. Cost: dev-eval wall time <= 40% of the training clock.
+5. Cost: every dev evaluation, less the one-time anchor baseline, fits in 40% of
+   the 24 h runs' 60-min cadence (<= 24 min), so those runs keep that cadence.
+   The gate's own cumulative fraction is reported for information: two
+   evaluations plus the baseline in 1 h cannot meet 40% (#52 amendment).
 6. Positive signal at 60 min: `a >= 0.45`, `D` >= the warm-start anchor's own `D`
    vs `b1-v2` on the same 104 `dev-*` seeds, and no stop rule triggered.
 7. Resources: learner RSS stays under the 20.0 GiB guard.
@@ -31,7 +34,9 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from tm_bot.runs.config import V2_DEV_EVAL_INTERVAL_S
 from tm_bot.runs.monitoring import MonitorLogger
+from tm_bot.search.config import FALLBACK_NUM_SIMULATIONS
 
 # Thresholds (#40 section 3).
 MAX_MEDIAN_GENERATIONS = 18.0
@@ -56,6 +61,8 @@ class DevEvalPoint:
     anchor_win_rate: float | None
     dev_score: float | None
     wall_s: float | None = None
+    # Wall time of the one-time anchor baseline inside this evaluation.
+    baseline_s: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +176,7 @@ def load_gate_summary(run_dir: str | Path) -> GateSummary:
                 anchor_win_rate=e.dev_win_rate_vs_anchor,
                 dev_score=e.dev_score_vs_b1,
                 wall_s=e.dev_eval_wall_s,
+                baseline_s=float(e.dev_eval_baseline_s),
             )
             for e in evals
         ),
@@ -290,23 +298,33 @@ def check_symmetry(s: GateSummary) -> GateCheck:
 
 
 def check_cost(s: GateSummary) -> GateCheck:
-    fraction = s.dev_eval_s / s.training_s if s.training_s > 0.0 else None
-    recurring = (
-        (s.dev_eval_s - s.dev_eval_baseline_s) / s.training_s if s.training_s > 0.0 else None
+    """Each evaluation must fit the 24 h runs' cost cap at their 60-min cadence.
+
+    `dev_eval_interval` doubles the 24 h cadence when one evaluation (less the
+    one-time anchor baseline) exceeds 40% of it; this check passes exactly when
+    the gate's costliest evaluation would not trigger that doubling.
+    """
+    limit_s = MAX_DEV_EVAL_FRACTION * V2_DEV_EVAL_INTERVAL_S
+    timed = bool(s.dev_evals) and all(e.wall_s is not None for e in s.dev_evals)
+    worst = (
+        max(float(e.wall_s or 0.0) - e.baseline_s for e in s.dev_evals) if timed else None
     )
-    passed = fraction is not None and fraction <= MAX_DEV_EVAL_FRACTION
+    passed = worst is not None and worst <= limit_s
+    fraction = s.dev_eval_s / s.training_s if s.training_s > 0.0 else None
     return GateCheck(
         5,
         "Cost",
         passed,
-        f"dev eval {s.dev_eval_s / 60.0:.1f} min = {_fmt(None if fraction is None else 100 * fraction, '.1f')}% "
-        f"of {s.training_s / 60.0:.1f} min training clock "
-        f"({_fmt(None if recurring is None else 100 * recurring, '.1f')}% without the "
-        f"one-time anchor baseline)",
-        f"<= {MAX_DEV_EVAL_FRACTION:.0%}",
+        f"costliest dev eval {_fmt(None if worst is None else worst / 60.0, '.1f')} min "
+        f"without the one-time anchor baseline (gate total {s.dev_eval_s / 60.0:.1f} min = "
+        f"{_fmt(None if fraction is None else 100 * fraction, '.1f')}% of the training clock, "
+        "for information)",
+        f"each <= {MAX_DEV_EVAL_FRACTION:.0%} of the {V2_DEV_EVAL_INTERVAL_S / 60.0:.0f}-min "
+        f"24 h cadence ({limit_s / 60.0:.0f} min)",
         {
+            "max_dev_eval_s_without_baseline": worst,
+            "limit_s": limit_s,
             "dev_eval_fraction": fraction,
-            "dev_eval_fraction_without_baseline": recurring,
             "dev_eval_s": s.dev_eval_s,
             "dev_eval_baseline_s": s.dev_eval_baseline_s,
         },
@@ -413,11 +431,14 @@ def render_markdown(report: GateReport) -> str:
         )
     throughput = report.checks[2]
     if s.agent_kind == "main" and not throughput.passed:
-        lines += [
-            "",
-            "Throughput missed: rerun the gate with `--search-fallback` (8/4); if it still "
-            "misses, stop and diagnose (#40 section 3).",
-        ]
+        if s.num_simulations > FALLBACK_NUM_SIMULATIONS:
+            advice = (
+                "Throughput missed: rerun the gate with `--search-fallback` (8/4); if it "
+                "still misses, stop and diagnose (#40 section 3)."
+            )
+        else:
+            advice = "Throughput missed at the 8/4 fallback: stop and diagnose (#40 section 3)."
+        lines += ["", advice]
     return "\n".join(lines) + "\n"
 
 

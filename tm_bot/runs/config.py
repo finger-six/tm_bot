@@ -37,6 +37,8 @@ WARMSTART_CHECKPOINT_ENV = "TM_SEARCH_CHECKPOINT"
 # clock, dev evaluation at 30 and 60 min. The 24 h runs keep the 60-min cadence.
 DEV_GATE_BUDGET_S = 3600.0
 DEV_GATE_DEV_EVAL_INTERVAL_S = 30.0 * 60.0
+# The 24 h runs' base dev cadence (#40 section 2).
+V2_DEV_EVAL_INTERVAL_S = 60.0 * 60.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,7 +164,7 @@ class RunConfig:
     device: str | None = None
 
     # Dev-evaluation cadence and cost cap (#40 section 2).
-    dev_eval_interval_s: float = 60.0 * 60.0
+    dev_eval_interval_s: float = V2_DEV_EVAL_INTERVAL_S
     dev_eval_cost_fraction: float = 0.40
     dev_anchor_games: int = 56
     # True for a 1 h development gate run (`dev_gate_config`, #52).

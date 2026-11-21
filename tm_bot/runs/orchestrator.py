@@ -882,6 +882,7 @@ class SelfPlayRunner:
 
         t_eval = self.clock()
         baseline_s = 0.0
+        baseline_failures = 0
         vs_anchor: DevResult | None = None
         try:
             if incumbent is not None and self.incumbent_b1_games is None:
@@ -890,6 +891,7 @@ class SelfPlayRunner:
                     incumbent, None, num_games=config.dev_games_per_opponent
                 )
                 baseline_s = self.clock() - t_base
+                baseline_failures = baseline.failures
                 self.incumbent_b1_games = baseline.records
                 self.best_dev_score = dev_score(baseline.records)
                 if anchor_is_incumbent:
@@ -914,8 +916,10 @@ class SelfPlayRunner:
         elif anchor_is_incumbent and vs_best is not None:
             anchor_games = games_on_seeds(vs_best.records, self._anchor_seed_keys())
             anchor_win_rate = dev_win_rate(anchor_games)
+        # A rule bug in the one-time anchor baseline games is still a rule bug.
         failures = (
-            vs_b1.failures
+            baseline_failures
+            + vs_b1.failures
             + (0 if vs_best is None else vs_best.failures)
             + (0 if vs_anchor is None else vs_anchor.failures)
         )
