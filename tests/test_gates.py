@@ -695,3 +695,89 @@ def test_setup_gate_ignores_3card_prelude_draw_after_setup_keep() -> None:
     by_pid = {p.player_id: p for p in res.players}
     assert by_pid["1001"].chosen_corporation == "CrediCor"
     assert by_pid["1001"].chosen_projects == ("Algae", "Birds", "Comet")
+
+
+def _deal(move_number: int, alice: list[str], bob: list[str]) -> dict:
+    return {
+        "move_number": move_number,
+        "player_id": "1001",
+        "player_name": "Alice",
+        "action_type": "pass",
+        "description": f"Alice drafts 4 cards: {', '.join(alice)} | Bob drafts 4 cards: {', '.join(bob)}",
+        "card_drafted": None,
+        "card_options": {"1001": alice, "1002": bob},
+        "cards_kept": None,
+        "reason": None,
+    }
+
+
+def _pick(move_number: int, pid: str, card: str, swap: dict | None = None) -> dict:
+    name = "Alice" if pid == "1001" else "Bob"
+    return {
+        "move_number": move_number,
+        "player_id": pid,
+        "player_name": name,
+        "action_type": "draft",
+        "description": f"{name} drafts {card}",
+        "card_drafted": card,
+        "card_options": swap,
+        "cards_kept": None,
+        "reason": "draft",
+    }
+
+
+def _keep(move_number: int) -> dict:
+    return {
+        "move_number": move_number,
+        "player_id": "1001",
+        "player_name": "Alice",
+        "action_type": "other",
+        "description": "Alice keeps Worms",
+        "card_drafted": None,
+        "card_options": None,
+        "cards_kept": {"1001": ["Worms"]},
+        "reason": None,
+    }
+
+
+def test_draft_generation_follows_round_and_inconsistent_rounds_are_quarantined() -> None:
+    """#30: generation = draft_round_id + 1; duplicate keys and gaps never reach the dataset."""
+    reg = CardRegistry.from_names(FIXTURE_CARDS)
+    rec = copy.deepcopy(_make_valid_record())
+    rec["moves"] = rec["moves"][:3] + [
+        # Round 1 (generation 2): clean two-pick sequence for Alice, one pick for Bob.
+        _deal(21, ["Mass Converter", "Towing A Comet", "Wave Power", "Worms"], ["Mangrove", "Mine", "Research", "Trees"]),
+        _pick(22, "1001", "Mass Converter"),
+        _pick(23, "1002", "Mangrove", {"1001": ["Mine", "Research", "Trees"], "1002": ["Towing A Comet", "Wave Power", "Worms"]}),
+        _pick(24, "1001", "Mine"),
+        _keep(25),
+        # Round 2 (generation 3): Alice's pick event is logged twice from the same packet.
+        _deal(31, ["Birds", "Comet", "Fish", "Grass"], ["Algae", "Heather", "Lichen", "Shuttles"]),
+        _pick(32, "1001", "Birds"),
+        _pick(33, "1001", "Birds"),
+        _pick(34, "1002", "Algae", {"1001": ["Heather", "Lichen", "Shuttles"], "1002": ["Comet", "Fish", "Grass"]}),
+        _keep(35),
+        # Round 3 (generation 4): Alice's first pick fails verification, so her second has a gap.
+        _deal(41, ["Dust Seals", "Farming", "Livestock", "Trees"], ["Decomposers", "Herbivores", "Mining Area", "Noctis City"]),
+        _pick(42, "1001", "Research"),
+        _pick(43, "1002", "Decomposers", {"1001": ["Herbivores", "Mining Area", "Noctis City"], "1002": ["Farming", "Livestock", "Trees"]}),
+        _pick(44, "1001", "Herbivores"),
+        _keep(45),
+    ]
+
+    res = extract_verified_drafts(rec, card_registry=reg)
+    assert [(p.move_number, p.player_id, p.draft_round_id, p.pick_index, p.generation) for p in res.picks] == [
+        (22, "1001", 1, 0, 2),
+        (23, "1002", 1, 0, 2),
+        (24, "1001", 1, 1, 2),
+        (34, "1002", 2, 0, 3),
+        (43, "1002", 3, 0, 4),
+    ]
+    assert sorted(res.dropped_reasons) == [
+        "chosen_not_in_packet",
+        "duplicate_pick_key",
+        "duplicate_pick_key",
+        "missing_earlier_pick",
+    ]
+    keys = [(p.player_id, p.draft_round_id, p.pick_index) for p in res.picks]
+    assert len(keys) == len(set(keys))

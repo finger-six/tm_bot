@@ -408,7 +408,7 @@ def build_draft_pick_choice(
     """
     actor = _validate_seat(seat)
     specs = cards_by_name if cards_by_name is not None else load_card_data()
-    # BGA parser recorded generation=1 on all draft_picks rows; round 1 corresponds to Gen 2+.
+    # Round r is the draft of generation r + 1; the v1 table's generation column is all 1 (#30).
     gen = max(2, int(draft_round_id) + 1)
 
     corps_off = sorted(str(c) for c in (offered_corps or (chosen_corp,)))

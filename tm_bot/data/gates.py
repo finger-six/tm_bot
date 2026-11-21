@@ -483,9 +483,6 @@ def extract_verified_setup(
     return SetupGateResult(True, players=tuple(verified_players))
 
 
-_GEN_END_RE = re.compile(r"end of the generation\s+(\d+)", re.IGNORECASE)
-
-
 @dataclass(frozen=True)
 class VerifiedDraftPick:
     player_id: str
@@ -493,7 +490,7 @@ class VerifiedDraftPick:
     move_number: int
     draft_round_id: int
     pick_index: int
-    generation: int | None
+    generation: int
     packet_cards: tuple[str, ...]
     chosen_card: str
 
@@ -503,6 +500,45 @@ class DraftExtractionResult:
     picks: tuple[VerifiedDraftPick, ...] = ()
     dropped_count: int = 0
     dropped_reasons: tuple[str, ...] = ()
+
+
+def _quarantine_inconsistent_rounds(
+    picks: list[VerifiedDraftPick], dropped_reasons: list[str]
+) -> list[VerifiedDraftPick]:
+    """Keep only picks whose (player, draft round) sequence is consistent (#30).
+
+    `draft_round_id` is the generation key (generation = round + 1), so each
+    player's picks in a round must be distinct `pick_index` values forming a
+    prefix 0, 1, 2, ...:
+    - a pick outside any draft round (round 0) is dropped (`no_draft_round`);
+    - a round with a repeated `pick_index` means two rounds were merged or a pick
+      event was logged twice, so the whole round is dropped (`duplicate_pick_key`);
+    - picks after a gap (an earlier pick failed verification) are dropped
+      (`missing_earlier_pick`), since their drafted-so-far set is incomplete.
+    """
+    groups: dict[tuple[str, int], list[VerifiedDraftPick]] = {}
+    for pick in picks:
+        groups.setdefault((pick.player_id, pick.draft_round_id), []).append(pick)
+    bad: set[int] = set()
+    for (_, round_id), group in groups.items():
+        indices = [p.pick_index for p in group]
+        if round_id < 1:
+            reason_by_pick = {id(p): "no_draft_round" for p in group}
+        elif len(set(indices)) != len(indices):
+            reason_by_pick = {id(p): "duplicate_pick_key" for p in group}
+        else:
+            reason_by_pick = {}
+            expected = 0
+            for p in sorted(group, key=lambda q: q.pick_index):
+                if p.pick_index == expected:
+                    expected += 1
+                else:
+                    reason_by_pick[id(p)] = "missing_earlier_pick"
+                    expected = -1  # everything after a gap is dropped
+        for pick_id, reason in reason_by_pick.items():
+            bad.add(pick_id)
+            dropped_reasons.append(reason)
+    return [p for p in picks if id(p) not in bad]
 
 
 def extract_verified_drafts(
@@ -526,7 +562,6 @@ def extract_verified_drafts(
     pending_packet: dict[str, tuple[str, ...]] = {}
     dropped_reasons: list[str] = []
     draft_round_id = 0
-    generation = 1
 
     def _flush_round() -> None:
         if round_picks:
@@ -550,9 +585,6 @@ def extract_verified_drafts(
         # Any keep/buy move ends an active draft round and is never a draft pick itself
         if has_kept:
             _flush_round()
-            gen_match = _GEN_END_RE.search(desc_str)
-            if gen_match:
-                generation = int(gen_match.group(1)) + 1
             continue
 
         raw_opts = move.get("card_options")
@@ -561,9 +593,6 @@ def extract_verified_drafts(
         # Draw-and-keep effects are not generation draft rounds
         if act == "draw":
             _flush_round()
-            gen_match = _GEN_END_RE.search(desc_str)
-            if gen_match:
-                generation = int(gen_match.group(1)) + 1
             continue
 
         is_draft_pick_move = (
@@ -593,7 +622,7 @@ def extract_verified_drafts(
                         move_number=mv_int,
                         draft_round_id=draft_round_id,
                         pick_index=max(0, 4 - len(pkt)),
-                        generation=generation,
+                        generation=draft_round_id + 1,
                         packet_cards=pkt,
                         chosen_card=chosen,
                     )
@@ -632,13 +661,10 @@ def extract_verified_drafts(
                     round_picks = kept_round
                 pending_packet[opid] = resolved_opt
 
-        gen_match = _GEN_END_RE.search(desc_str)
-        if gen_match:
-            generation = int(gen_match.group(1)) + 1
-
     _flush_round()
+    kept_picks = _quarantine_inconsistent_rounds(verified_picks, dropped_reasons)
     return DraftExtractionResult(
-        picks=tuple(verified_picks),
+        picks=tuple(kept_picks),
         dropped_count=len(dropped_reasons),
         dropped_reasons=tuple(dropped_reasons),
     )
