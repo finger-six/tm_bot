@@ -50,6 +50,8 @@ MAIN_AGENT = AgentSpec(
     build_model=_build_model,
     save_checkpoint=_save,
     load_checkpoint=_load,
+    # Reported P(win) and gate check 14 use a val-fitted temperature, as the comparator's (#60).
+    calibrate_temperature=True,
 )
 
 

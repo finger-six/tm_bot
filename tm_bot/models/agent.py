@@ -12,6 +12,7 @@ import torch
 from tm_bot.env.types import ActorObservation, Choice
 from tm_bot.models.encode import collate_encoded_batch, encode_choice, encode_observation
 from tm_bot.models.network import TMNetwork, load_checkpoint
+from tm_bot.models.value_temperature import calibrated_win_prob, load_value_temperature
 from tm_bot.models.vocab import CardVocab
 
 
@@ -27,12 +28,15 @@ class PolicyValueAgent:
         temperature: float = 0.0,
         seed: int | None = None,
         version: str = "policy-value-v1",
+        value_temperature: float = 1.0,
     ) -> None:
         self.device = torch.device(device)
         self.model = model.to(self.device)
         self.model.eval()
         self.vocab = vocab
         self.temperature = float(temperature)
+        # Temperature of the reported P(win) only (#60); search leaves use the raw value head.
+        self.value_temperature = float(value_temperature)
         self.version = version
         self._seed = seed
         self._rng = random.Random(seed)
@@ -52,6 +56,7 @@ class PolicyValueAgent:
         clone.model = self.model
         clone.vocab = self.vocab
         clone.temperature = self.temperature
+        clone.value_temperature = self.value_temperature
         clone.version = self.version
         clone._seed = self._seed
         clone._rng = random.Random(self._seed)
@@ -113,6 +118,10 @@ class PolicyValueAgent:
         )
         return probs_list, values, margins
 
+    def win_probability(self, values: Any) -> np.ndarray:
+        """Reported P(win) of value-head outputs, scaled by the checkpoint's value temperature."""
+        return calibrated_win_prob(values, self.value_temperature)
+
     def act(self, observation: ActorObservation, choice: Choice) -> int:
         n = len(choice.candidates)
         if n == 0:
@@ -149,7 +158,8 @@ class PolicyValueAgent:
         """Load an agent; it encodes with the checkpoint's own encoder version.
 
         `encoder_version` additionally requires that version (raising
-        `EncoderVersionMismatchError` otherwise); `None` accepts any.
+        `EncoderVersionMismatchError` otherwise); `None` accepts any. The reported P(win)
+        uses the checkpoint's value temperature (`load_value_temperature`).
         """
         model, vocab, meta = load_checkpoint(
             path, map_location=device, encoder_version=encoder_version
@@ -162,4 +172,5 @@ class PolicyValueAgent:
             temperature=temperature,
             seed=seed,
             version=resolved_version,
+            value_temperature=load_value_temperature(path, meta),
         )

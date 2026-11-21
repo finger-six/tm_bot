@@ -31,6 +31,7 @@ from tm_bot.agents.runner import DEFAULT_MAX_DECISIONS, play_games
 from tm_bot.env.types import SUPPORTED_MAPS
 from tm_bot.eval.harness import _deserialize_outcome, _serialize_outcome, resolve_agent_factory
 from tm_bot.eval.pairing import PairedGameMeta, build_paired_specs
+from tm_bot.models.value_temperature import read_value_temperature_file, value_temperature_path
 from tm_bot.search.agent import ISMCTSAgent
 from tm_bot.training.warmstart_gate import (
     GATE_SCHEMA_VERSION,
@@ -61,8 +62,15 @@ LIGHT_SEARCH: dict[str, Any] = {
     # flat action temperature, outcome-only search utility.
     "play_temperature": "flat",
     "margin_weight": 0.0,
+    # The one change of the #58 re-gate: the completed-Q root policy π′ (#60).
+    "root_rule": "completed_q",
 }
 RAW_POLICY: dict[str, Any] = {**LIGHT_SEARCH, "num_simulations": 0}
+# The archived v1 main warm start plays as it was evaluated: the same light search with its
+# visit-count root rule, so the vs-v1 opponent stays a fixed reference.
+V1_LIGHT_SEARCH: dict[str, Any] = {**LIGHT_SEARCH, "root_rule": "visits"}
+# Opponents whose games record the candidate's live P(win) (#60: per-opponent diagnostic).
+VALUE_RECORDING_OPPONENTS = ("b1", "self", "v1")
 BASELINE_TASKS: tuple[tuple[str, str], ...] = (
     # (gate task, encoded-cache task)
     ("draft", "draft"),
@@ -77,14 +85,29 @@ BASELINE_TASKS: tuple[tuple[str, str], ...] = (
 # --- validation inputs --------------------------------------------------------------------------
 
 
-def load_validation(run_dir: Path, agent: str) -> tuple[dict[str, Any], dict[str, Any] | None, Path]:
-    """`(metrics.json, value report the gate judges, path)` of a finished #46 run."""
+def load_validation(
+    run_dir: Path, agent: str, checkpoint: Path | None = None
+) -> tuple[dict[str, Any], dict[str, Any] | None, Path]:
+    """`(metrics.json, value report the gate judges, path)` of a finished #46 run.
+
+    Both agents are judged post-temperature (#58 amendment of check 14). A main warm start
+    trained before #60 has no `value_calibrated` in its metrics; its report then comes from the
+    checkpoint's value-temperature sidecar (`python -m tm_bot.training.value_temperature`).
+    """
     path = run_dir / "metrics.json"
     metrics = json.loads(path.read_text(encoding="utf-8"))
     if metrics.get("status") != "completed":
         raise ValueError(f"{path}: the #46 run has not completed (status={metrics.get('status')!r})")
-    val = metrics.get("val") or {}
-    value = metrics.get("value_calibrated") if agent == "comparator" else val.get("value")
+    value = metrics.get("value_calibrated")
+    if value is None and agent == "main":
+        ckpt = checkpoint or run_dir / "best"
+        fit = read_value_temperature_file(ckpt)
+        if fit is None:
+            raise ValueError(
+                f"{path} has no post-temperature value report and {value_temperature_path(ckpt)} is missing; "
+                f"fit it with `python -m tm_bot.training.value_temperature --checkpoint {ckpt}`"
+            )
+        value = fit["value_calibrated"]
     return metrics, value, path
 
 
@@ -215,9 +238,10 @@ def compute_frequency_baselines(
 
 
 class ValueRecordingSearchAgent(ISMCTSAgent):
-    """Search agent that also records its value head's win probability at each non-forced decision.
+    """Search agent that also records its reported (post-temperature) P(win) at each non-forced
+    decision.
 
-    Used only for the live value-calibration diagnostic vs `b1-v2`; actions are unchanged.
+    Used only for the live value-calibration diagnostics; actions are unchanged.
     """
 
     def __init__(self, inner: ISMCTSAgent, entries: list[tuple[int, float]]) -> None:
@@ -234,12 +258,13 @@ class ValueRecordingSearchAgent(ISMCTSAgent):
         out = super().act_batch_with_samplers(agents, observations, choices, samplers)
         idx = [i for i, c in enumerate(choices) if len(c.candidates) > 1]
         if idx:
-            _, values = agents[0].policy_agent.predict_batch(
+            pv = agents[0].policy_agent
+            _, values = pv.predict_batch(
                 [observations[i] for i in idx], [choices[i] for i in idx], compute_value=True
             )
-            for i, v in zip(idx, values):
+            for i, p in zip(idx, pv.win_probability(values)):
                 gen = int(observations[i].get("public", {}).get("generation", 0))
-                agents[i].value_entries.append((gen, (float(v) + 1.0) / 2.0))
+                agents[i].value_entries.append((gen, float(p)))
         return out
 
 
@@ -424,29 +449,40 @@ def main(argv: list[str] | None = None) -> int:
     baselines = None
     metrics_path = None
     if not args.skip_validation:
-        metrics, value, metrics_path = load_validation(args.run_dir, args.agent)
+        metrics, value, metrics_path = load_validation(args.run_dir, args.agent, checkpoint)
         print("[gate] computing frequency baselines ...", flush=True)
         baselines = compute_frequency_baselines(args.data_dir, args.cache_dir)
 
     summaries: dict[str, Any] = {}
+    value_temperature = None
     if not args.skip_live:
-        settings = LIGHT_SEARCH if args.agent == "main" else None
+        main_agent = args.agent == "main"
+        settings = LIGHT_SEARCH if main_agent else None
+        v1_settings = V1_LIGHT_SEARCH if main_agent else None
         cand = agent_factory(args.agent, checkpoint, device, settings)
+        if main_agent:
+            # Recorded live P(win) is post-temperature; a refit must not reuse old records.
+            value_temperature = cand().policy_agent.value_temperature  # type: ignore[attr-defined]
         opponents: dict[str, Callable[[], Agent]] = {
             "b0": resolve_agent_factory("b0"),
             "b1": resolve_agent_factory("b1"),
             "self": cand,
-            "v1": agent_factory(args.agent, v1_checkpoint, device, settings),
+            "v1": agent_factory(args.agent, v1_checkpoint, device, v1_settings),
         }
         for spec in pairings_for(args.agent):
             raw = spec.candidate == "raw"
             num_seeds = spec.num_seeds if args.seeds is None else args.seeds
+            record_values = spec.opponent in VALUE_RECORDING_OPPONENTS
             signature = {
                 "pairing": spec.key, "agent": args.agent, "checkpoint": str(checkpoint),
                 "opponent": str(v1_checkpoint) if spec.opponent == "v1" else spec.opponent,
                 "settings": RAW_POLICY if raw else settings, "num_seeds": num_seeds,
                 "seed_start": args.seed_start, "maps": list(maps), "max_decisions": args.max_decisions,
             }
+            if spec.opponent == "v1" and v1_settings is not None:
+                signature["opponent_settings"] = v1_settings
+            if value_temperature is not None:
+                signature["value_temperature"] = value_temperature
             path = work_dir / f"{spec.key}.json"
             loaded = _load_pairing(path, signature) if args.resume else None
             if loaded is None:
@@ -454,7 +490,7 @@ def main(argv: list[str] | None = None) -> int:
                 candidate = agent_factory(args.agent, checkpoint, device, RAW_POLICY) if raw else cand
                 loaded = run_pairing(
                     spec, agent=args.agent, candidate=candidate, opponent=opponents[spec.opponent],
-                    record_values=spec.opponent == "b1", num_seeds=num_seeds, seed_start=args.seed_start,
+                    record_values=record_values, num_seeds=num_seeds, seed_start=args.seed_start,
                     maps=maps, workers=args.workers, batch_size=args.batch_size, max_decisions=args.max_decisions,
                 )
                 _save_pairing(path, signature, *loaded)
@@ -484,6 +520,11 @@ def main(argv: list[str] | None = None) -> int:
                 if args.agent == "main" else "comparator standalone (sampled eval policy)"
             ),
             "raw_setting": ("search agent with num_simulations=0 (policy head)" if args.agent == "main" else None),
+            "v1_setting": (
+                "light search " + ", ".join(f"{k}={v}" for k, v in V1_LIGHT_SEARCH.items())
+                if args.agent == "main" else None
+            ),
+            "value_temperature": value_temperature if value is None else value.get("temperature"),
             "max_decisions": args.max_decisions,
             "workers": f"{args.workers} / {args.batch_size}",
             "seed_start": args.seed_start,

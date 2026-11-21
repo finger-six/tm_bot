@@ -152,16 +152,16 @@ def test_missing_validation_metrics_fail_every_validation_check() -> None:
     assert checks and not any(c.passed for c in checks)
 
 
-def test_load_validation_judges_main_raw_and_comparator_post_temperature(tmp_path: Path) -> None:
+def test_load_validation_judges_both_agents_post_temperature(tmp_path: Path) -> None:
+    """#58 amended check 14: the main agent is judged post-temperature too (sidecar: test_value_temperature)."""
     raw, cal = _value(accuracy=0.70), _value(accuracy=0.80)
-    for agent, expected in (("main", raw), ("comparator", cal)):
+    for agent in ("main", "comparator"):
         run = tmp_path / agent
         run.mkdir()
-        payload = {"status": "completed", "version": "v", "val": {**_val(), "value": raw},
-                   "value_calibrated": cal if agent == "comparator" else None}
+        payload = {"status": "completed", "version": "v", "val": {**_val(), "value": raw}, "value_calibrated": cal}
         (run / "metrics.json").write_text(json.dumps(payload), encoding="utf-8")
         _, value, _ = runner.load_validation(run, agent)
-        assert value == expected
+        assert value == cal
     (tmp_path / "main" / "metrics.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
     with pytest.raises(ValueError, match="not completed"):
         runner.load_validation(tmp_path / "main", "main")
@@ -349,6 +349,9 @@ class _StubPolicy:
     model = vocab = None
     device = "cpu"
 
+    def __init__(self, value_temperature: float = 1.0) -> None:
+        self.value_temperature = value_temperature
+
     def reset(self, seed: int | None = None) -> None:
         pass
 
@@ -359,12 +362,21 @@ class _StubPolicy:
         probs = [np.array([0.2, 0.8][: len(c.candidates)]) for c in choices]
         return probs, np.full(len(choices), 0.5, dtype=np.float32)  # value 0.5 -> win prob 0.75
 
+    def win_probability(self, values: Any) -> np.ndarray:
+        from tm_bot.models.value_temperature import calibrated_win_prob
 
-def test_value_recording_search_agent_records_without_changing_actions() -> None:
+        return calibrated_win_prob(values, self.value_temperature)
+
+
+@pytest.mark.parametrize("temperature", [1.0, 1.5])
+def test_value_recording_search_agent_records_without_changing_actions(temperature: float) -> None:
+    """It records the reported P(win): σ(logit / T) of the value head (0.75 raw at value 0.5)."""
     import copy
 
     entries: list[tuple[int, float]] = []
-    agent = runner.ValueRecordingSearchAgent(ISMCTSAgent(_StubPolicy(), config=SearchConfig()), entries)  # type: ignore[arg-type]
+    agent = runner.ValueRecordingSearchAgent(
+        ISMCTSAgent(_StubPolicy(temperature), config=SearchConfig()), entries  # type: ignore[arg-type]
+    )
     clone = copy.deepcopy(agent)
     assert type(clone) is runner.ValueRecordingSearchAgent and clone.value_entries is entries
     obs = {"actor": 0, "public": {"phase": "preludes", "generation": 3}}
@@ -372,7 +384,8 @@ def test_value_recording_search_agent_records_without_changing_actions() -> None
     one = Choice(seat=0, kind="space", prompt="Select space", candidates=(Candidate("a", "a"),))
     out = runner.ValueRecordingSearchAgent.act_batch_with_samplers([clone, clone], [obs, obs], [two, one], [None, None])
     assert out == [1, 0]
-    assert entries == [(3, 0.75)]
+    expected = 1.0 / (1.0 + np.exp(-np.log(3.0) / temperature))  # logit of 0.75 is ln 3
+    assert len(entries) == 1 and entries[0][0] == 3 and entries[0][1] == pytest.approx(expected, rel=1e-6)
 
 
 def test_value_recording_comparator_agent_records_calibrated_win_prob() -> None:
@@ -519,6 +532,35 @@ def test_report_renders_verdict_checks_and_per_map_breakdowns() -> None:
     passing = wg.format_gate_report(_result("main", _summaries("main")))
     assert "**Verdict: PASS**" in passing and "**FAIL**" not in passing
     json.dumps(result)  # the JSON report is serializable
+
+
+def test_main_light_search_uses_completed_q_and_the_v1_opponent_keeps_visits() -> None:
+    assert runner.LIGHT_SEARCH["root_rule"] == "completed_q"
+    assert runner.RAW_POLICY == {**runner.LIGHT_SEARCH, "num_simulations": 0}
+    assert runner.V1_LIGHT_SEARCH == {**runner.LIGHT_SEARCH, "root_rule": "visits"}
+    assert set(runner.VALUE_RECORDING_OPPONENTS) == {"b1", "self", "v1"}
+    for agent in ("main", "comparator"):
+        gate = _result(agent, _summaries(agent))["gate"]
+        names = [c["name"] for c in gate["checks"]]
+        assert "Gen >= 2 value ECE (post-temperature)" in names
+
+
+def test_report_shows_search_vs_raw_and_live_value_per_opponent() -> None:
+    summaries = _summaries("main", vs_b1={"margin": -22.0, "own_vp": 76.8},
+                           vs_b1_raw={"margin": -17.5, "own_vp": 80.4})
+    for key, rows in (("vs_b1", [(3, 0.7, 0.0)]), ("mirror", [(4, 0.6, 1.0)]), ("vs_v1", [(5, 0.9, 1.0)])):
+        summaries[key]["live_value"] = wg.live_value_metrics(rows)
+    gate = _result("main", summaries)["gate"]
+    delta = [d for d in gate["diagnostics"] if d["pairing"] == "search vs raw policy (vs b1-v2)"]
+    assert len(delta) == 1 and delta[0]["value"].startswith("-3.60 / -4.50")
+    live = {d["pairing"] for d in gate["diagnostics"] if d["name"].startswith("Live value")}
+    assert live == {"vs b1-v2", "self-mirror", "vs archived v1 warm start"}
+    md = wg.format_gate_report(_result("main", summaries))
+    assert "search vs raw policy (vs b1-v2)" in md and "| self-mirror | Live value" in md
+    assert "post-temperature" in md and "### Value head (post-temperature)" in md
+    # The comparator has no raw-policy pairing, so no search-vs-raw row.
+    cmp_gate = _result("comparator", _summaries("comparator"))["gate"]
+    assert not any(d["pairing"].startswith("search vs raw") for d in cmp_gate["diagnostics"])
 
 
 def test_compute_frequency_baselines_on_the_golden_v2_tables(tmp_path: Path) -> None:

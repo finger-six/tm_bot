@@ -41,6 +41,8 @@ VALUE_MIN_ACCURACY = 0.72
 VALUE_MAX_BRIER = 0.19
 VALUE_MAX_ECE = 0.04
 MONOTONE_BUCKETS: tuple[str, ...] = ("gen 2-5", "gen 6-9", "gen 10+")
+# Both agents' value checks score the val-fitted temperature's report (#58 amendment, #60).
+VALUE_LABEL = "post-temperature"
 
 # --- #38 §5.2: live dev-* behavioral gate --------------------------------------------------
 
@@ -270,8 +272,8 @@ def validation_checks(
     """#38 §5.1 on the #46 val metrics.
 
     `val` is `metrics.json["val"]`; `baselines` maps each gate task to a frequency-baseline entry
-    (`{"overall": {"acc", "total"}, "per_map": ...}`); `value` is the value report the gate judges
-    (`val["value"]` for the main agent, `metrics.json["value_calibrated"]` for the comparator).
+    (`{"overall": {"acc", "total"}, "per_map": ...}`); `value` is the value report the gate judges:
+    the post-temperature val report for both agents (#58 amendment of check 14).
     """
     group = "validation"
     checks: list[Check] = []
@@ -373,24 +375,46 @@ def live_checks(summaries: Mapping[str, Mapping[str, Any] | None]) -> list[Check
     ]
 
 
+def search_vs_raw(summaries: Mapping[str, Mapping[str, Any] | None]) -> dict[str, str] | None:
+    """Gated light search minus the raw policy vs b1-v2 (#58): own VP and VP margin."""
+    search, raw = _det(summaries.get("vs_b1")), _det(summaries.get("vs_b1_raw"))
+    if search is None or raw is None:
+        return None
+    vals = [search["mean_vp_a"], raw["mean_vp_a"], search["mean_vp_margin"], raw["mean_vp_margin"]]
+    if any(v is None for v in vals):
+        return None
+    s_vp, r_vp, s_m, r_m = (float(v) for v in vals)
+    return {
+        "pairing": "search vs raw policy (vs b1-v2)",
+        "name": "Own VP / VP margin, search minus raw",
+        "value": f"{_vp(s_vp - r_vp)} / {_vp(s_m - r_m)} (search {_num(s_vp, 2)} / {_vp(s_m)}, "
+                 f"raw {_num(r_vp, 2)} / {_vp(r_m)})",
+    }
+
+
 def diagnostics(summaries: Mapping[str, Mapping[str, Any] | None]) -> list[dict[str, str]]:
-    """Non-gating numbers #38 §5.2 asks to log: win rate and live value calibration vs b1-v2,
-    and the main agent's raw-policy (no-search) result vs b1-v2."""
+    """Non-gating numbers #38 §5.2 and #58 ask to log: win rate vs b1-v2, the main agent's
+    raw-policy (no-search) result vs b1-v2 and search minus raw, and live value calibration
+    (reported, post-temperature P(win)) per opponent: b1-v2, self-mirror, v1 warm start."""
     rows: list[dict[str, str]] = []
-    for key in ("vs_b1", "vs_b1_raw"):
+    for key in ("vs_b1", "vs_b1_raw", "mirror", "vs_v1"):
         s = summaries.get(key)
         if s is None:
             continue
         det = s["report"]
         ci = det["win_rate_ci_95"]
-        rows.append({
-            "pairing": s["label"],
-            "name": "Win rate",
-            "value": f"{_pct(det['win_rate'])}" + (f" [{_pct(ci[0])}, {_pct(ci[1])}]" if ci else ""),
-        })
+        if key in ("vs_b1", "vs_b1_raw"):
+            rows.append({
+                "pairing": s["label"],
+                "name": "Win rate",
+                "value": f"{_pct(det['win_rate'])}" + (f" [{_pct(ci[0])}, {_pct(ci[1])}]" if ci else ""),
+            })
         if key == "vs_b1_raw":
             rows.append({"pairing": s["label"], "name": "Mean own VP / VP margin",
                          "value": f"{_num(det['mean_vp_a'], 2)} / {_vp(det['mean_vp_margin'])}"})
+            delta = search_vs_raw(summaries)
+            if delta is not None:
+                rows.append(delta)
         lv = s.get("live_value")
         if lv:
             for scope, label in (("gen_2_plus", "gen >= 2"), ("all", "all gens")):
@@ -411,10 +435,12 @@ def evaluate_gate(
     value: Mapping[str, Any] | None,
     summaries: Mapping[str, Mapping[str, Any] | None],
 ) -> dict[str, Any]:
-    """All checks, diagnostics and the overall verdict (PASS only if every gating check passes)."""
-    value_label = "post-temperature" if agent == "comparator" else "raw"
+    """All checks, diagnostics and the overall verdict (PASS only if every gating check passes).
+
+    `value` is the post-temperature val value report for both agents (#58 amendment of check 14).
+    """
     specs = pairings_for(agent)
-    checks: list[Check] = validation_checks(val, baselines, value, value_label=value_label)
+    checks: list[Check] = validation_checks(val, baselines, value, value_label=VALUE_LABEL)
     checks += failure_checks({s.key: summaries.get(s.key) for s in specs})
     checks += live_checks(summaries)
     checks += [schedule_check(s, summaries.get(s.key)) for s in specs]
@@ -508,7 +534,9 @@ def format_gate_report(result: Mapping[str, Any]) -> str:
     ]
     for label, key in (("Checkpoint", "checkpoint"), ("Validation metrics", "metrics_path"),
                        ("v1 opponent", "v1_checkpoint"), ("Candidate setting", "candidate_setting"),
-                       ("Raw-policy diagnostic", "raw_setting"), ("Max decisions per game", "max_decisions"),
+                       ("v1 opponent setting", "v1_setting"), ("Raw-policy diagnostic", "raw_setting"),
+                       ("Value temperature (reported P(win), check 14)", "value_temperature"),
+                       ("Max decisions per game", "max_decisions"),
                        ("Workers / batch size", "workers"), ("Code", "git_commit")):
         if cfg.get(key) is not None:
             lines.append(f"- {label}: `{cfg[key]}`")
@@ -523,7 +551,10 @@ def format_gate_report(result: Mapping[str, Any]) -> str:
             f"{c['threshold']} | {result_s} | {c['note']} |"
         )
     if gate["diagnostics"]:
-        lines += ["", "## Diagnostics (not gating)", "", "| Pairing | Measure | Value |", "| --- | --- | --- |"]
+        lines += ["", "## Diagnostics (not gating)", "",
+                  "Live value rows score the candidate's reported (post-temperature) P(win) against the "
+                  "final result of its games.", "",
+                  "| Pairing | Measure | Value |", "| --- | --- | --- |"]
         lines += [f"| {d['pairing']} | {d['name']} | {d['value']} |" for d in gate["diagnostics"]]
 
     lines += ["", "## Live pairings", ""]
@@ -554,6 +585,6 @@ def format_gate_report(result: Mapping[str, Any]) -> str:
             lines.append("")
 
     lines += ["## Validation detail (val split)", "", *_validation_per_map(result.get("val"), result.get("baselines")), ""]
-    lines += [f"### Value head ({'post-temperature' if result['agent'] == 'comparator' else 'raw'})", "",
+    lines += [f"### Value head ({VALUE_LABEL})", "",
               *_value_table(result.get("value")), ""]
     return "\n".join(lines)

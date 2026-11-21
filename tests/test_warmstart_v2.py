@@ -25,6 +25,7 @@ from tm_bot.comparator.calibration import fit_midgame_temperature, fit_temperatu
 from tm_bot.comparator.model import ComparatorConfig, ComparatorNetwork, load_comparator_checkpoint
 from tm_bot.data.extract import run_extraction
 from tm_bot.data.inventory import run_inventory
+from tm_bot.models.agent import PolicyValueAgent
 from tm_bot.models.encode import collate_encoded_batch, encode_choice, encode_observation
 from tm_bot.models.network import TMModelConfig, TMNetwork, load_checkpoint
 from tm_bot.models.vocab import CardVocab
@@ -316,6 +317,14 @@ def test_both_agents_train_save_tagged_checkpoints_and_reports(golden_dir: Path,
     assert fit["excluded_gen1"] == sum(r["split"] == "val" for r in data_val["setup_outcomes"]) > 0
     assert comp_meta["temperature"] == pytest.approx(fit["temperature"]) == pytest.approx(comp["temperature"])
     assert "value_calibrated" in comp and comp["value_calibrated"]["temperature"] == pytest.approx(fit["temperature"])
+    # Since #60 the main warm start fits and stores its value temperature the same way.
+    main_fit = main_meta["val_calibration"]
+    assert (main_fit["n"], main_fit["excluded_gen1"]) == (fit["n"], fit["excluded_gen1"])
+    assert main_meta["temperature"] == pytest.approx(main_fit["temperature"]) == pytest.approx(main["temperature"])
+    assert main["value_calibrated"]["temperature"] == pytest.approx(main_fit["temperature"])
+    assert PolicyValueAgent.from_checkpoint(tmp_path / "main" / "best").value_temperature == pytest.approx(
+        main_fit["temperature"]
+    )
 
     with pytest.raises(RuntimeError, match="already completed"):
         train_warmstart.run_warmstart_training(
