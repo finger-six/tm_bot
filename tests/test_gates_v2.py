@@ -114,7 +114,8 @@ CASES: dict[str, tuple[Callable[[dict[str, Any]], None], dict[str, int]]] = {
                                    "research_buy:income_identity_failed": 1}),
     "count_only_discard": (_count_only_discard, {"hand_lost:count_only_discard": 1, "draft_pick:hand_lost": 3,
                                                  "research_buy:hand_lost": 1, "action:hand_lost": 2}),
-    "unnamed_draw": (_unnamed_draw, {"hand_lost:unnamed_draw": 1, "draft_pick:hand_lost": 3}),
+    "unnamed_draw": (_unnamed_draw, {"hand_lost:unnamed_draw": 1, "draft_pick:hand_lost": 3,
+                                     "research_buy:hand_lost": 1, "action:hand_lost": 2}),
     "play_not_in_hand": (_play_not_in_hand, {"hand_lost:play_not_in_hand": 1, "research_buy:hand_lost": 1}),
 }
 
@@ -149,6 +150,39 @@ def test_gate_quarantines_its_failure_case(case: str, registry: CardRegistry) ->
     for key in expected:
         if not key.startswith(("hand_lost", "income_identity")):
             assert tuple(key.split(":")) in dropped, (case, key, dropped)
+
+
+def _decision(res: LogStateResult, kind: str, move: int):
+    return next(d for d in res.decisions if d.player_id == A and d.kind == kind and d.move_number == move)
+
+
+def test_named_discard_keeps_the_hand_exact(registry: CardRegistry) -> None:
+    golden_hand = _decision(_reconstruct(_golden(), registry), "research_buy", 44).snapshot["me_hand"]
+    card = golden_hand[0]
+    data = _golden()
+    _row(data, 36)["description"] = f"Alice Testa discards {card}"
+    res = _reconstruct(data, registry)
+    # The discard itself keeps the identity; the hand is lost only when the discarded card is played later.
+    assert res.hand_lost_at[A] > 44
+    assert dict(res.counts_by_player[A]).get("hand_lost:play_not_in_hand") == 1
+    assert not any(k.startswith("hand_lost") and k != "hand_lost:play_not_in_hand" for k in res.counts_by_player[A])
+    snap = _decision(res, "research_buy", 44).snapshot
+    assert snap["me_hand_exact"] is True
+    assert snap["me_hand"] == [c for c in golden_hand if c != card]
+    assert card in snap["me_discarded_seen"]
+
+
+def test_look_and_buy_records_the_unkept_cards_as_seen(registry: CardRegistry) -> None:
+    data = _golden()
+    offer = _row(data, 34)  # Alice is shown two cards and keeps one of them two rows later
+    offer.update(action_type="draw", description="Alice Testa draws 2 card/s", card_options={A: ["Ants", "Birds"]})
+    keep = _row(data, 36)
+    keep.update(description="Alice Testa keeps 1 card/s", cards_kept={A: ["Ants"]})
+    res = _reconstruct(data, registry)
+    assert not any(k.startswith("hand_lost") for k in res.counts_by_player[A])
+    snap = _decision(res, "research_buy", 44).snapshot
+    assert "Ants" in snap["me_hand"] and "Ants" not in snap["me_discarded_seen"]
+    assert "Birds" in snap["me_discarded_seen"] and "Birds" not in snap["me_hand"]
 
 
 def test_forward_quarantine_keeps_earlier_rows(registry: CardRegistry) -> None:

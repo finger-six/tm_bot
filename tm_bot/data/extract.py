@@ -349,7 +349,7 @@ def format_yield_report_markdown(report: dict[str, Any]) -> str:
         f"- `setup_outcomes`: {examples['setup_outcomes']:,}",
         f"- `research_buys`: {examples.get('research_buys', 0):,}",
         f"- `midgame_values`: {examples.get('midgame_values', 0):,}",
-        f"- `draft_picks` without a gen 2+ snapshot (table-level v2 gate failed): "
+        f"- `draft_picks` without a gen 2+ snapshot (a generation 1 pick, or the table failed a table-level v2 gate): "
         f"{examples.get('draft_picks_without_snapshot', 0):,}",
         "",
         "## Split Sizes",
