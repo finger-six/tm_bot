@@ -9,7 +9,17 @@ from typing import Any, Mapping
 
 from tm_bot.agents.runner import DEFAULT_MAX_DECISIONS
 from tm_bot.env.types import SUPPORTED_MAPS
-from tm_bot.search.config import SearchConfig
+from tm_bot.agents.play_rules import (
+    MARGIN_UTILITY_WEIGHT,
+    SELFPLAY_RULES_VERSION,
+    PlayTemperatureSchedule,
+)
+from tm_bot.search.config import (
+    FALLBACK_NUM_SIMULATIONS,
+    V2_NUM_SIMULATIONS,
+    V2_NUM_WORLDS,
+    SearchConfig,
+)
 
 DEFAULT_RUNS_DIR = Path("runs")
 WARMSTART_CHECKPOINT_ENV = "TM_SEARCH_CHECKPOINT"
@@ -36,10 +46,17 @@ class RunConfig:
     """Configuration for one self-play run.
 
     Defaults match the #10 budget decision: 16 workers, 24 h of training time
-    (`wall_clock_budget_s`: wall clock minus in-run dev evaluation, #26), K = 4
-    worlds, 64 simulations per searched decision, a 200k-decision replay buffer,
-    30-minute checkpoints evaluated on 100 `dev-*` games against B1 and 100
-    against the previous best.
+    (`wall_clock_budget_s`: wall clock minus in-run dev evaluation, #26), a
+    200k-decision replay buffer, 30-minute checkpoints evaluated on 100 `dev-*`
+    games against B1 and 100 against the previous best.
+
+    Self-play follows the v2 rules (#39, #48; `selfplay_rules == "v2"`): 16
+    simulations x K = 4 worlds per searched decision (8 x 4 with
+    `search_fallback`, which normalises `num_simulations` to 8), τ(g) at every
+    learned seat's action-phase decisions (`play_temperature`), utility
+    U = o + `utility_margin_weight`·m, and the opponent mix 50% `latest` / 25%
+    pool / 10% warm-start anchor / 15% B1. A v1 run config (no
+    `selfplay_rules`) cannot be loaded.
     """
 
     run_name: str
@@ -51,12 +68,20 @@ class RunConfig:
     max_decisions_per_game: int = DEFAULT_MAX_DECISIONS
 
     # Search hyperparameters (shared by self-play and dev evaluation).
-    num_simulations: int = 64
-    num_worlds: int = 4
+    num_simulations: int = V2_NUM_SIMULATIONS
+    num_worlds: int = V2_NUM_WORLDS
     c_puct: float = 1.5
     temperature: float = 0.0
-    action_temperature: float = 1.0
     wave_size: int = 4
+    search_fallback: bool = False
+
+    # v2 self-play rules (#39, #48), shared by both agent kinds.
+    selfplay_rules: str = SELFPLAY_RULES_VERSION
+    play_temperature_start: float = 1.0
+    play_temperature_floor: float = 0.3
+    play_temperature_decay_from: int = 4
+    play_temperature_floor_at: int = 10
+    utility_margin_weight: float = MARGIN_UTILITY_WEIGHT
 
     # Seed namespaces. Training never leaves `train-*`; checkpoint selection is
     # `dev-*`; `eval-*` is never touched by a run.
@@ -84,10 +109,11 @@ class RunConfig:
     ppo_value_coef: float = 0.5
     ppo_entropy_coef: float = 0.01
 
-    # Opponent sampling (latest / frozen pool / B1).
-    opponent_latest_prob: float = 0.60
-    opponent_pool_prob: float = 0.30
-    opponent_b1_prob: float = 0.10
+    # Opponent sampling (latest / frozen pool / warm-start anchor / B1).
+    opponent_latest_prob: float = 0.50
+    opponent_pool_prob: float = 0.25
+    opponent_anchor_prob: float = 0.10
+    opponent_b1_prob: float = 0.15
     opponent_pool_size: int = 10
 
     # Checkpointing and evaluation.
@@ -130,10 +156,33 @@ class RunConfig:
             raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
         if self.wall_clock_budget_s <= 0.0:
             raise ValueError("wall_clock_budget_s must be > 0")
-        if self.num_simulations < 1:
-            raise ValueError("num_simulations must be >= 1")
-        if self.num_worlds < 1:
-            raise ValueError("num_worlds must be >= 1")
+        if self.selfplay_rules != SELFPLAY_RULES_VERSION:
+            raise ValueError(
+                f"selfplay_rules must be {SELFPLAY_RULES_VERSION!r}, got {self.selfplay_rules!r}"
+            )
+        if self.search_fallback:
+            # The fallback budget replaces the default one; `num_simulations` stays the
+            # effective count so metrics and search_config() read one field.
+            if self.num_simulations == V2_NUM_SIMULATIONS:
+                object.__setattr__(self, "num_simulations", FALLBACK_NUM_SIMULATIONS)
+            elif self.num_simulations != FALLBACK_NUM_SIMULATIONS:
+                raise ValueError(
+                    f"search_fallback uses {FALLBACK_NUM_SIMULATIONS} simulations, "
+                    f"got {self.num_simulations}"
+                )
+        if self.num_simulations < FALLBACK_NUM_SIMULATIONS:
+            raise ValueError(
+                f"num_simulations must be >= {FALLBACK_NUM_SIMULATIONS}, "
+                f"got {self.num_simulations}"
+            )
+        if self.num_worlds < V2_NUM_WORLDS:
+            raise ValueError(f"num_worlds must be >= {V2_NUM_WORLDS}, got {self.num_worlds}")
+        self.play_temperature  # validates the schedule
+        if not (0.0 <= self.utility_margin_weight < 1.0 / 1.2):
+            raise ValueError(
+                "utility_margin_weight must be in [0, 1/1.2), "
+                f"got {self.utility_margin_weight}"
+            )
         if not self.maps:
             raise ValueError("maps must be non-empty")
         if self.train_seed_start < 0 or self.dev_seed_start < 0:
@@ -164,12 +213,6 @@ class RunConfig:
             )
         if self.ppo_gamma <= 0.0:
             raise ValueError(f"ppo_gamma must be > 0, got {self.ppo_gamma}")
-        if self.agent_kind == "comparator" and self.action_temperature != 1.0:
-            # PPO recomputes behaviour log-probs at temperature 1 (on-policy).
-            raise ValueError(
-                "comparator runs require action_temperature == 1.0, got "
-                f"{self.action_temperature}"
-            )
         if self.random_init and self.agent_kind == "comparator":
             raise ValueError(
                 "random_init is only supported for the main agent; "
@@ -178,6 +221,7 @@ class RunConfig:
         probs = (
             self.opponent_latest_prob,
             self.opponent_pool_prob,
+            self.opponent_anchor_prob,
             self.opponent_b1_prob,
         )
         if any(p < 0.0 for p in probs):
@@ -189,6 +233,16 @@ class RunConfig:
     def run_dir(self) -> Path:
         return Path(self.output_root) / self.run_name
 
+    @property
+    def play_temperature(self) -> PlayTemperatureSchedule:
+        """τ(g) for every learned seat's action-phase decisions (#39)."""
+        return PlayTemperatureSchedule(
+            start=self.play_temperature_start,
+            floor=self.play_temperature_floor,
+            decay_from=self.play_temperature_decay_from,
+            floor_at=self.play_temperature_floor_at,
+        )
+
     def search_config(self) -> SearchConfig:
         """Search hyperparameters used by both self-play seats and dev evaluation."""
         return SearchConfig(
@@ -196,8 +250,9 @@ class RunConfig:
             num_worlds=self.num_worlds,
             c_puct=self.c_puct,
             temperature=self.temperature,
-            action_temperature=self.action_temperature,
             wave_size=self.wave_size,
+            play_temperature=self.play_temperature,
+            margin_weight=self.utility_margin_weight,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -211,6 +266,12 @@ class RunConfig:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> RunConfig:
+        rules = payload.get("selfplay_rules")
+        if rules != SELFPLAY_RULES_VERSION:
+            raise ValueError(
+                f"run config uses self-play rules {rules!r}; this code runs only "
+                f"{SELFPLAY_RULES_VERSION!r} (#48), so a v1 run cannot be resumed"
+            )
         valid = {f.name for f in fields(cls)}
         data = {k: v for k, v in payload.items() if k in valid}
         if "output_root" in data:

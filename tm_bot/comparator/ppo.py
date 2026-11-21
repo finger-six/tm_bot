@@ -13,12 +13,28 @@ import torch.nn.functional as F
 
 from tm_bot.comparator.model import ComparatorNetwork
 from tm_bot.models.encode import EncodedChoice, EncodedObservation
-from tm_bot.runs.buffer import collate_samples
+from tm_bot.runs.buffer import _optional_float, _optional_logits, collate_samples
 
 
 @dataclass(frozen=True, slots=True)
 class PPOSample:
-    """One recorded comparator decision with behavior log-probability and GAE targets."""
+    """One recorded comparator decision with behavior log-probability and GAE targets.
+
+    `old_log_prob` is the τ = 1 log-probability of `action`; scaling the PPO ratio
+    by the τ the decision was sampled at (`play_temperature`) is #50's job.
+
+    v2 self-play fields (#48), consumed by the learners (#49 main, #50 comparator):
+
+    - `play_temperature`: the τ this seat sampled the decision with (τ(g) in the
+      action phase, 0.0 for an argmax decision, None when the agent did not report
+      one, e.g. forced single-candidate decisions).
+    - `margin_target`: m = clip(my_vp - opp_vp, -60, 60) / 50 for this seat at game
+      end (`vp_margin_target`), the margin head's target; U = o + 0.15·m.
+    - `anchor_logits`: float32[num_candidates] raw (τ = 1) policy logits of the frozen
+      warm-start anchor on this same observation and choice; index i is candidate i,
+      the same order as `policy_target` (and `action`). None when the run has no
+      anchor.
+    """
 
     observation: EncodedObservation
     choice: EncodedChoice
@@ -34,6 +50,9 @@ class PPOSample:
     behavior_value: float  # raw win probability at collection time
     advantage: float = 0.0
     return_: float = 0.0
+    play_temperature: float | None = None
+    margin_target: float = 0.0
+    anchor_logits: np.ndarray | None = None
 
     @property
     def num_candidates(self) -> int:
@@ -81,11 +100,18 @@ class PPOBuffer:
             "behavior_value": [s.behavior_value for s in self._items],
             "advantage": [s.advantage for s in self._items],
             "return_": [s.return_ for s in self._items],
+            "play_temperature": [s.play_temperature for s in self._items],
+            "margin_target": [s.margin_target for s in self._items],
+            "anchor_logits": [s.anchor_logits for s in self._items],
         }
 
     def load_state_dict(self, payload: dict[str, list]) -> None:
         self._items.clear()
-        for i in range(len(payload["action"])):
+        n = len(payload["action"])
+        play_temperature = payload.get("play_temperature", [None] * n)
+        margin_target = payload.get("margin_target", [0.0] * n)
+        anchor_logits = payload.get("anchor_logits", [None] * n)
+        for i in range(n):
             self._items.append(
                 PPOSample(
                     observation=payload["observation"][i],
@@ -102,6 +128,9 @@ class PPOBuffer:
                     behavior_value=float(payload["behavior_value"][i]),
                     advantage=float(payload["advantage"][i]),
                     return_=float(payload["return_"][i]),
+                    play_temperature=_optional_float(play_temperature[i]),
+                    margin_target=float(margin_target[i]),
+                    anchor_logits=_optional_logits(anchor_logits[i]),
                 )
             )
 

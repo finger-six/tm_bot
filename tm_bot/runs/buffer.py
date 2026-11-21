@@ -18,7 +18,20 @@ from tm_bot.models.encode import (
 
 @dataclass(frozen=True, slots=True)
 class DecisionSample:
-    """One training row: acting-seat observation, choice, visit policy, utility target."""
+    """One training row: acting-seat observation, choice, visit policy, utility target.
+
+    v2 self-play fields (#48), consumed by the learners (#49 main, #50 comparator):
+
+    - `play_temperature`: the τ this seat sampled the decision with (τ(g) in the
+      action phase, 0.0 for an argmax decision, None when the agent did not report
+      one, e.g. forced single-candidate decisions).
+    - `margin_target`: m = clip(my_vp - opp_vp, -60, 60) / 50 for this seat at game
+      end (`vp_margin_target`), the margin head's target; U = o + 0.15·m.
+    - `anchor_logits`: float32[num_candidates] raw (τ = 1) policy logits of the frozen
+      warm-start anchor on this same observation and choice; index i is candidate i,
+      the same order as `policy_target` (and `action`). None when the run has no
+      anchor.
+    """
 
     observation: EncodedObservation
     choice: EncodedChoice
@@ -29,6 +42,9 @@ class DecisionSample:
     seed_key: str
     map_name: str
     generation: int
+    play_temperature: float | None = None
+    margin_target: float = 0.0
+    anchor_logits: np.ndarray | None = None
 
     @property
     def num_candidates(self) -> int:
@@ -102,11 +118,17 @@ class ReplayBuffer:
             "seed_key": [s.seed_key for s in self._items],
             "map_name": [s.map_name for s in self._items],
             "generation": [s.generation for s in self._items],
+            "play_temperature": [s.play_temperature for s in self._items],
+            "margin_target": [s.margin_target for s in self._items],
+            "anchor_logits": [s.anchor_logits for s in self._items],
         }
 
     def load_state_dict(self, payload: dict[str, list]) -> None:
         self._items.clear()
         n = len(payload["value_target"])
+        play_temperature = payload.get("play_temperature", [None] * n)
+        margin_target = payload.get("margin_target", [0.0] * n)
+        anchor_logits = payload.get("anchor_logits", [None] * n)
         for i in range(n):
             self._items.append(
                 DecisionSample(
@@ -119,8 +141,19 @@ class ReplayBuffer:
                     seed_key=str(payload["seed_key"][i]),
                     map_name=str(payload["map_name"][i]),
                     generation=int(payload["generation"][i]),
+                    play_temperature=_optional_float(play_temperature[i]),
+                    margin_target=float(margin_target[i]),
+                    anchor_logits=_optional_logits(anchor_logits[i]),
                 )
             )
+
+
+def _optional_float(value: float | None) -> float | None:
+    return None if value is None else float(value)
+
+
+def _optional_logits(value: np.ndarray | None) -> np.ndarray | None:
+    return None if value is None else np.asarray(value, dtype=np.float32)
 
 
 def collate_samples(

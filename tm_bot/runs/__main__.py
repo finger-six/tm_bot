@@ -24,7 +24,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--budget-hours", type=float, default=24.0, help="Training-time budget (wall clock minus in-run dev eval).")
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--sims", type=int, default=64, help="Simulations per searched decision.")
+    parser.add_argument("--sims", type=int, default=16, help="Simulations per searched decision.")
+    parser.add_argument(
+        "--search-fallback",
+        action="store_true",
+        help="Use the #39 fallback search budget: 8 simulations x K = 4.",
+    )
     parser.add_argument("--worlds", type=int, default=4, help="Determinizations (K).")
     parser.add_argument("--games-per-cycle", type=int, default=32)
     parser.add_argument("--updates-per-cycle", type=int, default=16)
@@ -68,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         batch_size=args.batch_size,
         wall_clock_budget_s=args.budget_hours * 3600.0,
         num_simulations=args.sims,
+        search_fallback=args.search_fallback,
         num_worlds=args.worlds,
         games_per_cycle=args.games_per_cycle,
         updates_per_cycle=args.updates_per_cycle,

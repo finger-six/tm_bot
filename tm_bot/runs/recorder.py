@@ -25,6 +25,10 @@ class DecisionRecord:
 
     Keeping `ActorObservation` dicts here cost ~423 KB per record; the encoded
     arrays cost ~10 KB, which is what the replay buffer and PPO rollout consume.
+
+    `play_temperature` is the τ the agent sampled this decision with (#48): τ(g) in
+    the action phase, 0.0 for an argmax decision, None when the agent does not say
+    (B1, forced single-candidate decisions).
     """
 
     observation: EncodedObservation
@@ -35,16 +39,22 @@ class DecisionRecord:
     seat: Seat
     generation: int
     num_candidates: int
+    play_temperature: float | None = None
 
 
 @dataclass
 class GameRecorder:
-    """Ordered action history and (optionally) policy records for one game."""
+    """Ordered action history and (optionally) policy records for one game.
+
+    Only `capture_seat`'s decisions are recorded, unless `record_both_seats` is set:
+    mirror games against `latest` record both seats (#48).
+    """
 
     seed_key: str
     map_name: str
     capture_seat: Seat | None = None
     vocab: CardVocab | None = None
+    record_both_seats: bool = False
     decisions: list[DecisionRecord] = field(default_factory=list)
     actions: list[tuple[int, int]] = field(default_factory=list)
 
@@ -56,9 +66,13 @@ class GameRecorder:
         policy: Sequence[float] | None,
         *,
         was_searched: bool,
+        play_temperature: float | None = None,
     ) -> None:
         seat = int(observation["actor"])  # type: ignore[index]
-        if self.capture_seat is None or seat != self.capture_seat:
+        captured = self.capture_seat is not None and (
+            seat == self.capture_seat or self.record_both_seats
+        )
+        if not captured:
             self.actions.append((seat, int(candidate_index)))
             return
         if self.vocab is None:
@@ -84,6 +98,7 @@ class GameRecorder:
                 seat=seat,  # type: ignore[arg-type]
                 generation=int(observation["public"]["generation"]),  # type: ignore[index]
                 num_candidates=n,
+                play_temperature=None if play_temperature is None else float(play_temperature),
             )
         )
         # Log the action only after encoding succeeded, so a failed encode never
@@ -157,6 +172,7 @@ class RecordingAgent:
             index,
             policy,
             was_searched=bool(getattr(self.inner, "last_decision_was_searched", False)),
+            play_temperature=getattr(self.inner, "last_decision_temperature", None),
         )
 
     def act(self, observation: ActorObservation, choice: Choice) -> int:

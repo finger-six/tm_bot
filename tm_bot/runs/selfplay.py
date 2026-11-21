@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 import random
 from pathlib import Path
@@ -20,8 +21,9 @@ from tm_bot.eval.seeds import (
     make_seed_key,
     validate_namespace,
 )
-from tm_bot.models.network import TMNetwork
+from tm_bot.models.network import TMNetwork, load_checkpoint, vp_margin_target
 from tm_bot.models.vocab import CardVocab
+from tm_bot.runs.anchor import anchor_policy_logits, check_anchor_compatible, freeze
 from tm_bot.runs.buffer import DecisionSample, normalize_policy_target
 from tm_bot.runs.config import RunConfig
 from tm_bot.runs.monitoring import (
@@ -30,33 +32,40 @@ from tm_bot.runs.monitoring import (
     compare_replay,
     policy_entropy,
 )
-from tm_bot.runs.recorder import GameRecorder, capture_agent
+from tm_bot.runs.recorder import DecisionRecord, GameRecorder, capture_agent
 from tm_bot.search.agent import ISMCTSAgent
 
 
 @dataclass(frozen=True, slots=True)
 class OpponentChoice:
-    """One sampled opponent: the latest net, a frozen pool checkpoint, or B1."""
+    """One sampled opponent: the latest net, a frozen pool checkpoint, the frozen
+    warm-start anchor, or B1."""
 
-    kind: str  # "latest" | "pool" | "b1"
+    kind: str  # "latest" | "pool" | "anchor" | "b1"
     checkpoint: Path | None = None
 
 
 class OpponentSampler:
-    """Sample opponents 60% latest / 30% last-10 pool / 10% B1 by default."""
+    """Sample opponents with the #39 mix: 50% latest / 25% last-10 pool / 10% anchor / 15% B1.
+
+    One uniform roll is split in the order latest, pool, anchor, B1. With an empty pool
+    the pool share falls back to latest.
+    """
 
     def __init__(
         self,
         *,
-        latest_prob: float = 0.60,
-        pool_prob: float = 0.30,
-        b1_prob: float = 0.10,
+        latest_prob: float = 0.50,
+        pool_prob: float = 0.25,
+        anchor_prob: float = 0.10,
+        b1_prob: float = 0.15,
         rng: np.random.Generator | None = None,
     ) -> None:
-        if abs(latest_prob + pool_prob + b1_prob - 1.0) > 1e-9:
+        if abs(latest_prob + pool_prob + anchor_prob + b1_prob - 1.0) > 1e-9:
             raise ValueError("opponent probabilities must sum to 1")
         self.latest_prob = latest_prob
         self.pool_prob = pool_prob
+        self.anchor_prob = anchor_prob
         self.b1_prob = b1_prob
         self.rng = rng or np.random.default_rng(0)
         self.pool: tuple[Path, ...] = ()
@@ -66,10 +75,14 @@ class OpponentSampler:
 
     def sample(self) -> OpponentChoice:
         roll = float(self.rng.random())
-        if self.pool and roll >= self.latest_prob and roll < self.latest_prob + self.pool_prob:
+        pool_end = self.latest_prob + self.pool_prob
+        anchor_end = pool_end + self.anchor_prob
+        if self.pool and self.latest_prob <= roll < pool_end:
             idx = int(self.rng.integers(0, len(self.pool)))
             return OpponentChoice(kind="pool", checkpoint=self.pool[idx])
-        if roll >= self.latest_prob + self.pool_prob and self.b1_prob > 0.0:
+        if pool_end <= roll < anchor_end:
+            return OpponentChoice(kind="anchor")
+        if roll >= anchor_end and self.b1_prob > 0.0:
             return OpponentChoice(kind="b1")
         return OpponentChoice(kind="latest")
 
@@ -117,7 +130,8 @@ def build_selfplay_specs(
 
     `learner_factory(seed)` and `opponent_factory(choice, seed)` must return
     `Agent`s; the recorder's `capture_seat` is the training seat, so only that
-    seat's `(observation, choice)` pairs become encoded training rows. `vocab`
+    seat's `(observation, choice)` pairs become encoded training rows, except in
+    mirror games against `latest`, which record both seats (#48). `vocab`
     belongs to the caller's model and is shared by every recorder. Returns
     `(specs, recorders, training_seats, opponent_kinds)`.
     """
@@ -143,9 +157,14 @@ def build_selfplay_specs(
             map_name=map_name,
             capture_seat=training_seat,  # type: ignore[arg-type]
             vocab=vocab,
+            record_both_seats=opponent.kind == "latest",
         )
         captured_learner = capture_agent(learner, recorder, capture_seat=training_seat)  # type: ignore[arg-type]
-        captured_opp = capture_agent(opp_agent, recorder, capture_seat=None)
+        captured_opp = capture_agent(
+            opp_agent,
+            recorder,
+            capture_seat=(1 - training_seat) if recorder.record_both_seats else None,  # type: ignore[arg-type]
+        )
         agents: tuple[Agent, Agent] = (
             (captured_learner, captured_opp)
             if training_seat == 0
@@ -184,6 +203,24 @@ def game_summary(outcome: GameRunResult) -> GameSummary:
         error_type=outcome.error_type,
         error=outcome.error,
     )
+
+
+def margin_for_seat(summary: GameSummary, seat: int) -> float:
+    """m = clip(my_vp - opp_vp, -60, 60) / 50 from `seat`'s perspective."""
+    if not summary.ok or summary.scores is None:
+        raise ValueError("cannot score an unfinished game")
+    return float(vp_margin_target(summary.scores[seat], summary.scores[1 - seat]))
+
+
+def check_recorded_seats(recorder: GameRecorder, training_seat: int) -> None:
+    """Raise unless every record is the training seat's (or the game is a mirror)."""
+    if recorder.record_both_seats:
+        return
+    for rec in recorder.decisions:
+        if int(rec.seat) != training_seat:
+            raise RuntimeError(
+                f"recorded actor {rec.seat} does not match training seat {training_seat}"
+            )
 
 
 def utility_for_seat(summary: GameSummary, seat: int) -> float:
@@ -245,6 +282,8 @@ class SelfPlayEngine:
         vocab: CardVocab,
         device: str = "cpu",
         rng: np.random.Generator | None = None,
+        anchor_model: TMNetwork | None = None,
+        anchor_vocab: CardVocab | None = None,
     ) -> None:
         self.config = config
         self.model = model
@@ -254,12 +293,32 @@ class SelfPlayEngine:
         self.opponents = OpponentSampler(
             latest_prob=config.opponent_latest_prob,
             pool_prob=config.opponent_pool_prob,
+            anchor_prob=config.opponent_anchor_prob,
             b1_prob=config.opponent_b1_prob,
             rng=self.rng,
         )
         self._card_data = None
         self._pool_agents: dict[str, ISMCTSAgent] = {}
+        self._anchor_agent: ISMCTSAgent | None = None
+        self._anchor: tuple[TMNetwork, CardVocab] | None = None
+        if anchor_model is not None:
+            self._set_anchor(anchor_model, anchor_vocab or vocab)
         self.seed_cursor = config.train_seed_start
+
+    def _set_anchor(self, model: TMNetwork, vocab: CardVocab) -> None:
+        check_anchor_compatible(model, vocab, self.model, self.vocab)
+        freeze(model)
+        self._anchor = (model, vocab)
+
+    @property
+    def anchor(self) -> tuple[TMNetwork, CardVocab] | None:
+        """The frozen warm-start anchor `(model, vocab)`, loaded once; None without one."""
+        if self._anchor is None and self.config.warmstart_checkpoint:
+            model, vocab, _meta = load_checkpoint(
+                self.config.warmstart_checkpoint, map_location=self.device
+            )
+            self._set_anchor(model, vocab)
+        return self._anchor
 
     def set_opponent_pool(self, checkpoints: Sequence[str | Path]) -> None:
         self.opponents.set_pool(checkpoints)
@@ -293,9 +352,29 @@ class SelfPlayEngine:
                 seed=seed,
             )
             self._pool_agents[key] = cached
-        import copy
-
         agent = copy.deepcopy(cached)
+        agent.reset(seed)
+        return agent
+
+    def _anchor_factory(self, seed: int) -> ISMCTSAgent:
+        if self._anchor_agent is None:
+            from tm_bot.models.agent import PolicyValueAgent
+
+            anchor = self.anchor
+            if anchor is None:
+                raise RuntimeError(
+                    "the anchor opponent needs config.warmstart_checkpoint (the frozen warm start)"
+                )
+            pv = PolicyValueAgent(
+                anchor[0],
+                anchor[1],
+                device=self.device,
+                temperature=0.0,
+                seed=seed,
+                version="selfplay-anchor",
+            )
+            self._anchor_agent = ISMCTSAgent(pv, config=self.config.search_config(), seed=seed)
+        agent = copy.deepcopy(self._anchor_agent)
         agent.reset(seed)
         return agent
 
@@ -306,6 +385,8 @@ class SelfPlayEngine:
             return B1Agent(seed=seed, card_data=self._card_data)
         if choice.kind == "pool" and choice.checkpoint is not None:
             return self._pool_factory(choice.checkpoint, seed)
+        if choice.kind == "anchor":
+            return self._anchor_factory(seed)
         return self._learner_factory(seed)
 
     def play_batch(
@@ -350,12 +431,17 @@ class SelfPlayEngine:
         training_seats: Sequence[int],
         opponent_kinds: Sequence[str] | None = None,
     ) -> SelfPlayBatch:
-        """Encode recorded acting-seat decisions into training rows with utility targets."""
+        """Encode recorded decisions into training rows with outcome and margin targets.
+
+        Each row's targets come from its own seat (mirror games carry both seats); the
+        frozen anchor's logits are attached when the run has an anchor.
+        """
         games = [game_summary(o) for o in outcomes]
         samples: list[DecisionSample] = []
         latencies: list[float] = []
         decisions = 0
         searched = 0
+        kept: list[tuple[GameRecorder, DecisionRecord, float, float]] = []
         for outcome, recorder, seat in zip(outcomes, recorders, training_seats):
             decisions += int(outcome.decisions)
             searched += recorder.num_searched
@@ -364,29 +450,38 @@ class SelfPlayEngine:
             summary = game_summary(outcome)
             if not summary.ok:
                 continue
-            value_target = utility_for_seat(summary, seat)
+            check_recorded_seats(recorder, seat)
             for rec in recorder.decisions:
-                if int(rec.seat) != seat:
-                    raise RuntimeError(
-                        f"recorded actor {rec.seat} "
-                        f"does not match training seat {seat}"
-                    )
-                n = rec.num_candidates
-                if n < 1:
+                if rec.num_candidates < 1:
                     continue
-                samples.append(
-                    DecisionSample(
-                        observation=rec.observation,
-                        choice=rec.choice,
-                        policy_target=normalize_policy_target(rec.policy, n),
-                        value_target=float(value_target),
-                        seat=int(seat),
-                        was_searched=bool(rec.was_searched),
-                        seed_key=recorder.seed_key,
-                        map_name=recorder.map_name,
-                        generation=int(rec.generation),
+                rec_seat = int(rec.seat)
+                kept.append(
+                    (
+                        recorder,
+                        rec,
+                        utility_for_seat(summary, rec_seat),
+                        margin_for_seat(summary, rec_seat),
                     )
                 )
+        anchor_logits = self._anchor_logits([rec for _r, rec, _o, _m in kept])
+        for (recorder, rec, outcome_target, margin), logits in zip(kept, anchor_logits):
+            n = rec.num_candidates
+            samples.append(
+                DecisionSample(
+                    observation=rec.observation,
+                    choice=rec.choice,
+                    policy_target=normalize_policy_target(rec.policy, n),
+                    value_target=float(outcome_target),
+                    seat=int(rec.seat),
+                    was_searched=bool(rec.was_searched),
+                    seed_key=recorder.seed_key,
+                    map_name=recorder.map_name,
+                    generation=int(rec.generation),
+                    play_temperature=rec.play_temperature,
+                    margin_target=margin,
+                    anchor_logits=logits,
+                )
+            )
         return SelfPlayBatch(
             games=games,
             samples=samples,
@@ -397,6 +492,20 @@ class SelfPlayEngine:
             searched_decisions=searched,
             latencies_ms=latencies,
             seed_keys=[o.seed_key for o in outcomes],
+        )
+
+    def _anchor_logits(self, records: Sequence[DecisionRecord]) -> list[np.ndarray | None]:
+        anchor = self.anchor
+        if anchor is None or not records:
+            return [None] * len(records)
+        return list(
+            anchor_policy_logits(
+                anchor[0],
+                [r.observation for r in records],
+                [r.choice for r in records],
+                [r.num_candidates for r in records],
+                device=self.device,
+            )
         )
 
 

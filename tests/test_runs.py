@@ -389,7 +389,7 @@ def test_training_seeds_never_fall_in_dev_or_eval_namespaces() -> None:
 
 def test_selfplay_specs_use_train_seeds_and_one_capture_seat() -> None:
     keys = make_train_seed_keys(0, 3)
-    sampler = OpponentSampler(b1_prob=1.0, latest_prob=0.0, pool_prob=0.0)
+    sampler = OpponentSampler(b1_prob=1.0, latest_prob=0.0, pool_prob=0.0, anchor_prob=0.0)
     specs, recorders, seats, kinds = build_selfplay_specs(
         seed_keys=keys,
         maps=["tharsis", "hellas"],

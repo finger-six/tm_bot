@@ -353,11 +353,14 @@ def test_temperature_scaling_and_calibration_report(tmp_path: Path) -> None:
         assert (tmp_path / name).exists()
 
 
-def test_comparator_requires_on_policy_action_temperature() -> None:
-    # PPO old log-probs are recomputed at temperature 1, so the behaviour policy must be T = 1.
-    with pytest.raises(ValueError, match="action_temperature"):
-        RunConfig(run_name="cmp", agent_kind="comparator", action_temperature=0.5)
-    assert RunConfig(run_name="main", action_temperature=0.5).action_temperature == 0.5
+def test_comparator_selfplay_seats_use_the_play_temperature_schedule() -> None:
+    # v2 (#48) replaces the flat action_temperature: every comparator seat samples at τ(g)
+    # in the action phase and τ 1 elsewhere, with the run config's schedule.
+    config = RunConfig(run_name="cmp", agent_kind="comparator")
+    engine = ComparatorSelfPlayEngine(config, model=_tiny_comparator(), vocab=_VOCAB)
+    agent = engine._learner_factory(1)
+    assert agent.play_temperature == config.play_temperature
+    assert agent.temperature == 1.0
 
 
 def test_agent_kind_is_validated() -> None:

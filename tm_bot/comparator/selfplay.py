@@ -18,22 +18,29 @@ from tm_bot.comparator.model import ComparatorNetwork, load_comparator_checkpoin
 from tm_bot.comparator.ppo import PPOSample, compute_gae
 from tm_bot.models.encode import collate_encoded_batch
 from tm_bot.models.vocab import CardVocab
+from tm_bot.runs.anchor import anchor_policy_logits, check_anchor_compatible, freeze
 from tm_bot.runs.buffer import normalize_policy_target
 from tm_bot.runs.config import RunConfig
-from tm_bot.runs.recorder import GameRecorder, capture_agent
+from tm_bot.runs.recorder import DecisionRecord, GameRecorder
 from tm_bot.runs.selfplay import (
     OpponentChoice,
     OpponentSampler,
     SelfPlayBatch,
     build_selfplay_specs,
+    check_recorded_seats,
     game_summary,
     make_train_seed_keys,
+    margin_for_seat,
     utility_for_seat,
 )
 
 
 class ComparatorSelfPlayEngine:
-    """Plays self-play games with the direct comparator policy and sampled opponents."""
+    """Plays self-play games with the direct comparator policy and sampled opponents.
+
+    Every learned seat (learner, `latest`, pool, warm-start anchor) samples at τ(g) in
+    the action phase and τ 1 elsewhere (#39, #48); there is no greedy seat.
+    """
 
     def __init__(
         self,
@@ -43,6 +50,8 @@ class ComparatorSelfPlayEngine:
         vocab: CardVocab,
         device: str = "cpu",
         rng: np.random.Generator | None = None,
+        anchor_model: ComparatorNetwork | None = None,
+        anchor_vocab: CardVocab | None = None,
     ) -> None:
         self.config = config
         self.model = model
@@ -52,12 +61,44 @@ class ComparatorSelfPlayEngine:
         self.opponents = OpponentSampler(
             latest_prob=config.opponent_latest_prob,
             pool_prob=config.opponent_pool_prob,
+            anchor_prob=config.opponent_anchor_prob,
             b1_prob=config.opponent_b1_prob,
             rng=self.rng,
         )
         self._card_data = None
         self._pool_agents: dict[str, ComparatorAgent] = {}
+        self._anchor: tuple[ComparatorNetwork, CardVocab] | None = None
+        if anchor_model is not None:
+            self._set_anchor(anchor_model, anchor_vocab or vocab)
         self.seed_cursor = config.train_seed_start
+
+    def _set_anchor(self, model: ComparatorNetwork, vocab: CardVocab) -> None:
+        check_anchor_compatible(model, vocab, self.model, self.vocab)
+        freeze(model)
+        self._anchor = (model, vocab)
+
+    @property
+    def anchor(self) -> tuple[ComparatorNetwork, CardVocab] | None:
+        """The frozen warm-start anchor `(model, vocab)`, loaded once; None without one."""
+        if self._anchor is None and self.config.warmstart_checkpoint:
+            model, vocab, _meta = load_comparator_checkpoint(
+                self.config.warmstart_checkpoint, map_location=self.device
+            )
+            self._set_anchor(model, vocab)
+        return self._anchor
+
+    def _agent(
+        self, model: ComparatorNetwork, vocab: CardVocab, seed: int, version: str
+    ) -> ComparatorAgent:
+        return ComparatorAgent(
+            model,
+            vocab,
+            device=self.device,
+            temperature=1.0,
+            play_temperature=self.config.play_temperature,
+            seed=seed,
+            version=version,
+        )
 
     def set_opponent_pool(self, checkpoints: Sequence[str | Path]) -> None:
         self.opponents.set_pool(checkpoints)
@@ -67,24 +108,15 @@ class ComparatorSelfPlayEngine:
                 del self._pool_agents[key]
 
     def _learner_factory(self, seed: int) -> ComparatorAgent:
-        return ComparatorAgent(
-            self.model,
-            self.vocab,
-            device=self.device,
-            temperature=self.config.action_temperature,
-            seed=seed,
-            version="comparator-latest",
-        )
+        return self._agent(self.model, self.vocab, seed, "comparator-latest")
 
-    def _latest_opponent_factory(self, seed: int) -> ComparatorAgent:
-        return ComparatorAgent(
-            self.model,
-            self.vocab,
-            device=self.device,
-            temperature=0.0,
-            seed=seed,
-            version="comparator-latest-greedy",
-        )
+    def _anchor_factory(self, seed: int) -> ComparatorAgent:
+        anchor = self.anchor
+        if anchor is None:
+            raise RuntimeError(
+                "the anchor opponent needs config.warmstart_checkpoint (the frozen warm start)"
+            )
+        return self._agent(anchor[0], anchor[1], seed, "comparator-anchor")
 
     def _pool_factory(self, path: Path, seed: int) -> ComparatorAgent:
         key = str(path)
@@ -93,14 +125,7 @@ class ComparatorSelfPlayEngine:
             model, vocab, _meta = load_comparator_checkpoint(
                 path, map_location=self.device, encoder_version=None
             )
-            cached = ComparatorAgent(
-                model,
-                vocab,
-                device=self.device,
-                temperature=0.0,
-                seed=seed,
-                version=f"comparator-{path.name}",
-            )
+            cached = self._agent(model, vocab, seed, f"comparator-{path.name}")
             self._pool_agents[key] = cached
         agent = copy.deepcopy(cached)
         agent.reset(seed)
@@ -113,7 +138,9 @@ class ComparatorSelfPlayEngine:
             return B1Agent(seed=seed, card_data=self._card_data)
         if choice.kind == "pool" and choice.checkpoint is not None:
             return self._pool_factory(choice.checkpoint, seed)
-        return self._latest_opponent_factory(seed)
+        if choice.kind == "anchor":
+            return self._anchor_factory(seed)
+        return self._learner_factory(seed)
 
     def play_batch(
         self,
@@ -172,7 +199,12 @@ class ComparatorSelfPlayEngine:
         training_seats: Sequence[int],
         opponent_kinds: Sequence[str] | None = None,
     ) -> SelfPlayBatch:
-        """Encode recorded training-seat decisions into PPO rows with GAE targets."""
+        """Encode recorded decisions into PPO rows with GAE targets.
+
+        Mirror games carry both seats; each seat is its own trajectory, with GAE run on
+        that seat's outcome. `old_log_prob` is the τ = 1 log-probability; the τ the
+        decision was sampled at is recorded in `play_temperature` for #50.
+        """
         games = [game_summary(o) for o in outcomes]
         ppo_samples: list[PPOSample] = []
         latencies: list[float] = []
@@ -186,45 +218,13 @@ class ComparatorSelfPlayEngine:
                 continue
             if not recorder.decisions:
                 continue
-            utility = utility_for_seat(summary, seat)
-            records = [r for r in recorder.decisions if int(r.seat) == seat]
-            if len(records) != len(recorder.decisions):
-                raise RuntimeError(
-                    "recorded comparator observations do not all belong to the training seat"
-                )
-            old_log_probs, behavior_values = self._behavior_stats(records)
-            # The bootstrap values are win probabilities, so the outcome enters GAE as a win
-            # probability too (loss 0, tie 0.5, win 1), not as the -1/+1 utility.
-            advantages, returns = compute_gae(
-                behavior_values,
-                (float(utility) + 1.0) * 0.5,
-                gamma=self.config.ppo_gamma,
-                gae_lambda=self.config.ppo_gae_lambda,
-            )
-            for rec, old_logp, value, advantage, ret in zip(
-                records, old_log_probs, behavior_values, advantages, returns
-            ):
-                n = rec.num_candidates
-                if n < 1:
-                    continue
-                ppo_samples.append(
-                    PPOSample(
-                        observation=rec.observation,
-                        choice=rec.choice,
-                        policy_target=normalize_policy_target(rec.policy, n),
-                        value_target=float(utility),
-                        seat=int(seat),
-                        was_searched=False,
-                        seed_key=recorder.seed_key,
-                        map_name=recorder.map_name,
-                        generation=int(rec.generation),
-                        action=int(rec.candidate_index),
-                        old_log_prob=float(old_logp),
-                        behavior_value=float(value),
-                        advantage=float(advantage),
-                        return_=float(ret),
+            check_recorded_seats(recorder, seat)
+            for traj_seat in (seat, 1 - seat):
+                records = [r for r in recorder.decisions if int(r.seat) == traj_seat]
+                if records:
+                    ppo_samples.extend(
+                        self._trajectory_samples(recorder, summary, traj_seat, records)
                     )
-                )
         return SelfPlayBatch(
             games=games,
             samples=[],
@@ -236,4 +236,67 @@ class ComparatorSelfPlayEngine:
             latencies_ms=latencies,
             seed_keys=[o.seed_key for o in outcomes],
             ppo_samples=ppo_samples,
+        )
+
+    def _trajectory_samples(
+        self,
+        recorder: GameRecorder,
+        summary: Any,
+        seat: int,
+        records: Sequence[DecisionRecord],
+    ) -> list[PPOSample]:
+        utility = utility_for_seat(summary, seat)
+        margin = margin_for_seat(summary, seat)
+        old_log_probs, behavior_values = self._behavior_stats(records)
+        anchor_logits = self._anchor_logits(records)
+        # The bootstrap values are win probabilities, so the outcome enters GAE as a win
+        # probability too (loss 0, tie 0.5, win 1), not as the -1/+1 utility.
+        advantages, returns = compute_gae(
+            behavior_values,
+            (float(utility) + 1.0) * 0.5,
+            gamma=self.config.ppo_gamma,
+            gae_lambda=self.config.ppo_gae_lambda,
+        )
+        samples: list[PPOSample] = []
+        for rec, old_logp, value, advantage, ret, logits in zip(
+            records, old_log_probs, behavior_values, advantages, returns, anchor_logits
+        ):
+            n = rec.num_candidates
+            if n < 1:
+                continue
+            samples.append(
+                PPOSample(
+                    observation=rec.observation,
+                    choice=rec.choice,
+                    policy_target=normalize_policy_target(rec.policy, n),
+                    value_target=float(utility),
+                    seat=int(seat),
+                    was_searched=False,
+                    seed_key=recorder.seed_key,
+                    map_name=recorder.map_name,
+                    generation=int(rec.generation),
+                    action=int(rec.candidate_index),
+                    old_log_prob=float(old_logp),
+                    behavior_value=float(value),
+                    advantage=float(advantage),
+                    return_=float(ret),
+                    play_temperature=rec.play_temperature,
+                    margin_target=margin,
+                    anchor_logits=logits,
+                )
+            )
+        return samples
+
+    def _anchor_logits(self, records: Sequence[DecisionRecord]) -> list[np.ndarray | None]:
+        anchor = self.anchor
+        if anchor is None:
+            return [None] * len(records)
+        return list(
+            anchor_policy_logits(
+                anchor[0],
+                [r.observation for r in records],
+                [r.choice for r in records],
+                [r.num_candidates for r in records],
+                device=self.device,
+            )
         )
