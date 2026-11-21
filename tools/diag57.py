@@ -18,7 +18,8 @@ Variant knobs (defaults = the gate's LIGHT_SEARCH): `--sims`, `--worlds`, `--wav
 `--root {visits,prior_q}` and `--root-tau` (action-phase root rule; other phases keep τ = 0),
 `--sub-tau` (policy-head sub-choices), `--fpu {zero,parent}` and `--fpu-reduction`,
 `--leaf {raw,tscale,zero}` and `--leaf-temp`, `--hybrid` (space and payment sub-choices from
-b1-v2's own heuristic: a measurement, never training data, #36), `--opponent {b1,self,v1}`.
+b1-v2's own heuristic: a measurement, never training data, #36; `--hybrid-kinds` narrows it),
+`--opponent {b1,self,v1}`.
 """
 
 from __future__ import annotations
@@ -199,7 +200,7 @@ class DiagAgent(ISMCTSAgent):
                         "visited": int((visits > 0).sum()), "max_n": float(visits.max()),
                         "q_chosen": q(out[i]), "q_top": q(prior_top),
                     })
-            elif ag.b1 is not None and ch.kind in SUB_KINDS:
+            elif ag.b1 is not None and ch.kind in ag.opts["hybrid_kinds"]:
                 out[i] = ag.b1.act(obs, ch)
             elif ag.opts["sub_tau"] is not None and ag.last_decision_policy is not None:
                 out[i] = _tempered(ag.last_decision_policy, ag.opts["sub_tau"], ag._rng)
@@ -267,7 +268,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     LeafPolicyValueAgent.leaf_temp = args.leaf_temp
     settings = _settings(args)
     opts = {"root": args.root, "root_tau": args.root_tau, "beta": args.beta, "sub_tau": args.sub_tau,
-            "hybrid": args.hybrid}
+            "hybrid": args.hybrid, "hybrid_kinds": list(args.hybrid_kinds)}
     base = make_warmstart_search_agent(checkpoint=str(args.checkpoint), device=device, **settings)
     if args.leaf != "raw":
         pv = copy.copy(base.policy_agent)
@@ -470,14 +471,16 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--worlds", type=int, default=LIGHT_SEARCH["num_worlds"])
             p.add_argument("--wave-size", type=int, default=LIGHT_SEARCH["wave_size"])
             p.add_argument("--root", choices=("visits", "prior_q"), default="visits")
-            p.add_argument("--root-tau", type=float, default=None, help="Action-phase root τ (default: config's 1.0).")
+            p.add_argument("--root-tau", type=float, default=None, help="Action-phase root tau (default: config's 1.0).")
             p.add_argument("--beta", type=float, default=3.0, help="prior_q: weight of Q on the prior's logits.")
-            p.add_argument("--sub-tau", type=float, default=None, help="Policy sub-choice τ (default: config's 1.0).")
+            p.add_argument("--sub-tau", type=float, default=None, help="Policy sub-choice tau (default: config's 1.0).")
             p.add_argument("--fpu", choices=("zero", "parent"), default="zero")
             p.add_argument("--fpu-reduction", type=float, default=0.0)
             p.add_argument("--leaf", choices=("raw", "tscale", "zero"), default="raw")
             p.add_argument("--leaf-temp", type=float, default=1.0)
             p.add_argument("--hybrid", action="store_true", help="space/payment sub-choices from b1-v2 (measurement).")
+            p.add_argument("--hybrid-kinds", nargs="+", choices=SUB_KINDS, default=list(SUB_KINDS),
+                           help="--hybrid: which sub-choice kinds b1-v2 makes.")
             p.add_argument("--opponent", choices=("b1", "self", "v1"), default="b1")
             p.add_argument("--opp-sims", type=int, default=0, help="Simulations of a self/v1 opponent.")
             p.add_argument("--seeds", type=int, default=13)
