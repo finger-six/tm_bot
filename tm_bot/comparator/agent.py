@@ -130,8 +130,9 @@ class ComparatorAgent:
             logits = np.log(np.clip(probs, 1e-12, None)) / temperature
             logits -= logits.max()
             weights = np.exp(logits)
-            probs = weights / weights.sum()
-            index = int(self._rng.choices(range(n), weights=probs.tolist(), k=1)[0])
+            # Sample at τ but record the τ = 1 policy, matching `old_log_prob`.
+            sampled = weights / weights.sum()
+            index = int(self._rng.choices(range(n), weights=sampled.tolist(), k=1)[0])
         else:
             index = int(self._rng.choices(range(n), weights=probs.tolist(), k=1)[0])
         self.last_decision_policy = probs

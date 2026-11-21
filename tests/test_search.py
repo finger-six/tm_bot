@@ -460,6 +460,50 @@ def test_search_returns_legal_candidate_never_mutates_live_game_and_cleans_clone
             assert nested_calls > 0
 
 
+def test_search_leaves_back_up_the_margin_utility(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Leaf evaluation asks for the margin head and feeds U = (2p - 1) + 0.15·m̂ (#48)."""
+    import tm_bot.search.agent as search_agent
+
+    pv = _make_tiny_policy_value_agent(seed=5)
+    inner_predict = pv.predict_batch
+
+    def predict_batch(*args: Any, **kwargs: Any) -> Any:
+        out = inner_predict(*args, **kwargs)
+        if kwargs.get("return_margin"):
+            probs, values, margins = out
+            return probs, values, [0.5] * len(margins)
+        return out
+
+    monkeypatch.setattr(pv, "predict_batch", predict_batch)
+    seen: list[tuple[float, float]] = []
+    real_utility = search_agent.search_utility
+
+    def spy_utility(value: float, margin: float, *, weight: float) -> float:
+        seen.append((margin, weight))
+        return real_utility(value, margin, weight=weight)
+
+    monkeypatch.setattr(search_agent, "search_utility", spy_utility)
+    agent = ISMCTSAgent(pv, config=SearchConfig(num_simulations=4, num_worlds=2), seed=3)
+    agent.reset(7)
+    b0 = B0Agent(seed=1)
+    with WorkerClient() as client:
+        with client.open("search-margin-1", "tharsis") as live:
+            while seats := live.pending():
+                seat = seats[0]
+                obs, choice = live.observe(seat), live.choice(seat)
+                if seat == 0 and is_search_decision(obs, choice):
+                    sampler = open_world_samplers(client, [(live.game_id, 0)])[0]
+                    try:
+                        agent.act_with_sampler(obs, choice, sampler)
+                    finally:
+                        release_samplers([sampler])
+                    break
+                live.choose(seat, b0.act(obs, choice))
+
+    assert seen
+    assert all(m == pytest.approx(0.5) and w == pytest.approx(0.15) for m, w in seen)
+
+
 def test_search_config_simulations_worlds_determinism_and_deepcopy() -> None:
     pv = _make_tiny_policy_value_agent(seed=11)
     agent_fast = ISMCTSAgent(
@@ -486,17 +530,18 @@ def test_search_config_simulations_worlds_determinism_and_deepcopy() -> None:
     with pytest.raises(ValueError, match="action_temperature"):
         SearchConfig(action_temperature=-0.1)
 
-    # Verify determinism across repeated runs with configured simulations, worlds, and action_temperature
+    # Verify determinism across repeated runs with configured simulations, worlds, and the
+    # v1 flat action_temperature (only live when play_temperature is None).
     with WorkerClient() as client:
         r1 = play_game(
-            (ISMCTSAgent(pv, config=SearchConfig(num_simulations=4, num_worlds=2, action_temperature=1.0), seed=12), B1Agent(seed=34)),
+            (ISMCTSAgent(pv, config=SearchConfig(num_simulations=4, num_worlds=2, action_temperature=1.0, play_temperature=None), seed=12), B1Agent(seed=34)),
             seed_key="eval-search-det-1",
             map_name="tharsis",
             client=client,
             seat_seeds=(100, 200),
         )
         r2 = play_game(
-            (ISMCTSAgent(pv, config=SearchConfig(num_simulations=4, num_worlds=2, action_temperature=1.0), seed=12), B1Agent(seed=34)),
+            (ISMCTSAgent(pv, config=SearchConfig(num_simulations=4, num_worlds=2, action_temperature=1.0, play_temperature=None), seed=12), B1Agent(seed=34)),
             seed_key="eval-search-det-1",
             map_name="tharsis",
             client=client,

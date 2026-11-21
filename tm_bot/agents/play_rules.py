@@ -58,7 +58,8 @@ class PlayTemperatureSchedule:
         public = observation.get("public", {}) or {}
         if str(public.get("phase", "")) != "action":
             return None
-        return self(int(public.get("generation", 1) or 1))
+        generation = public.get("generation")
+        return self(1 if generation is None else int(generation))
 
     @property
     def spec(self) -> str:

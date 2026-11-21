@@ -15,7 +15,11 @@ import torch
 from tests.test_comparator import _tiny_comparator
 from tests.test_runs import _VOCAB, _choice, _obs, _tiny_model
 from tm_bot.agents import B0Agent
-from tm_bot.agents.play_rules import V2_PLAY_TEMPERATURE, game_utility
+from tm_bot.agents.play_rules import (
+    V2_PLAY_TEMPERATURE,
+    PlayTemperatureSchedule,
+    game_utility,
+)
 from tm_bot.comparator.agent import comparator_eval_factory
 from tm_bot.comparator.ppo import PPOBuffer, PPOSample
 from tm_bot.comparator.selfplay import ComparatorSelfPlayEngine
@@ -154,6 +158,23 @@ def test_no_learned_comparator_seat_runs_at_tau_zero(tmp_path: Path) -> None:
     }
     for agent in seats.values():
         _assert_comparator_agent_samples_at_tau(agent)
+
+
+def test_comparator_records_the_tau_one_policy() -> None:
+    agent = comparator_eval_factory(_tiny_comparator(), _VOCAB)()
+    obs, choice = _action_obs(12), _choice()
+    probs, _ = agent.predict(obs, choice)
+    expected = np.asarray(probs[: len(choice.candidates)], dtype=np.float64)
+    expected /= expected.sum()
+    agent.act(obs, choice)
+    assert agent.last_decision_temperature == pytest.approx(0.3)
+    np.testing.assert_allclose(agent.last_decision_policy, expected, rtol=1e-6)
+
+
+def test_generation_zero_keys_its_own_temperature() -> None:
+    schedule = PlayTemperatureSchedule(start=1.0, floor=0.3, decay_from=0, floor_at=10)
+    assert schedule.for_observation(_action_obs(0)) == pytest.approx(1.0)
+    assert schedule.for_observation(_action_obs(1)) == pytest.approx(0.93)
 
 
 # --- opponent mix --------------------------------------------------------------------

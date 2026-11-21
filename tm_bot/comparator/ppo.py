@@ -38,7 +38,7 @@ class PPOSample:
 
     observation: EncodedObservation
     choice: EncodedChoice
-    policy_target: np.ndarray  # behavior distribution over legal candidates
+    policy_target: np.ndarray  # τ = 1 policy over legal candidates (sampling used play_temperature)
     value_target: float  # terminal utility from the acting seat's perspective
     seat: int
     was_searched: bool
