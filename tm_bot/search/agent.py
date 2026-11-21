@@ -64,7 +64,7 @@ def _select_from_probs(
     return int(rng.choices(range(num_actions), weights=w.tolist(), k=1)[0])
 
 
-def _default_version(config: SearchConfig, policy_version: str) -> str:
+def search_agent_version(config: SearchConfig, policy_version: str) -> str:
     """`ismcts-s16-k4-tau1g4-0.3g10-u0.15-<net>`; v1 configs keep `ismcts-sN-kK-<net>`."""
     parts = [f"ismcts-s{config.num_simulations}-k{config.num_worlds}"]
     if config.play_temperature is not None:
@@ -180,7 +180,7 @@ class ISMCTSAgent:
         self._seed = seed
         self._rng = random.Random(seed)
         self._decision_counter = 0
-        self.version = version or _default_version(self.config, policy_agent.version)
+        self.version = version or search_agent_version(self.config, policy_agent.version)
         self.last_decision_was_searched: bool = False
         self.last_decision_latency_ms: float = 0.0
         # Temperature the last decision was sampled with: τ(g) at action-phase decisions,

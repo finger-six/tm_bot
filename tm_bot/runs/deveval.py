@@ -27,7 +27,7 @@ from tm_bot.models.agent import PolicyValueAgent
 from tm_bot.models.network import vp_margin_target
 from tm_bot.runs.monitoring import CheckpointMetrics
 from tm_bot.runs.selfplay import assert_namespace
-from tm_bot.search.agent import ISMCTSAgent
+from tm_bot.search.agent import ISMCTSAgent, search_agent_version
 from tm_bot.search.config import SearchConfig
 
 
@@ -55,7 +55,8 @@ def dev_agent_factory(
 
     def factory() -> Agent:
         pv = cached_policy_value_agent(checkpoint, device)
-        return ISMCTSAgent(pv, config=search_config, version=f"dev-{Path(checkpoint).name}")
+        version = search_agent_version(search_config, f"dev-{Path(checkpoint).name}")
+        return ISMCTSAgent(pv, config=search_config, version=version)
 
     return factory
 

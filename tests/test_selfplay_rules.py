@@ -119,6 +119,7 @@ def test_no_learned_main_seat_runs_at_tau_zero(tmp_path: Path) -> None:
     for name, agent in seats.items():
         assert isinstance(agent, ISMCTSAgent), name
         _assert_search_agent_samples_at_tau(agent)
+    assert V2_PLAY_TEMPERATURE.spec in seats["dev"].version
 
 
 def test_eval_search_agent_defaults_to_v2_rules(
@@ -158,6 +159,7 @@ def test_no_learned_comparator_seat_runs_at_tau_zero(tmp_path: Path) -> None:
     }
     for agent in seats.values():
         _assert_comparator_agent_samples_at_tau(agent)
+    assert V2_PLAY_TEMPERATURE.spec in seats["eval"].version
 
 
 def test_comparator_records_the_tau_one_policy() -> None:

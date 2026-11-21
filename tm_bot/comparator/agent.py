@@ -183,7 +183,12 @@ def comparator_eval_factory(
     version: str = "comparator-v1",
     play_temperature: PlayTemperatureSchedule | None = V2_PLAY_TEMPERATURE,
 ) -> Callable[[], ComparatorAgent]:
-    """Fresh evaluation agent per game sharing `model`, sampling its policy at τ(g)."""
+    """Fresh evaluation agent per game sharing `model`, sampling its policy at τ(g).
+
+    The τ(g) spec is appended to `version` so reports record the play policy (#39).
+    """
+    if play_temperature is not None:
+        version = f"{version}-{play_temperature.spec}"
     return lambda: ComparatorAgent(
         model,
         vocab,

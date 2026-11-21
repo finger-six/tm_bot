@@ -388,7 +388,7 @@ def test_evaluation_comparator_plays_its_sampled_policy_reproducibly() -> None:
     first = picks(7)
     assert picks(7) == first
     assert len(set(first)) > 1, "evaluation agent must sample, not take the argmax"
-    assert factory().version == "eval-test"
+    assert factory().version == "eval-test-tau1g4-0.3g10"
 
 
 class _RolloutEngine:
