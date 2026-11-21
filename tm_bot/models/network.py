@@ -15,8 +15,11 @@ from tm_bot.models.encode import (
     CAND_FEAT_DIM,
     CARD_DYN_DIM,
     CHOICE_CTX_DIM,
+    ENCODER_VERSION,
     OBS_SCALAR_DIM,
     SPACE_FEAT_DIM,
+    choice_ctx_dim,
+    num_prompt_types,
 )
 from tm_bot.models.vocab import (
     CARD_STATIC_DIM,
@@ -52,6 +55,11 @@ class TMModelConfig:
     policy_ff_dim: int = 512
     dropout: float = 0.05
     architecture: str = "tm_transformer_v1"
+    encoder_version: int = ENCODER_VERSION
+    vp_margin_head: bool = True
+
+    def __post_init__(self) -> None:
+        check_encoder_dims(self)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -59,8 +67,80 @@ class TMModelConfig:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> TMModelConfig:
         valid = {f.name for f in cls.__dataclass_fields__.values()}
-        filtered = {k: v for k, v in payload.items() if k in valid}
+        filtered = {k: v for k, v in legacy_config_defaults(payload).items() if k in valid}
         return cls(**filtered)
+
+
+# --- Encoder versions and the auxiliary VP-margin head (#42) ---------------------
+
+VP_MARGIN_CLIP = 60.0
+VP_MARGIN_SCALE = 50.0
+VP_MARGIN_BOUND = VP_MARGIN_CLIP / VP_MARGIN_SCALE  # 1.2
+VP_MARGIN_SMOOTH_L1_BETA = 0.2
+
+
+class EncoderVersionMismatchError(ValueError):
+    """A checkpoint was trained with a different encoder version than the caller expects."""
+
+
+def legacy_config_defaults(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Fill fields that configs saved before #42 lack: encoder v1, no VP-margin head."""
+    out = dict(payload)
+    if "encoder_version" not in out:
+        out["encoder_version"] = 1
+        out.setdefault("vp_margin_head", False)
+    return out
+
+
+def check_encoder_dims(config: Any) -> None:
+    """Reject a config whose prompt/choice-context widths don't match its encoder version."""
+    v = int(config.encoder_version)
+    if config.num_prompt_types != num_prompt_types(v) or config.choice_ctx_dim != choice_ctx_dim(v):
+        raise ValueError(
+            f"encoder v{v} needs num_prompt_types={num_prompt_types(v)} and "
+            f"choice_ctx_dim={choice_ctx_dim(v)}, got {config.num_prompt_types} and "
+            f"{config.choice_ctx_dim}"
+        )
+
+
+def check_encoder_version(found: int, expected: int | None, source: object) -> None:
+    """Raise unless a checkpoint's encoder version is the one the caller expects.
+
+    `expected=None` accepts any supported version; agents then encode with the
+    checkpoint's own version (e.g. a v1 warm start as an evaluation opponent).
+    """
+    if expected is not None and int(found) != int(expected):
+        raise EncoderVersionMismatchError(
+            f"{source} was trained with encoder v{found}, but encoder v{expected} was requested; "
+            f"pass encoder_version={found} (or None) to load it deliberately"
+        )
+
+
+def vp_margin_target(my_vp: Any, opp_vp: Any) -> Any:
+    """Training target `clip(my_vp - opp_vp, -60, 60) / 50` (float or tensor)."""
+    margin = my_vp - opp_vp
+    if isinstance(margin, torch.Tensor):
+        return margin.float().clamp(-VP_MARGIN_CLIP, VP_MARGIN_CLIP) / VP_MARGIN_SCALE
+    return max(-VP_MARGIN_CLIP, min(VP_MARGIN_CLIP, float(margin))) / VP_MARGIN_SCALE
+
+
+def vp_margin_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """SmoothL1 (beta 0.2) between `vp_margin_pred` and `vp_margin_target`."""
+    return F.smooth_l1_loss(pred.float(), target.float(), beta=VP_MARGIN_SMOOTH_L1_BETA)
+
+
+class VPMarginHead(nn.Module):
+    """Auxiliary scalar head bounded to `[-VP_MARGIN_BOUND, VP_MARGIN_BOUND]`.
+
+    It never feeds `P(win)`: that still comes only from the win logit.
+    """
+
+    def __init__(self, d_in: int, hidden: int) -> None:
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(d_in, hidden), nn.SiLU(), nn.Linear(hidden, 1))
+
+    def forward(self, obs_pooled: torch.Tensor) -> torch.Tensor:
+        return VP_MARGIN_BOUND * torch.tanh(self.net(obs_pooled).squeeze(-1))
 
 
 def _masked_mean_pool(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -181,6 +261,7 @@ class TMNetwork(nn.Module):
             nn.SiLU(),
             nn.Linear(d // 2, 1),
         )
+        self.vp_margin_head = VPMarginHead(d, d // 2) if config.vp_margin_head else None
 
         # Policy head: choice context + candidate tokens -> cross-attend to obs -> candidate self-attn -> scorer
         self.prompt_emb = nn.Embedding(config.num_prompt_types, 64)
@@ -381,6 +462,8 @@ class TMNetwork(nn.Module):
             out["value_logit"] = value_logit
             out["win_prob"] = win_prob
             out["value"] = 2.0 * win_prob - 1.0
+            if self.vp_margin_head is not None:
+                out["vp_margin_pred"] = self.vp_margin_head(obs_pooled).float()
         if compute_policy and "cand_card_ids" in batch:
             logits, probs = self.forward_policy(obs_tokens, obs_mask, obs_pooled, batch)
             out["policy_logits"] = logits
@@ -461,12 +544,18 @@ def load_checkpoint(
     path: str | Path,
     *,
     map_location: str | torch.device = "cpu",
+    encoder_version: int | None = ENCODER_VERSION,
 ) -> tuple[TMNetwork, CardVocab, dict[str, Any]]:
-    """Load `(model, vocab, metadata)` saved by `save_checkpoint`."""
+    """Load `(model, vocab, metadata)` saved by `save_checkpoint`.
+
+    Raises `EncoderVersionMismatchError` unless the checkpoint's encoder version is
+    `encoder_version` (`None` accepts any supported version).
+    """
     target = Path(path)
     ckpt_path = target / "checkpoint.pt" if target.is_dir() else target
     payload = torch.load(ckpt_path, map_location=map_location, weights_only=False)
     cfg = TMModelConfig.from_dict(payload["config"])
+    check_encoder_version(cfg.encoder_version, encoder_version, ckpt_path)
     vocab = CardVocab.from_dict(payload["vocab"])
     model = TMNetwork.from_vocab(vocab, cfg)
     model.load_state_dict(payload["model_state_dict"])
@@ -481,6 +570,7 @@ def build_random_init_model(
     *,
     seed: int,
     map_location: str | torch.device = "cpu",
+    encoder_version: int | None = ENCODER_VERSION,
 ) -> tuple[TMNetwork, CardVocab, dict[str, Any]]:
     """Build a fresh model from a checkpoint's architecture and vocabulary (#27).
 
@@ -495,7 +585,9 @@ def build_random_init_model(
     # Loading and drawing both happen on CPU inside a forked CPU RNG, so the
     # caller's (and any CUDA) random state is left untouched.
     with torch.random.fork_rng(devices=[]):
-        warm, vocab, metadata = load_checkpoint(path, map_location="cpu")
+        warm, vocab, metadata = load_checkpoint(
+            path, map_location="cpu", encoder_version=encoder_version
+        )
         torch.manual_seed(seed)
         model = TMNetwork(warm.config, warm.card_static_matrix)
     model = model.to(map_location)

@@ -329,7 +329,9 @@ def collect_dev_calibration(
     device: str = "cpu",
 ) -> dict[str, Any]:
     """Play seat-swapped `dev-*` games and collect comparator win-prob predictions."""
-    model, vocab, meta = load_comparator_checkpoint(checkpoint, map_location=device)
+    model, vocab, meta = load_comparator_checkpoint(
+        checkpoint, map_location=device, encoder_version=None
+    )
     model.eval()
     temperature = float(getattr(model, "temperature", 1.0))
     recorders: list[WinProbRecorder] = []
@@ -349,7 +351,7 @@ def collect_dev_calibration(
         opponent_name = "b1"
     else:
         opp_model, opp_vocab, _ = load_comparator_checkpoint(
-            opponent_checkpoint, map_location=device
+            opponent_checkpoint, map_location=device, encoder_version=None
         )
         opp_model.eval()
         opponent_factory = comparator_eval_factory(

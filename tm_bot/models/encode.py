@@ -47,8 +47,52 @@ _DONE_COUNT_RE = re.compile(r"\((\d+)\s+selected\)")
 OBS_SCALAR_DIM = 185
 SPACE_FEAT_DIM = 24
 CARD_DYN_DIM = 4
-CHOICE_CTX_DIM = len(PROMPT_TYPES) + 6  # 20
 CAND_FEAT_DIM = 32
+
+# Encoder versions. v1: 14 prompt types (CHOICE_CTX_DIM 20) and aliased root `branch`
+# candidates. v2 (#42): `standard_project` and `card_action` prompt types (22) and one
+# feature bit per root branch kind. A model records the version it was trained with
+# (`TMModelConfig.encoder_version`) and must be encoded with that version.
+ENCODER_VERSION = 2
+SUPPORTED_ENCODER_VERSIONS: tuple[int, ...] = (1, 2)
+_V1_PROMPT_TYPE_COUNT = 14
+
+
+def num_prompt_types(encoder_version: int = ENCODER_VERSION) -> int:
+    """Number of prompt types (the prompt one-hot width) of an encoder version."""
+    _check_supported(encoder_version)
+    return _V1_PROMPT_TYPE_COUNT if encoder_version == 1 else len(PROMPT_TYPES)
+
+
+def choice_ctx_dim(encoder_version: int = ENCODER_VERSION) -> int:
+    """Width of `EncodedChoice.choice_ctx` for an encoder version."""
+    return num_prompt_types(encoder_version) + 6
+
+
+def _check_supported(encoder_version: int) -> None:
+    if encoder_version not in SUPPORTED_ENCODER_VERSIONS:
+        raise ValueError(
+            f"unsupported encoder version {encoder_version!r}; "
+            f"supported: {SUPPORTED_ENCODER_VERSIONS}"
+        )
+
+
+CHOICE_CTX_DIM = choice_ctx_dim(ENCODER_VERSION)  # 22
+
+# Root `branch` candidate feature bits (v2). v1 set only 23..28 and put both
+# "End Turn" and "Pass for this generation" in 28; the rest encoded as all-zero.
+_BRANCH_BITS_V2: tuple[tuple[str, int], ...] = (
+    ("take first action of", 31),
+    ("standard projects", 30),
+    ("fund an award", 29),
+    ("pass for this generation", 28),
+    ("end turn", 22),
+    ("milestone", 23),
+    ("greenery", 24),
+    ("heat", 25),
+    ("play project card", 26),
+    ("action from a played card", 27),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +117,11 @@ class EncodedChoice:
     picked_card_ids: np.ndarray  # int64[N_picked]
 
 
-def classify_prompt_type(choice: Choice, obs: ActorObservation) -> str:
+def classify_prompt_type(
+    choice: Choice, obs: ActorObservation, *, encoder_version: int = ENCODER_VERSION
+) -> str:
     """Map `(choice, obs)` to a canonical prompt type string."""
+    _check_supported(encoder_version)
     kind = choice.kind
     prompt_l = choice.prompt.lower()
     phase = str(obs["public"]["phase"]).lower()
@@ -82,6 +129,9 @@ def classify_prompt_type(choice: Choice, obs: ActorObservation) -> str:
     if kind == "card":
         if "corporation" in prompt_l:
             return "initial_corp"
+        # The engine asks the card-action pick as a SelectCard after the root branch.
+        if encoder_version >= 2 and prompt_l.startswith("perform an action from a played card"):
+            return "card_action"
         if phase in ("drafting", "initial_drafting") or "pass the rest" in prompt_l:
             return "draft_pick"
         if phase == "preludes" or "prelude" in prompt_l:
@@ -95,6 +145,10 @@ def classify_prompt_type(choice: Choice, obs: ActorObservation) -> str:
         if "buy" in prompt_l:
             return "research_buy"
         return "other_card"
+    # The engine asks the standard-project pick as a `projectCard` input (adapter kind
+    # `project_card`) titled "Standard projects"; v1 aliased it with hand-card plays.
+    if kind == "project_card" and encoder_version >= 2 and prompt_l == "standard projects":
+        return "standard_project"
     if kind in PROMPT_TYPE_TO_ID:
         return kind
     return "other_card"
@@ -396,9 +450,15 @@ def encode_observation(obs: ActorObservation, vocab: CardVocab) -> EncodedObserv
     )
 
 
-def encode_choice(choice: Choice, obs: ActorObservation, vocab: CardVocab) -> EncodedChoice:
+def encode_choice(
+    choice: Choice,
+    obs: ActorObservation,
+    vocab: CardVocab,
+    *,
+    encoder_version: int = ENCODER_VERSION,
+) -> EncodedChoice:
     """Encode a Choice and its candidates conditioned on the ActorObservation."""
-    prompt_type = classify_prompt_type(choice, obs)
+    prompt_type = classify_prompt_type(choice, obs, encoder_version=encoder_version)
     prompt_type_id = PROMPT_TYPE_TO_ID[prompt_type]
     cands = choice.candidates
     n_cands = len(cands)
@@ -425,9 +485,9 @@ def encode_choice(choice: Choice, obs: ActorObservation, vocab: CardVocab) -> En
 
     picked_card_ids = np.asarray([vocab.card_id(nm) for nm in picked_names], dtype=np.int64)
 
-    ctx = np.zeros(CHOICE_CTX_DIM, dtype=np.float32)
+    ctx = np.zeros(choice_ctx_dim(encoder_version), dtype=np.float32)
     ctx[prompt_type_id] = 1.0
-    o = len(PROMPT_TYPES)
+    o = num_prompt_types(encoder_version)
     ctx[o + 0] = float(n_cands) / 30.0
     ctx[o + 1] = 1.0 if has_done else 0.0
     ctx[o + 2] = float(already_selected) / 10.0
@@ -476,6 +536,12 @@ def encode_choice(choice: Choice, obs: ActorObservation, vocab: CardVocab) -> En
                     cand_feats[j, 21] = v / 10.0
                 elif kl == "heat":
                     cand_feats[j, 22] = v / 20.0
+        elif choice.kind == "branch" and encoder_version >= 2:
+            lbl = cand.label.lower()
+            for needle, bit in _BRANCH_BITS_V2:
+                if needle in lbl:
+                    cand_feats[j, bit] = 1.0
+                    break
         elif choice.kind == "branch":
             lbl = cand.label.lower()
             if "milestone" in lbl:

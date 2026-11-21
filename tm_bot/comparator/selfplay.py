@@ -90,7 +90,9 @@ class ComparatorSelfPlayEngine:
         key = str(path)
         cached = self._pool_agents.get(key)
         if cached is None:
-            model, vocab, _meta = load_comparator_checkpoint(path, map_location=self.device)
+            model, vocab, _meta = load_comparator_checkpoint(
+                path, map_location=self.device, encoder_version=None
+            )
             cached = ComparatorAgent(
                 model,
                 vocab,

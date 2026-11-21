@@ -63,7 +63,9 @@ class PolicyValueAgent:
     ) -> tuple[np.ndarray, float]:
         """Return `(candidate_probs, value)` for a single observation and choice."""
         enc_obs = encode_observation(observation, self.vocab)
-        enc_choice = encode_choice(choice, observation, self.vocab)
+        enc_choice = encode_choice(
+            choice, observation, self.vocab, encoder_version=self.model.config.encoder_version
+        )
         batch = collate_encoded_batch([enc_obs], [enc_choice])
         tensors = {k: v.to(self.device) for k, v in batch.items()}
         out = self.model(tensors, compute_policy=True, compute_value=True)
@@ -81,7 +83,11 @@ class PolicyValueAgent:
     ) -> tuple[list[np.ndarray], np.ndarray]:
         """Batched inference returning `(list_of_prob_arrays, values_array)`."""
         enc_obs = [encode_observation(o, self.vocab) for o in observations]
-        enc_ch = [encode_choice(c, o, self.vocab) for o, c in zip(observations, choices)]
+        ev = self.model.config.encoder_version
+        enc_ch = [
+            encode_choice(c, o, self.vocab, encoder_version=ev)
+            for o, c in zip(observations, choices)
+        ]
         batch = collate_encoded_batch(enc_obs, enc_ch)
         tensors = {k: v.to(self.device) for k, v in batch.items()}
         out = self.model(tensors, compute_policy=True, compute_value=compute_value)
@@ -125,8 +131,16 @@ class PolicyValueAgent:
         temperature: float = 0.0,
         seed: int | None = None,
         version: str | None = None,
+        encoder_version: int | None = None,
     ) -> PolicyValueAgent:
-        model, vocab, meta = load_checkpoint(path, map_location=device)
+        """Load an agent; it encodes with the checkpoint's own encoder version.
+
+        `encoder_version` additionally requires that version (raising
+        `EncoderVersionMismatchError` otherwise); `None` accepts any.
+        """
+        model, vocab, meta = load_checkpoint(
+            path, map_location=device, encoder_version=encoder_version
+        )
         resolved_version = version or str(meta.get("version", "warmstart-v1"))
         return cls(
             model=model,

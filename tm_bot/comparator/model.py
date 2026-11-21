@@ -21,8 +21,15 @@ from tm_bot.models.encode import (
     CAND_FEAT_DIM,
     CARD_DYN_DIM,
     CHOICE_CTX_DIM,
+    ENCODER_VERSION,
     OBS_SCALAR_DIM,
     SPACE_FEAT_DIM,
+)
+from tm_bot.models.network import (
+    VPMarginHead,
+    check_encoder_dims,
+    check_encoder_version,
+    legacy_config_defaults,
 )
 from tm_bot.models.vocab import (
     CARD_STATIC_DIM,
@@ -60,6 +67,11 @@ class ComparatorConfig:
     value_hidden: int = 384
     dropout: float = 0.05
     architecture: str = COMPARATOR_ARCHITECTURE
+    encoder_version: int = ENCODER_VERSION
+    vp_margin_head: bool = True
+
+    def __post_init__(self) -> None:
+        check_encoder_dims(self)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -67,7 +79,7 @@ class ComparatorConfig:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> ComparatorConfig:
         valid = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in payload.items() if k in valid})
+        return cls(**{k: v for k, v in legacy_config_defaults(payload).items() if k in valid})
 
 
 def _masked_mean_pool(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -164,6 +176,7 @@ class ComparatorNetwork(nn.Module):
             nn.SiLU(),
             nn.Linear(vh, 1),
         )
+        self.vp_margin_head = VPMarginHead(d, vh // 2) if config.vp_margin_head else None
 
         # Typed-candidate scorer: choice context + candidate MLP conditioned on the observation.
         ch = config.choice_hidden
@@ -305,6 +318,8 @@ class ComparatorNetwork(nn.Module):
             out["value_logit"] = value_logit
             out["win_prob"] = win_prob
             out["value"] = 2.0 * win_prob - 1.0
+            if self.vp_margin_head is not None:
+                out["vp_margin_pred"] = self.vp_margin_head(obs_pooled).float()
         if compute_policy and "cand_card_ids" in batch:
             logits, probs = self.forward_policy(obs_pooled, batch)
             out["policy_logits"] = logits
@@ -353,8 +368,13 @@ def load_comparator_checkpoint(
     path: str | Path,
     *,
     map_location: str | torch.device = "cpu",
+    encoder_version: int | None = ENCODER_VERSION,
 ) -> tuple[ComparatorNetwork, CardVocab, dict[str, Any]]:
-    """Load `(model, vocab, metadata)` saved by `save_comparator_checkpoint`."""
+    """Load `(model, vocab, metadata)` saved by `save_comparator_checkpoint`.
+
+    Raises `EncoderVersionMismatchError` unless the checkpoint's encoder version is
+    `encoder_version` (`None` accepts any supported version).
+    """
     target = Path(path)
     ckpt_path = target / "checkpoint.pt" if target.is_dir() else target
     payload = torch.load(ckpt_path, map_location=map_location, weights_only=False)
@@ -363,6 +383,7 @@ def load_comparator_checkpoint(
         raise ValueError(
             f"{ckpt_path} is a {cfg.architecture!r} checkpoint, not a comparator checkpoint"
         )
+    check_encoder_version(cfg.encoder_version, encoder_version, ckpt_path)
     vocab = CardVocab.from_dict(payload["vocab"])
     model = ComparatorNetwork.from_vocab(vocab, cfg)
     model.load_state_dict(payload["model_state_dict"])

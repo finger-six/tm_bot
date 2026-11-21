@@ -18,7 +18,7 @@ from tm_bot.agents.protocol import WorldSampler
 from tm_bot.agents.sampler import batch_sample_worlds, batch_world_ops
 from tm_bot.env.types import ActorObservation, Choice, Op, Seat
 from tm_bot.models.agent import PolicyValueAgent
-from tm_bot.models.network import TMNetwork
+from tm_bot.models.network import TMNetwork, check_encoder_version
 from tm_bot.models.vocab import CardVocab
 from tm_bot.search.config import SearchConfig, is_search_decision
 
@@ -698,8 +698,13 @@ def make_warmstart_search_agent(
     action_temperature: float | None = None,
     wave_size: int | None = None,
     seed: int | None = None,
+    encoder_version: int | None = None,
 ) -> ISMCTSAgent:
-    """Factory loading and caching the warm-start checkpoint for eval/search runs."""
+    """Factory loading and caching the warm-start checkpoint for eval/search runs.
+
+    The agent encodes with the checkpoint's own encoder version, so a pre-#42 (v1)
+    warm start plays as before; `encoder_version` additionally requires that version.
+    """
     ckpt_path = str(
         checkpoint
         or os.environ.get("TM_SEARCH_CHECKPOINT")
@@ -713,8 +718,12 @@ def make_warmstart_search_agent(
     cache_key = (str(Path(ckpt_path).resolve()), resolved_device)
     pv = _CHECKPOINT_CACHE.get(cache_key)
     if pv is None:
-        pv = PolicyValueAgent.from_checkpoint(ckpt_path, device=resolved_device, temperature=0.0)
+        pv = PolicyValueAgent.from_checkpoint(
+            ckpt_path, device=resolved_device, temperature=0.0, encoder_version=encoder_version
+        )
         _CHECKPOINT_CACHE[cache_key] = pv
+    elif encoder_version is not None:
+        check_encoder_version(pv.model.config.encoder_version, encoder_version, ckpt_path)
 
     sims = (
         num_simulations

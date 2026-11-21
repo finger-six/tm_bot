@@ -337,7 +337,7 @@ class SelfPlayRunner:
 
         def comparator_factory(checkpoint: Path):
             cmp_model, cmp_vocab, _ = load_comparator_checkpoint(
-                checkpoint, map_location=device
+                checkpoint, map_location=device, encoder_version=None
             )
             cmp_model.eval()
             return comparator_eval_factory(

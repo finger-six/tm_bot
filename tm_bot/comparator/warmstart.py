@@ -368,7 +368,7 @@ def run_comparator_warmstart(
                 vocab,
                 temperature=1.0,
                 metadata={
-                    "version": "comparator-warmstart-v1",
+                    "version": "comparator-warmstart-v2",
                     "best_epoch": best_epoch,
                     "val_score": best_score,
                     "train_config": cfg.to_dict(),
@@ -389,7 +389,7 @@ def run_comparator_warmstart(
         vocab,
         temperature=fit["temperature"],
         metadata={
-            "version": "comparator-warmstart-v1",
+            "version": "comparator-warmstart-v2",
             "best_epoch": best_epoch,
             "val_score": best_score,
             "val_calibration": fit,

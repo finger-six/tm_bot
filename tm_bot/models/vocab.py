@@ -103,6 +103,10 @@ PROMPT_TYPES: tuple[str, ...] = (
     "amount",
     "resource",
     "other_card",
+    # Encoder v2 (#42): split out of `project_card` and `other_card` respectively.
+    # Appended so v1 ids stay unchanged.
+    "standard_project",
+    "card_action",
 )
 PROMPT_TYPE_TO_ID: dict[str, int] = {name: idx for idx, name in enumerate(PROMPT_TYPES)}
 

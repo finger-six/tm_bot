@@ -12,6 +12,7 @@ import torch
 from tm_bot.comparator.model import ComparatorNetwork, load_comparator_checkpoint
 from tm_bot.env.types import ActorObservation, Choice
 from tm_bot.models.encode import collate_encoded_batch, encode_choice, encode_observation
+from tm_bot.models.network import check_encoder_version
 from tm_bot.models.vocab import CardVocab
 
 
@@ -75,7 +76,9 @@ class ComparatorAgent:
     ) -> tuple[np.ndarray, float]:
         """Return `(candidate_probs, calibrated_win_prob)` for one decision."""
         enc_obs = encode_observation(observation, self.vocab)
-        enc_choice = encode_choice(choice, observation, self.vocab)
+        enc_choice = encode_choice(
+            choice, observation, self.vocab, encoder_version=self.model.config.encoder_version
+        )
         batch = collate_encoded_batch([enc_obs], [enc_choice])
         tensors = {k: v.to(self.device) for k, v in batch.items()}
         out = self.model(tensors, compute_policy=True, compute_value=True)
@@ -125,8 +128,12 @@ class ComparatorAgent:
         temperature: float = 0.0,
         seed: int | None = None,
         version: str | None = None,
+        encoder_version: int | None = None,
     ) -> ComparatorAgent:
-        model, vocab, meta = load_comparator_checkpoint(path, map_location=device)
+        """Load an agent; it encodes with the checkpoint's own encoder version."""
+        model, vocab, meta = load_comparator_checkpoint(
+            path, map_location=device, encoder_version=encoder_version
+        )
         resolved_version = version or str(meta.get("version", "comparator-warmstart-v1"))
         return cls(
             model=model,
@@ -169,20 +176,26 @@ def make_comparator_agent(
     *,
     checkpoint: str | Path,
     device: str | None = None,
+    encoder_version: int | None = None,
 ) -> ComparatorAgent:
     """Eval-CLI factory (`tm_bot.comparator:make_comparator_agent?checkpoint=...`).
 
     Loads each checkpoint once per process and returns a fresh agent playing the
-    evaluation policy.
+    evaluation policy. The agent encodes with the checkpoint's own encoder version;
+    `encoder_version` additionally requires that version.
     """
     resolved_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     key = (str(Path(checkpoint).resolve()), resolved_device)
     cached = _EVAL_MODEL_CACHE.get(key)
     if cached is None:
-        model, vocab, meta = load_comparator_checkpoint(checkpoint, map_location=resolved_device)
+        model, vocab, meta = load_comparator_checkpoint(
+            checkpoint, map_location=resolved_device, encoder_version=encoder_version
+        )
         model.eval()
         version = str(meta.get("version") or f"comparator-{Path(checkpoint).name}")
         cached = (model, vocab, version)
         _EVAL_MODEL_CACHE[key] = cached
     model, vocab, version = cached
+    if encoder_version is not None:
+        check_encoder_version(model.config.encoder_version, encoder_version, checkpoint)
     return comparator_eval_factory(model, vocab, device=resolved_device, version=version)()

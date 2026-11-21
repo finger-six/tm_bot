@@ -456,7 +456,7 @@ def run_warmstart_training(
                 model,
                 vocab,
                 metadata={
-                    "version": "warmstart-v2",
+                    "version": "warmstart-v3",
                     "best_epoch": best_epoch,
                     "val_score": best_score,
                     "train_config": cfg.to_dict(),
