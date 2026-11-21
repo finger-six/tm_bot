@@ -187,6 +187,43 @@ Exactness: the cache stores the encoder's own outputs, with the board taken from
 - The test split is not evaluated by these runs, and the pre-self-play gate (#47) uses the val split too (#38 §5).
 - Checkpoints carry `version`, `warmstart_data_version: 2`, `encoder_version`, the model config (whose `encoder_version` the loaders check), the full train config, table sizes, the composite inputs and the Markdown report; `best/report.md` and `metrics.json` sit beside them.
 
+### Results (2026-11-21)
+
+Both runs used the same 15,000-step budget on the local GPU from the shared encoded cache (`runs/warmstart-v3`, `runs/comparator-warmstart-v2`; full tables in each run's `best/report.md`). Both selected **epoch 2 (step 5,000)**.
+
+| | Main (`TMNetwork`) | Comparator (`ComparatorNetwork`) |
+| --- | ---: | ---: |
+| Parameters | 4,492,995 | 2,575,715 |
+| Train wall clock | 143.0 min | 38.6 min |
+| Composite (best) | 0.6232 | 0.6161 |
+| Corporation top-1 | 0.7266 | 0.7296 |
+| Prelude step-0 top-1 | 0.8121 | 0.8118 |
+| Draft pick top-1 | 0.7243 | 0.7150 |
+| Research buy step-0 / done-stop | 0.9505 / 0.8758 | 0.9446 / 0.8569 |
+| Root branch top-1 | 0.6597 | 0.6407 |
+| Project card play top-1 | 0.5783 | 0.5312 |
+| Standard project top-1 | 0.7024 | 0.6796 |
+| Card action top-1 | 0.7412 | 0.7271 |
+| Initial project buy step-0 / done-stop | 0.9546 / 0.7843 | 0.9555 / 0.7183 |
+| Gen 2+ value acc / Brier / ECE (raw) | 0.7579 / 0.1628 / 0.0608 | 0.7631 / 0.1563 / 0.0347 |
+| Gen 2+ value Brier / ECE (calibrated) | — | 0.1549 / 0.0128 (T = 1.2603) |
+| Gen 2+ VP-margin MAE (normalised) | 0.2360 | 0.2346 |
+
+Value accuracy / Brier by generation bucket (raw):
+
+| Bucket | Main acc | Main Brier | Main ECE | Comparator acc | Comparator Brier | Comparator ECE |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| gen 1 | 0.6093 | 0.2293 | 0.0397 | 0.6210 | 0.2271 | 0.0133 |
+| gen 2-5 | 0.7112 | 0.1932 | 0.0749 | 0.7125 | 0.1864 | 0.0482 |
+| gen 6-9 | 0.7879 | 0.1428 | 0.0551 | 0.7989 | 0.1349 | 0.0291 |
+| gen 10+ | 0.8338 | 0.1150 | 0.0305 | 0.8368 | 0.1130 | 0.0246 |
+
+Per map, policy top-1 is within a few points across Tharsis, Elysium, Hellas and Vastitas Borealis (Nova); the gen 2+ value tables on Elysium (n = 553) and Vastitas Borealis (n = 349) are small and noisier (ECE 0.13–0.17 raw), since the outcome-verified mid-game rows are mostly Tharsis and Hellas.
+
+**Value overfitting after epoch 2.** Policy top-1 kept improving to step 15,000 (main root branch 0.6456 → 0.6597 → 0.6813, project play 0.5492 → 0.5783 → 0.6092 at epochs 1 / 2 / 6), but the gen 2+ value Brier rose after epoch 2, sharply for main (0.1604, 0.1628, 0.1981, 0.2264, 0.2368, 0.2414) and mildly for the comparator (0.1659, 0.1563, 0.1620, 0.1656, 0.1716, 0.1731). The composite's value term therefore picked epoch 2 for both. The ~1.09M mid-game value points come from far fewer games (many correlated points per game), so the larger main network memorises game outcomes. The selected checkpoints trade a few points of policy accuracy for an un-overfit value head; self-play's KL anchor and human-data auxiliary loss (#39) start from these epoch-2 weights. If the pre-self-play gate (§6) fails on value-dependent checks, the first lever is a shorter value schedule or lower value weight rather than more steps.
+
+The cache rebuild before training took ~9 min (16 workers). A first attempt hung when its worker pool could no longer spawn processes after the launching session ended; rerun detached, it completed normally.
+
 ## 6. Pre-self-play gate (#47)
 
 Both v2 warm starts must pass every #38 §5 check before self-play. The checks and the report are pure functions in [`tm_bot/training/warmstart_gate.py`](../tm_bot/training/warmstart_gate.py); [`run_warmstart_gate.py`](../tm_bot/training/run_warmstart_gate.py) gathers their inputs and writes `<out>.md` plus `<out>.json`.
