@@ -261,6 +261,18 @@ def _vocab_fingerprint(vocab: CardVocab) -> str:
     return hashlib.sha1("\n".join(vocab.names).encode("utf-8")).hexdigest()
 
 
+def _code_fingerprint() -> str:
+    """Hash of the modules that define the cached encoding, so a builder or encoder fix invalidates the
+    cache even without a version bump."""
+    from tm_bot.models import encode
+    from tm_bot.training import warmstart_builder
+
+    h = hashlib.sha1()
+    for mod_file in (encode.__file__, warmstart_builder.__file__, __file__):
+        h.update(Path(mod_file).read_bytes().replace(b"\r\n", b"\n"))
+    return h.hexdigest()
+
+
 def _source_signature(path: Path) -> dict[str, Any]:
     st = path.stat()
     return {"path": str(path.resolve()), "size": st.st_size, "mtime_ns": st.st_mtime_ns}
@@ -277,6 +289,7 @@ def _expected_meta(task: CacheTask, source: Path, vocab: CardVocab) -> dict[str,
         "feat_cols": list(task.feat_cols),
         "vocab_size": vocab.size,
         "vocab_sha1": _vocab_fingerprint(vocab),
+        "code_sha1": _code_fingerprint(),
         "source": _source_signature(source),
     }
 

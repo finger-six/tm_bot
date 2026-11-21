@@ -262,9 +262,10 @@ use one because the spec fixes fitting to validation data.
 ## Commands
 
 ```bash
-# Warm start on the same corpus/split as the main agent (full schedule: --epochs 4, no step cap).
+# v2 warm start: the shared 15,000-step multi-task schedule (docs/warmstart.md section 5).
+# The v1 flags --epochs/--max-steps-per-epoch below are gone; the v1 sections above are a record.
 conda run -n tm_bot python -m tm_bot.comparator.warmstart \
-  --out-dir runs/comparator-warmstart --epochs 1 --max-steps-per-epoch 900
+  --data-dir data/warmstart --out-dir runs/comparator-warmstart-v2
 
 # PPO self-play under the run orchestration (1 h development run).
 conda run -n tm_bot python -m tm_bot.runs --run-name cmp-dev1h-final \
