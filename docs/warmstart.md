@@ -184,5 +184,18 @@ Exactness: the cache stores the encoder's own outputs, with the board taken from
 - Checkpoint selection after each 2,500-step epoch on the val split: `0.25 · mean(corp, prelude step-0, draft, research-buy step-0) + 0.50 · mean(branch, project play, standard project, card action) + 0.25 · max(0, 1 − gen 2+ value Brier / 0.25)`. Research-buy accuracy is step-0 accuracy (the top candidate is one of the bought cards); done-stop accuracy is reported alongside.
 - Reports give per-task top-1 overall, per map and per generation bucket (`gen 1`, `2–5`, `6–9`, `10+`), and value accuracy / Brier / ECE per bucket, per phase and per map, for both agents.
 - The comparator's temperature is fit on gen 2+ val value logits only (`calibration.fit_midgame_temperature`); its report adds the calibrated value table.
-- The test split is not evaluated by these runs; it stays reserved for the pre-self-play gate (#47).
+- The test split is not evaluated by these runs, and the pre-self-play gate (#47) uses the val split too (#38 §5).
 - Checkpoints carry `version`, `warmstart_data_version: 2`, `encoder_version`, the model config (whose `encoder_version` the loaders check), the full train config, table sizes, the composite inputs and the Markdown report; `best/report.md` and `metrics.json` sit beside them.
+
+## 6. Pre-self-play gate (#47)
+
+Both v2 warm starts must pass every #38 §5 check before self-play. The checks and the report are pure functions in [`tm_bot/training/warmstart_gate.py`](../tm_bot/training/warmstart_gate.py); [`run_warmstart_gate.py`](../tm_bot/training/run_warmstart_gate.py) gathers their inputs and writes `<out>.md` plus `<out>.json`.
+
+```
+python -m tm_bot.training.run_warmstart_gate --agent main --run-dir runs/warmstart-v3 --out docs/gate-warmstart-v3.md
+python -m tm_bot.training.run_warmstart_gate --agent comparator --run-dir runs/comparator-warmstart-v2 --out docs/gate-comparator-warmstart-v2.md
+```
+
+- **Validation** reads `<run-dir>/metrics.json` (`val`; the comparator is judged on `value_calibrated`). Frequency baselines rank each row's candidates by train-split selection counts and are scored on val: corporation and prelude from `setup_choices`, the gen 2+ tasks from the encoded cache (the same rows the model was scored on; ties go to the earlier candidate; research buys score step 0 like the model). A policy task passes only if the model beats its baseline overall; per-map numbers are reported, not gated. Value accuracy must rise strictly over `gen 2-5` → `6-9` → `10+`.
+- **Live games** use `dev-*` seeds from `dev-0000` and the eval harness's seat-swapped schedule: 104 games vs `b0-v1`, 40 self-mirror games, 104 vs the archived v1 warm start (`runs/warmstart/best` or `runs/comparator-warmstart-full/best`, same settings as the candidate), and 104 vs `b1-v2`. The main agent plays light search, #39's 8/4 fallback budget (`c_puct` 1.5, temperature 0, action temperature 1, wave 4); its raw-policy diagnostic is the same agent at 0 simulations, 104 more games vs `b1-v2`. The comparator plays its sampled evaluation policy. Failures are counted over every pairing played, the diagnostic one included (`IndexError` = illegal response, `StepCapError` = step cap, anything else = adapter error). Live value Brier / ECE vs `b1-v2` (raw value head for main, post-temperature for the comparator) is logged, not gated.
+- Each finished pairing's games are saved under `--work-dir` (default `<run-dir>/gate/`); `--resume` reuses them. `--skip-validation`, `--skip-live`, `--seeds` and `--maps` are for smoke runs: skipped or shortened parts fail their checks, so such a report never reads PASS.
