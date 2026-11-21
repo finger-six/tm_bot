@@ -239,6 +239,20 @@ function sampleWorldFromObservationLegacy(
   };
 }
 
+// #31: a stale belief makes the sampler throw only for some seeds (the opponent-hand split
+// is seed-dependent), so sweep seeds instead of trying one.
+function assertSamplesEverySeed(obs: ActorObservation, seeds = 64): void {
+  for (let seed = 0; seed < seeds; seed++) {
+    const world = sampleWorldFromObservation(obs, seed);
+    assert.equal(world.projectDeck.length, obs.public.deckSize, `deck size, seed ${seed}`);
+    assert.equal(
+      world.opponentHand.length,
+      obs.public.players[obs.actor === 0 ? 1 : 0].cardsInHandCount,
+      `opponent hand size, seed ${seed}`,
+    );
+  }
+}
+
 describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
   describe('1. clone() prompt/continuation equivalence across all decision categories', () => {
     it('clones identically at initial setup root and mid multi_card selection', () => {
@@ -626,8 +640,22 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
     });
 
     it('excludes pre-reshuffle unbought drafted cards when actor sells patents post-reshuffle', () => {
+      // The actor must not have discarded from hand yet: the synthetic sale below is then
+      // its only one, and the observation stays self-consistent.
+      const actorDiscardedFromHand = (game: AdapterGame): boolean => {
+        const obs = game.observe(0);
+        return obs.public.publicLog.some(
+          (e) =>
+            e.data[0]?.value === obs.public.players[0].color &&
+            (e.message === '${0} sold ${1} patents' ||
+              e.message === '${0} is using their ${1} effect to draw a card by discarding a card.'),
+        );
+      };
       const g = findGameAt(
-        (game) => _unsafeGetEngineGame(game).phase === 'action' && _unsafeGetEngineGame(game).generation >= 2,
+        (game) =>
+          _unsafeGetEngineGame(game).phase === 'action' &&
+          _unsafeGetEngineGame(game).generation >= 2 &&
+          !actorDiscardedFromHand(game),
         'pool-draft-sell-reshuffle',
         'tharsis',
       );
@@ -636,22 +664,17 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
       const basePool = computeUnseenPool(baseObs);
       assert.ok(basePool.projects.length >= 3);
       const [unbought1, unbought2, passedCard] = basePool.projects;
-      const filteredLog = baseObs.public.publicLog.filter(
-        (e) =>
-          !(
-            e.data[0]?.value === actorColor &&
-            (e.message === '${0} sold ${1} patents' ||
-              e.message === '${0} is using their ${1} effect to draw a card by discarding a card.')
-          ),
-      );
       const synthObs: ActorObservation = {
         ...baseObs,
         public: {
           ...baseObs.public,
           generation: 5,
+          // The reshuffle moved the whole discard pile into the deck, so the belief is exactly
+          // tight: every unseen card not in the opponent's hand must fit in the deck (#31).
+          deckSize: baseObs.public.deckSize + baseObs.public.discardPileSize,
           discardPileSize: 0,
           publicLog: [
-            ...filteredLog,
+            ...baseObs.public.publicLog,
             {type: 0, message: 'Generation ${0}', data: [{type: 0, value: '4'}]},
             {type: 0, message: 'The project discard pile has been shuffled to form a new deck.', data: []},
             {type: 0, message: 'Generation ${0}', data: [{type: 0, value: '5'}]},
@@ -688,6 +711,7 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
           ],
         },
       };
+      assertSamplesEverySeed(synthObs);
       const pool = computeUnseenPool(synthObs);
       assert.equal(
         pool.knownProjectDiscardPile.includes(unbought1),
@@ -695,8 +719,6 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
         'Pre-reshuffle unbought drafted card must not be marked in post-reshuffle discard pile',
       );
       assert.equal(pool.knownProjectDiscardPile.includes(unbought2), false);
-      const world = sampleWorldFromObservation(synthObs, 42);
-      assert.equal(world.opponentHand.length, synthObs.public.players[1].cardsInHandCount);
     });
 
     it('leaves Discarded N cards in unseen pool when a reshuffle occurs inside drawByConditionOrThrow', () => {
@@ -731,6 +753,7 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
           ],
         },
       };
+      assertSamplesEverySeed(synthObs);
       const pool = computeUnseenPool(synthObs);
       for (const c of discardedBatch) {
         assert.equal(
@@ -739,9 +762,6 @@ describe('Ticket 16: clone(), unseenPool(), determinize()', () => {
           `Batch card ${c} spanning reshuffle must not be forced into knownProjectDiscardPile`,
         );
       }
-      const world = sampleWorldFromObservation(synthObs, 42);
-      assert.equal(world.projectDeck.length, synthObs.public.deckSize);
-      assert.equal(world.opponentHand.length, synthObs.public.players[1].cardsInHandCount);
     });
   });
 

@@ -5,6 +5,7 @@ import {
   SampledWorld,
   Seat,
   _unsafeGetEngineGame,
+  computeUnseenPool,
   createGame,
   sampleWorldFromObservation,
   serializeObservation,
@@ -184,6 +185,35 @@ function extractTrueWorld(game: AdapterGame, actor: Seat): SampledWorld {
   };
 }
 
+// #31: the belief must contain the truth. A card wrongly excluded from the unseen pool
+// (e.g. a stale pre-reshuffle discard) makes the sampler unsatisfiable for some seeds;
+// this catches the over-exclusion even while the counts still leave enough slack.
+function beliefViolations(game: AdapterGame, actor: Seat, truth: SampledWorld): Array<string> {
+  const pool = computeUnseenPool(game.observe(actor));
+  const unseen = new Set(pool.projects);
+  const discard = new Set(truth.projectDiscardPile ?? []);
+  const oppHand = new Set(truth.opponentHand);
+  const known = new Set(pool.knownOpponentHandProjects);
+  const possible = new Set(pool.possibleOpponentHandProjects);
+  const out: Array<string> = [];
+  for (const c of truth.projectDeck) {
+    if (!unseen.has(c)) out.push(`deck card ${c} not in unseen pool`);
+  }
+  for (const c of pool.knownProjectDiscardPile) {
+    if (!discard.has(c)) out.push(`known discard ${c} not in discard pile`);
+  }
+  for (const c of known) {
+    if (!oppHand.has(c)) out.push(`known opponent card ${c} not in opponent hand`);
+  }
+  for (const c of possible) {
+    if (!oppHand.has(c) && !discard.has(c)) out.push(`possible opponent card ${c} in neither hand nor discard`);
+  }
+  for (const c of oppHand) {
+    if (!known.has(c) && !possible.has(c) && !unseen.has(c)) out.push(`opponent card ${c} excluded from belief`);
+  }
+  return out;
+}
+
 function playToCompletion(game: AdapterGame, rng: () => number): void {
   while (true) {
     const seats = game.pending();
@@ -218,6 +248,11 @@ function main(): void {
             const cTruth = g.clone();
             const obsBefore = serializeObservation(cTruth.observe(actor));
             const trueWorld = extractTrueWorld(cTruth, actor);
+            assert.deepEqual(
+              beliefViolations(cTruth, actor, trueWorld),
+              [],
+              `belief excludes the truth in game ${gi} decision ${decision} (actor ${actor})`,
+            );
             cTruth.determinize(actor, trueWorld);
             assert.equal(
               serializeObservation(cTruth.observe(actor)),
@@ -263,7 +298,7 @@ function main(): void {
   const endNs = process.hrtime.bigint();
   const totalSec = Number(endNs - startNs) / 1e9;
   console.log(`=== Determinize Truth & Rollout Sweep (${totalGames} games) ===`);
-  console.log(`Truth checks:     ${truthChecks} (0 rejections, 0 duplicates)`);
+  console.log(`Truth checks:     ${truthChecks} (0 rejections, 0 duplicates, 0 belief violations)`);
   console.log(`Sampled rollouts: ${sampledRollouts} (all completed, 0 duplicates)`);
   console.log(`Total wall:       ${totalSec.toFixed(2)}s`);
 }
