@@ -1,0 +1,2133 @@
+{
+  "agent": "main",
+  "baselines": {
+    "branch": {
+      "overall": {
+        "acc": 0.46814773058067377,
+        "correct": 101317,
+        "total": 216421
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.4936772888214466,
+          "correct": 976,
+          "total": 1977
+        },
+        "hellas": {
+          "acc": 0.4602835466874287,
+          "correct": 25421,
+          "total": 55229
+        },
+        "tharsis": {
+          "acc": 0.47062550287947996,
+          "correct": 74284,
+          "total": 157841
+        },
+        "vastitas borealis nova": {
+          "acc": 0.462882096069869,
+          "correct": 636,
+          "total": 1374
+        }
+      }
+    },
+    "card_action": {
+      "overall": {
+        "acc": 0.5936049945161562,
+        "correct": 14072,
+        "total": 23706
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.6820512820512821,
+          "correct": 133,
+          "total": 195
+        },
+        "hellas": {
+          "acc": 0.5977119573734524,
+          "correct": 3814,
+          "total": 6381
+        },
+        "tharsis": {
+          "acc": 0.5922364462273613,
+          "correct": 10039,
+          "total": 16951
+        },
+        "vastitas borealis nova": {
+          "acc": 0.48044692737430167,
+          "correct": 86,
+          "total": 179
+        }
+      }
+    },
+    "corp": {
+      "overall": {
+        "acc": 0.6849035608308606,
+        "correct": 3693,
+        "total": 5392
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.6481481481481481,
+          "correct": 35,
+          "total": 54
+        },
+        "hellas": {
+          "acc": 0.7102446483180428,
+          "correct": 929,
+          "total": 1308
+        },
+        "tharsis": {
+          "acc": 0.6776216758655293,
+          "correct": 2701,
+          "total": 3986
+        },
+        "vastitas borealis nova": {
+          "acc": 0.6363636363636364,
+          "correct": 28,
+          "total": 44
+        }
+      }
+    },
+    "draft": {
+      "overall": {
+        "acc": 0.6398463149121292,
+        "correct": 62950,
+        "total": 98383
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.6322505800464037,
+          "correct": 545,
+          "total": 862
+        },
+        "hellas": {
+          "acc": 0.6400829015544042,
+          "correct": 15442,
+          "total": 24125
+        },
+        "tharsis": {
+          "acc": 0.6399444566652002,
+          "correct": 46547,
+          "total": 72736
+        },
+        "vastitas borealis nova": {
+          "acc": 0.6303030303030303,
+          "correct": 416,
+          "total": 660
+        }
+      }
+    },
+    "prelude": {
+      "overall": {
+        "acc": 0.7839391691394659,
+        "correct": 4227,
+        "total": 5392
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.7592592592592593,
+          "correct": 41,
+          "total": 54
+        },
+        "hellas": {
+          "acc": 0.8027522935779816,
+          "correct": 1050,
+          "total": 1308
+        },
+        "tharsis": {
+          "acc": 0.777722027094832,
+          "correct": 3100,
+          "total": 3986
+        },
+        "vastitas borealis nova": {
+          "acc": 0.8181818181818182,
+          "correct": 36,
+          "total": 44
+        }
+      }
+    },
+    "project_card": {
+      "overall": {
+        "acc": 0.30250659777513,
+        "correct": 27166,
+        "total": 89803
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.3394919168591224,
+          "correct": 294,
+          "total": 866
+        },
+        "hellas": {
+          "acc": 0.2944088397790055,
+          "correct": 6661,
+          "total": 22625
+        },
+        "tharsis": {
+          "acc": 0.3050489070082298,
+          "correct": 20053,
+          "total": 65737
+        },
+        "vastitas borealis nova": {
+          "acc": 0.2747826086956522,
+          "correct": 158,
+          "total": 575
+        }
+      }
+    },
+    "research_buy": {
+      "overall": {
+        "acc": 0.8973380491437081,
+        "correct": 28923,
+        "total": 32232
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.8943661971830986,
+          "correct": 254,
+          "total": 284
+        },
+        "hellas": {
+          "acc": 0.8975652832092847,
+          "correct": 7115,
+          "total": 7927
+        },
+        "tharsis": {
+          "acc": 0.8973034274193549,
+          "correct": 21363,
+          "total": 23808
+        },
+        "vastitas borealis nova": {
+          "acc": 0.8967136150234741,
+          "correct": 191,
+          "total": 213
+        }
+      }
+    },
+    "standard_project": {
+      "overall": {
+        "acc": 0.3498592948187386,
+        "correct": 4227,
+        "total": 12082
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.330188679245283,
+          "correct": 35,
+          "total": 106
+        },
+        "hellas": {
+          "acc": 0.39481946624803765,
+          "correct": 1006,
+          "total": 2548
+        },
+        "tharsis": {
+          "acc": 0.3374357876712329,
+          "correct": 3153,
+          "total": 9344
+        },
+        "vastitas borealis nova": {
+          "acc": 0.39285714285714285,
+          "correct": 33,
+          "total": 84
+        }
+      }
+    }
+  },
+  "config": {
+    "candidate_setting": "light search num_simulations=8, num_worlds=4, c_puct=1.5, temperature=0.0, action_temperature=1.0, wave_size=4",
+    "checkpoint": "C:\\2026\\tm_bot\\runs\\warmstart-v3\\best",
+    "git_commit": "1014f5f",
+    "maps": [
+      "tharsis",
+      "elysium",
+      "hellas",
+      "vastitas borealis nova"
+    ],
+    "max_decisions": 20000,
+    "metrics_path": "runs\\warmstart-v3\\metrics.json",
+    "raw_setting": "search agent with num_simulations=0 (policy head)",
+    "seed_start": 0,
+    "v1_checkpoint": "C:\\2026\\tm_bot\\runs\\warmstart\\best",
+    "workers": "8 / 32"
+  },
+  "gate": {
+    "checks": [
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.7266320474777448,
+        "measured_text": "72.66%",
+        "name": "Corporation: top-1 beats frequency baseline",
+        "note": "baseline 68.49%, delta +4.17 pp",
+        "passed": true,
+        "threshold": "> 68.49%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.8121290801186943,
+        "measured_text": "81.21%",
+        "name": "Prelude (step-0): top-1 beats frequency baseline",
+        "note": "baseline 78.39%, delta +2.82 pp",
+        "passed": true,
+        "threshold": "> 78.39%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.7243121270951283,
+        "measured_text": "72.43%",
+        "name": "Draft pick: top-1 beats frequency baseline",
+        "note": "baseline 63.98%, delta +8.45 pp",
+        "passed": true,
+        "threshold": "> 63.98%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.9505150161330355,
+        "measured_text": "95.05%",
+        "name": "Research buy (step-0): top-1 beats frequency baseline",
+        "note": "baseline 89.73%, delta +5.32 pp",
+        "passed": true,
+        "threshold": "> 89.73%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.6596679619815082,
+        "measured_text": "65.97%",
+        "name": "Root branch: top-1 beats frequency baseline",
+        "note": "baseline 46.81%, delta +19.15 pp",
+        "passed": true,
+        "threshold": "> 46.81%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.5783437078939456,
+        "measured_text": "57.83%",
+        "name": "Project card play: top-1 beats frequency baseline",
+        "note": "baseline 30.25%, delta +27.58 pp",
+        "passed": true,
+        "threshold": "> 30.25%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.7023671577553385,
+        "measured_text": "70.24%",
+        "name": "Standard project: top-1 beats frequency baseline",
+        "note": "baseline 34.99%, delta +35.25 pp",
+        "passed": true,
+        "threshold": "> 34.99%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.7411625748755589,
+        "measured_text": "74.12%",
+        "name": "Card action: top-1 beats frequency baseline",
+        "note": "baseline 59.36%, delta +14.76 pp",
+        "passed": true,
+        "threshold": "> 59.36%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.7266320474777448,
+        "measured_text": "72.66%",
+        "name": "Corporation: within -1.5 pp of v1 (72.50%)",
+        "note": "",
+        "passed": true,
+        "threshold": ">= 71.00%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.8121290801186943,
+        "measured_text": "81.21%",
+        "name": "Prelude (step-0): within -1.5 pp of v1 (81.30%)",
+        "note": "",
+        "passed": true,
+        "threshold": ">= 79.80%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.7243121270951283,
+        "measured_text": "72.43%",
+        "name": "Draft pick: within -1.5 pp of v1 (70.20%)",
+        "note": "",
+        "passed": true,
+        "threshold": ">= 68.70%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.757864753285619,
+        "measured_text": "75.79%",
+        "name": "Gen >= 2 value accuracy (raw)",
+        "note": "",
+        "passed": true,
+        "threshold": ">= 72.00%"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.1628487337153525,
+        "measured_text": "0.1628",
+        "name": "Gen >= 2 value Brier (raw)",
+        "note": "",
+        "passed": true,
+        "threshold": "<= 0.1900"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": 0.06080442377120346,
+        "measured_text": "0.0608",
+        "name": "Gen >= 2 value ECE (raw)",
+        "note": "",
+        "passed": false,
+        "threshold": "<= 0.0400"
+      },
+      {
+        "gating": true,
+        "group": "validation",
+        "measured": [
+          0.71123462900217,
+          0.787885798898709,
+          0.8337504940060598
+        ],
+        "measured_text": "71.12% -> 78.79% -> 83.38%",
+        "name": "Value accuracy increases over gen 2-5 -> gen 6-9 -> gen 10+ (raw)",
+        "note": "",
+        "passed": true,
+        "threshold": "strictly increasing"
+      },
+      {
+        "gating": true,
+        "group": "failures",
+        "measured": 0,
+        "measured_text": "0",
+        "name": "0 illegal responses across all pairings",
+        "note": "",
+        "passed": true,
+        "threshold": "== 0"
+      },
+      {
+        "gating": true,
+        "group": "failures",
+        "measured": 0,
+        "measured_text": "0",
+        "name": "0 adapter errors across all pairings",
+        "note": "",
+        "passed": true,
+        "threshold": "== 0"
+      },
+      {
+        "gating": true,
+        "group": "failures",
+        "measured": 0,
+        "measured_text": "0",
+        "name": "0 step-cap truncations across all pairings",
+        "note": "",
+        "passed": true,
+        "threshold": "== 0"
+      },
+      {
+        "gating": true,
+        "group": "vs_b0",
+        "measured": 1.0,
+        "measured_text": "100.00%",
+        "name": "Win rate vs b0-v1",
+        "note": "",
+        "passed": true,
+        "threshold": ">= 90.00%"
+      },
+      {
+        "gating": true,
+        "group": "vs_b0",
+        "measured": 1.0,
+        "measured_text": "100.00%",
+        "name": "Win rate 95% CI lower bound vs b0-v1",
+        "note": "paired bootstrap over seeds",
+        "passed": true,
+        "threshold": "> 80.00%"
+      },
+      {
+        "gating": true,
+        "group": "vs_b0",
+        "measured": 54.54807692307692,
+        "measured_text": "+54.55",
+        "name": "Mean VP margin vs b0-v1",
+        "note": "",
+        "passed": true,
+        "threshold": ">= +35.00"
+      },
+      {
+        "gating": true,
+        "group": "mirror",
+        "measured": 15.0,
+        "measured_text": "15.0",
+        "name": "Self-mirror median game length (generations)",
+        "note": "",
+        "passed": true,
+        "threshold": "<= 16.0"
+      },
+      {
+        "gating": true,
+        "group": "mirror",
+        "measured": 20.049999999999997,
+        "measured_text": "20.0",
+        "name": "Self-mirror p95 game length (generations)",
+        "note": "",
+        "passed": true,
+        "threshold": "<= 22.0"
+      },
+      {
+        "gating": true,
+        "group": "vs_v1",
+        "measured": 1.0,
+        "measured_text": "100.00%",
+        "name": "Win rate vs archived v1 warm start",
+        "note": "",
+        "passed": true,
+        "threshold": ">= 85.00%"
+      },
+      {
+        "gating": true,
+        "group": "vs_b1",
+        "measured": 57.29807692307692,
+        "measured_text": "57.30",
+        "name": "Mean own VP vs b1-v2",
+        "note": "",
+        "passed": false,
+        "threshold": ">= 75.00"
+      },
+      {
+        "gating": true,
+        "group": "vs_b1",
+        "measured": -55.04807692307692,
+        "measured_text": "-55.05",
+        "name": "Mean VP margin vs b1-v2",
+        "note": "",
+        "passed": false,
+        "threshold": ">= -35.00"
+      },
+      {
+        "gating": true,
+        "group": "schedule",
+        "measured": 104,
+        "measured_text": "104",
+        "name": "vs b0-v1: 104 seat-swapped dev-* games (13 seeds x 4 maps x 2 seats)",
+        "note": "",
+        "passed": true,
+        "threshold": "== 104"
+      },
+      {
+        "gating": true,
+        "group": "schedule",
+        "measured": 40,
+        "measured_text": "40",
+        "name": "self-mirror: 40 seat-swapped dev-* games (5 seeds x 4 maps x 2 seats)",
+        "note": "",
+        "passed": true,
+        "threshold": "== 40"
+      },
+      {
+        "gating": true,
+        "group": "schedule",
+        "measured": 104,
+        "measured_text": "104",
+        "name": "vs archived v1 warm start: 104 seat-swapped dev-* games (13 seeds x 4 maps x 2 seats)",
+        "note": "",
+        "passed": true,
+        "threshold": "== 104"
+      },
+      {
+        "gating": true,
+        "group": "schedule",
+        "measured": 104,
+        "measured_text": "104",
+        "name": "vs b1-v2: 104 seat-swapped dev-* games (13 seeds x 4 maps x 2 seats)",
+        "note": "",
+        "passed": true,
+        "threshold": "== 104"
+      },
+      {
+        "gating": false,
+        "group": "schedule",
+        "measured": 104,
+        "measured_text": "104",
+        "name": "raw policy vs b1-v2 (diagnostic): 104 seat-swapped dev-* games (13 seeds x 4 maps x 2 seats)",
+        "note": "",
+        "passed": true,
+        "threshold": "== 104"
+      }
+    ],
+    "diagnostics": [
+      {
+        "name": "Win rate",
+        "pairing": "vs b1-v2",
+        "value": "0.96% [0.00%, 2.88%]"
+      },
+      {
+        "name": "Live value Brier / ECE / accuracy (gen >= 2)",
+        "pairing": "vs b1-v2",
+        "value": "0.1934 / 0.2892 / 72.31% (n=19,417)"
+      },
+      {
+        "name": "Live value Brier / ECE / accuracy (all gens)",
+        "pairing": "vs b1-v2",
+        "value": "0.1981 / 0.3023 / 71.08% (n=21,197)"
+      },
+      {
+        "name": "Win rate",
+        "pairing": "raw policy vs b1-v2 (diagnostic)",
+        "value": "21.15% [10.58%, 32.72%]"
+      },
+      {
+        "name": "Mean own VP / VP margin",
+        "pairing": "raw policy vs b1-v2 (diagnostic)",
+        "value": "80.38 / -17.48"
+      },
+      {
+        "name": "Live value Brier / ECE / accuracy (gen >= 2)",
+        "pairing": "raw policy vs b1-v2 (diagnostic)",
+        "value": "0.3479 / 0.3730 / 53.79% (n=27,983)"
+      },
+      {
+        "name": "Live value Brier / ECE / accuracy (all gens)",
+        "pairing": "raw policy vs b1-v2 (diagnostic)",
+        "value": "0.3431 / 0.3636 / 53.54% (n=29,939)"
+      }
+    ],
+    "gating_passed": 27,
+    "gating_total": 30,
+    "verdict": "FAIL"
+  },
+  "pairings": {
+    "mirror": {
+      "all_dev_seeds": true,
+      "expected_games": 40,
+      "failure_counts": {
+        "adapter_error": 0,
+        "illegal_response": 0,
+        "step_cap": 0
+      },
+      "gating": true,
+      "generations": {
+        "max": 23,
+        "median": 15.0,
+        "p95": 20.049999999999997
+      },
+      "key": "mirror",
+      "label": "self-mirror",
+      "live_value": null,
+      "report": {
+        "agent_a": {
+          "compute": {},
+          "fewer_than_3_training_seeds": false,
+          "name": "candidate",
+          "training_seeds": 0,
+          "version": "ismcts-s8-k4-warmstart-v3"
+        },
+        "agent_b": {
+          "compute": {},
+          "fewer_than_3_training_seeds": false,
+          "name": "self",
+          "training_seeds": 0,
+          "version": "ismcts-s8-k4-warmstart-v3"
+        },
+        "bootstrap_resamples": 10000,
+        "bootstrap_seed": 0,
+        "completed_games": 40,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "failures": [],
+        "losses": 26,
+        "max_generations": 23,
+        "mean_decisions_per_game": 544.65,
+        "mean_generations": 15.125,
+        "mean_vp_a": 79.925,
+        "mean_vp_b": 87.4,
+        "mean_vp_margin": -7.475,
+        "min_generations": 12,
+        "namespace": "dev",
+        "per_map": {
+          "amazonis planitia": {
+            "completed_games": 0,
+            "failures": 0,
+            "loses_to_opponent": null,
+            "losses": 0,
+            "mean_generations": null,
+            "mean_vp_margin": null,
+            "note": "not supported",
+            "status": "not supported",
+            "ties": 0,
+            "total_games": 0,
+            "win_rate": null,
+            "win_rate_ci_95": null,
+            "wins": 0
+          },
+          "elysium": {
+            "completed_games": 10,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 7,
+            "mean_generations": 15.1,
+            "mean_vp_margin": -7.6,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 10,
+            "win_rate": 0.3,
+            "win_rate_ci_95": [
+              0.1,
+              0.5
+            ],
+            "wins": 3
+          },
+          "hellas": {
+            "completed_games": 10,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 7,
+            "mean_generations": 14.7,
+            "mean_vp_margin": -11.9,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 10,
+            "win_rate": 0.3,
+            "win_rate_ci_95": [
+              0.0,
+              0.7
+            ],
+            "wins": 3
+          },
+          "tharsis": {
+            "completed_games": 10,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 7,
+            "mean_generations": 15.5,
+            "mean_vp_margin": -8.7,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 10,
+            "win_rate": 0.3,
+            "win_rate_ci_95": [
+              0.1,
+              0.5
+            ],
+            "wins": 3
+          },
+          "vastitas borealis nova": {
+            "completed_games": 10,
+            "failures": 0,
+            "loses_to_opponent": false,
+            "losses": 5,
+            "mean_generations": 15.2,
+            "mean_vp_margin": -1.7,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 10,
+            "win_rate": 0.5,
+            "win_rate_ci_95": [
+              0.5,
+              0.5
+            ],
+            "wins": 5
+          }
+        },
+        "schema_version": "eval-report-v1",
+        "ties": 0,
+        "total_decisions": 21786,
+        "total_games": 40,
+        "win_rate": 0.35,
+        "win_rate_ci_95": [
+          0.2,
+          0.5
+        ],
+        "wins": 14
+      },
+      "seat_swapped": true,
+      "seed_keys": [
+        "dev-0000",
+        "dev-0001",
+        "dev-0002",
+        "dev-0003",
+        "dev-0004"
+      ],
+      "wall_time_s": 443.1290830000071
+    },
+    "vs_b0": {
+      "all_dev_seeds": true,
+      "expected_games": 104,
+      "failure_counts": {
+        "adapter_error": 0,
+        "illegal_response": 0,
+        "step_cap": 0
+      },
+      "gating": true,
+      "generations": {
+        "max": 27,
+        "median": 16.0,
+        "p95": 22.0
+      },
+      "key": "vs_b0",
+      "label": "vs b0-v1",
+      "live_value": null,
+      "report": {
+        "agent_a": {
+          "compute": {},
+          "fewer_than_3_training_seeds": false,
+          "name": "candidate",
+          "training_seeds": 0,
+          "version": "ismcts-s8-k4-warmstart-v3"
+        },
+        "agent_b": {
+          "compute": {},
+          "fewer_than_3_training_seeds": false,
+          "name": "b0",
+          "training_seeds": 0,
+          "version": "b0-v1"
+        },
+        "bootstrap_resamples": 10000,
+        "bootstrap_seed": 0,
+        "completed_games": 104,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "failures": [],
+        "losses": 0,
+        "max_generations": 27,
+        "mean_decisions_per_game": 596.9230769230769,
+        "mean_generations": 17.009615384615383,
+        "mean_vp_a": 107.09615384615384,
+        "mean_vp_b": 52.54807692307692,
+        "mean_vp_margin": 54.54807692307692,
+        "min_generations": 13,
+        "namespace": "dev",
+        "per_map": {
+          "amazonis planitia": {
+            "completed_games": 0,
+            "failures": 0,
+            "loses_to_opponent": null,
+            "losses": 0,
+            "mean_generations": null,
+            "mean_vp_margin": null,
+            "note": "not supported",
+            "status": "not supported",
+            "ties": 0,
+            "total_games": 0,
+            "win_rate": null,
+            "win_rate_ci_95": null,
+            "wins": 0
+          },
+          "elysium": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": false,
+            "losses": 0,
+            "mean_generations": 17.307692307692307,
+            "mean_vp_margin": 59.57692307692308,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 1.0,
+            "win_rate_ci_95": [
+              1.0,
+              1.0
+            ],
+            "wins": 26
+          },
+          "hellas": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": false,
+            "losses": 0,
+            "mean_generations": 17.46153846153846,
+            "mean_vp_margin": 58.84615384615385,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 1.0,
+            "win_rate_ci_95": [
+              1.0,
+              1.0
+            ],
+            "wins": 26
+          },
+          "tharsis": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": false,
+            "losses": 0,
+            "mean_generations": 17.307692307692307,
+            "mean_vp_margin": 54.34615384615385,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 1.0,
+            "win_rate_ci_95": [
+              1.0,
+              1.0
+            ],
+            "wins": 26
+          },
+          "vastitas borealis nova": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": false,
+            "losses": 0,
+            "mean_generations": 15.961538461538462,
+            "mean_vp_margin": 45.42307692307692,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 1.0,
+            "win_rate_ci_95": [
+              1.0,
+              1.0
+            ],
+            "wins": 26
+          }
+        },
+        "schema_version": "eval-report-v1",
+        "ties": 0,
+        "total_decisions": 62080,
+        "total_games": 104,
+        "win_rate": 1.0,
+        "win_rate_ci_95": [
+          1.0,
+          1.0
+        ],
+        "wins": 104
+      },
+      "seat_swapped": true,
+      "seed_keys": [
+        "dev-0000",
+        "dev-0001",
+        "dev-0002",
+        "dev-0003",
+        "dev-0004",
+        "dev-0005",
+        "dev-0006",
+        "dev-0007",
+        "dev-0008",
+        "dev-0009",
+        "dev-0010",
+        "dev-0011",
+        "dev-0012"
+      ],
+      "wall_time_s": 879.120726400055
+    },
+    "vs_b1": {
+      "all_dev_seeds": true,
+      "expected_games": 104,
+      "failure_counts": {
+        "adapter_error": 0,
+        "illegal_response": 0,
+        "step_cap": 0
+      },
+      "gating": true,
+      "generations": {
+        "max": 15,
+        "median": 13.0,
+        "p95": 15.0
+      },
+      "key": "vs_b1",
+      "label": "vs b1-v2",
+      "live_value": {
+        "all": {
+          "accuracy": 0.7108081332263999,
+          "brier": 0.19809464038522565,
+          "ece": 0.3023233718215089,
+          "n": 21197,
+          "nll": 0.6067738968405756
+        },
+        "gen_2_plus": {
+          "accuracy": 0.7231292166658083,
+          "brier": 0.19338568348998733,
+          "ece": 0.28915768029417566,
+          "n": 19417,
+          "nll": 0.5977794326613336
+        }
+      },
+      "report": {
+        "agent_a": {
+          "compute": {},
+          "fewer_than_3_training_seeds": false,
+          "name": "candidate",
+          "training_seeds": 0,
+          "version": "ismcts-s8-k4-warmstart-v3"
+        },
+        "agent_b": {
+          "compute": {},
+          "fewer_than_3_training_seeds": false,
+          "name": "b1",
+          "training_seeds": 0,
+          "version": "b1-v2"
+        },
+        "bootstrap_resamples": 10000,
+        "bootstrap_seed": 0,
+        "completed_games": 104,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "failures": [],
+        "losses": 103,
+        "max_generations": 15,
+        "mean_decisions_per_game": 465.09615384615387,
+        "mean_generations": 12.663461538461538,
+        "mean_vp_a": 57.29807692307692,
+        "mean_vp_b": 112.34615384615384,
+        "mean_vp_margin": -55.04807692307692,
+        "min_generations": 10,
+        "namespace": "dev",
+        "per_map": {
+          "amazonis planitia": {
+            "completed_games": 0,
+            "failures": 0,
+            "loses_to_opponent": null,
+            "losses": 0,
+            "mean_generations": null,
+            "mean_vp_margin": null,
+            "note": "not supported",
+            "status": "not supported",
+            "ties": 0,
+            "total_games": 0,
+            "win_rate": null,
+            "win_rate_ci_95": null,
+            "wins": 0
+          },
+          "elysium": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 26,
+            "mean_generations": 12.576923076923077,
+            "mean_vp_margin": -57.07692307692308,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 0.0,
+            "win_rate_ci_95": [
+              0.0,
+              0.0
+            ],
+            "wins": 0
+          },
+          "hellas": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 26,
+            "mean_generations": 12.73076923076923,
+            "mean_vp_margin": -57.15384615384615,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 0.0,
+            "win_rate_ci_95": [
+              0.0,
+              0.0
+            ],
+            "wins": 0
+          },
+          "tharsis": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 25,
+            "mean_generations": 12.76923076923077,
+            "mean_vp_margin": -53.92307692307692,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 0.038461538461538464,
+            "win_rate_ci_95": [
+              0.0,
+              0.11538461538461539
+            ],
+            "wins": 1
+          },
+          "vastitas borealis nova": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 26,
+            "mean_generations": 12.576923076923077,
+            "mean_vp_margin": -52.03846153846154,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 0.0,
+            "win_rate_ci_95": [
+              0.0,
+              0.0
+            ],
+            "wins": 0
+          }
+        },
+        "schema_version": "eval-report-v1",
+        "ties": 0,
+        "total_decisions": 48370,
+        "total_games": 104,
+        "win_rate": 0.009615384615384616,
+        "win_rate_ci_95": [
+          0.0,
+          0.028846153846153848
+        ],
+        "wins": 1
+      },
+      "seat_swapped": true,
+      "seed_keys": [
+        "dev-0000",
+        "dev-0001",
+        "dev-0002",
+        "dev-0003",
+        "dev-0004",
+        "dev-0005",
+        "dev-0006",
+        "dev-0007",
+        "dev-0008",
+        "dev-0009",
+        "dev-0010",
+        "dev-0011",
+        "dev-0012"
+      ],
+      "wall_time_s": 582.6737181000644
+    },
+    "vs_b1_raw": {
+      "all_dev_seeds": true,
+      "expected_games": 104,
+      "failure_counts": {
+        "adapter_error": 0,
+        "illegal_response": 0,
+        "step_cap": 0
+      },
+      "gating": false,
+      "generations": {
+        "max": 14,
+        "median": 12.0,
+        "p95": 14.0
+      },
+      "key": "vs_b1_raw",
+      "label": "raw policy vs b1-v2 (diagnostic)",
+      "live_value": {
+        "all": {
+          "accuracy": 0.5354220247837269,
+          "brier": 0.3430805328252498,
+          "ece": 0.36358683369052114,
+          "n": 29939,
+          "nll": 1.150413664079811
+        },
+        "gen_2_plus": {
+          "accuracy": 0.5378622735232105,
+          "brier": 0.3478955322282358,
+          "ece": 0.37304193987045653,
+          "n": 27983,
+          "nll": 1.1778072955986518
+        }
+      },
+      "report": {
+        "agent_a": {
+          "compute": {},
+          "fewer_than_3_training_seeds": false,
+          "name": "candidate (raw policy)",
+          "training_seeds": 0,
+          "version": "ismcts-s0-k4-warmstart-v3"
+        },
+        "agent_b": {
+          "compute": {},
+          "fewer_than_3_training_seeds": false,
+          "name": "b1",
+          "training_seeds": 0,
+          "version": "b1-v2"
+        },
+        "bootstrap_resamples": 10000,
+        "bootstrap_seed": 0,
+        "completed_games": 104,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "failures": [],
+        "losses": 82,
+        "max_generations": 14,
+        "mean_decisions_per_game": 542.6826923076923,
+        "mean_generations": 12.10576923076923,
+        "mean_vp_a": 80.38461538461539,
+        "mean_vp_b": 97.86538461538461,
+        "mean_vp_margin": -17.48076923076923,
+        "min_generations": 10,
+        "namespace": "dev",
+        "per_map": {
+          "amazonis planitia": {
+            "completed_games": 0,
+            "failures": 0,
+            "loses_to_opponent": null,
+            "losses": 0,
+            "mean_generations": null,
+            "mean_vp_margin": null,
+            "note": "not supported",
+            "status": "not supported",
+            "ties": 0,
+            "total_games": 0,
+            "win_rate": null,
+            "win_rate_ci_95": null,
+            "wins": 0
+          },
+          "elysium": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 22,
+            "mean_generations": 12.23076923076923,
+            "mean_vp_margin": -22.76923076923077,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 0.15384615384615385,
+            "win_rate_ci_95": [
+              0.038461538461538464,
+              0.2692307692307692
+            ],
+            "wins": 4
+          },
+          "hellas": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 17,
+            "mean_generations": 12,
+            "mean_vp_margin": -13.307692307692308,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 0.34615384615384615,
+            "win_rate_ci_95": [
+              0.15384615384615385,
+              0.5384615384615384
+            ],
+            "wins": 9
+          },
+          "tharsis": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 22,
+            "mean_generations": 12.26923076923077,
+            "mean_vp_margin": -20.03846153846154,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 0.15384615384615385,
+            "win_rate_ci_95": [
+              0.0,
+              0.34615384615384615
+            ],
+            "wins": 4
+          },
+          "vastitas borealis nova": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": true,
+            "losses": 21,
+            "mean_generations": 11.923076923076923,
+            "mean_vp_margin": -13.807692307692308,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 0.19230769230769232,
+            "win_rate_ci_95": [
+              0.038461538461538464,
+              0.38461538461538464
+            ],
+            "wins": 5
+          }
+        },
+        "schema_version": "eval-report-v1",
+        "ties": 0,
+        "total_decisions": 56439,
+        "total_games": 104,
+        "win_rate": 0.21153846153846154,
+        "win_rate_ci_95": [
+          0.10576923076923077,
+          0.32716346153845804
+        ],
+        "wins": 22
+      },
+      "seat_swapped": true,
+      "seed_keys": [
+        "dev-0000",
+        "dev-0001",
+        "dev-0002",
+        "dev-0003",
+        "dev-0004",
+        "dev-0005",
+        "dev-0006",
+        "dev-0007",
+        "dev-0008",
+        "dev-0009",
+        "dev-0010",
+        "dev-0011",
+        "dev-0012"
+      ],
+      "wall_time_s": 175.98539629997686
+    },
+    "vs_v1": {
+      "all_dev_seeds": true,
+      "expected_games": 104,
+      "failure_counts": {
+        "adapter_error": 0,
+        "illegal_response": 0,
+        "step_cap": 0
+      },
+      "gating": true,
+      "generations": {
+        "max": 34,
+        "median": 17.0,
+        "p95": 26.0
+      },
+      "key": "vs_v1",
+      "label": "vs archived v1 warm start",
+      "live_value": null,
+      "report": {
+        "agent_a": {
+          "compute": {},
+          "fewer_than_3_training_seeds": false,
+          "name": "candidate",
+          "training_seeds": 0,
+          "version": "ismcts-s8-k4-warmstart-v3"
+        },
+        "agent_b": {
+          "compute": {},
+          "fewer_than_3_training_seeds": false,
+          "name": "v1",
+          "training_seeds": 0,
+          "version": "ismcts-s8-k4-warmstart-v2"
+        },
+        "bootstrap_resamples": 10000,
+        "bootstrap_seed": 0,
+        "completed_games": 104,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "failures": [],
+        "losses": 0,
+        "max_generations": 34,
+        "mean_decisions_per_game": 595.0961538461538,
+        "mean_generations": 18.048076923076923,
+        "mean_vp_a": 115.01923076923077,
+        "mean_vp_b": 55.00961538461539,
+        "mean_vp_margin": 60.00961538461539,
+        "min_generations": 11,
+        "namespace": "dev",
+        "per_map": {
+          "amazonis planitia": {
+            "completed_games": 0,
+            "failures": 0,
+            "loses_to_opponent": null,
+            "losses": 0,
+            "mean_generations": null,
+            "mean_vp_margin": null,
+            "note": "not supported",
+            "status": "not supported",
+            "ties": 0,
+            "total_games": 0,
+            "win_rate": null,
+            "win_rate_ci_95": null,
+            "wins": 0
+          },
+          "elysium": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": false,
+            "losses": 0,
+            "mean_generations": 17.384615384615383,
+            "mean_vp_margin": 59.80769230769231,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 1.0,
+            "win_rate_ci_95": [
+              1.0,
+              1.0
+            ],
+            "wins": 26
+          },
+          "hellas": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": false,
+            "losses": 0,
+            "mean_generations": 19,
+            "mean_vp_margin": 62.53846153846154,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 1.0,
+            "win_rate_ci_95": [
+              1.0,
+              1.0
+            ],
+            "wins": 26
+          },
+          "tharsis": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": false,
+            "losses": 0,
+            "mean_generations": 17.153846153846153,
+            "mean_vp_margin": 59.80769230769231,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 1.0,
+            "win_rate_ci_95": [
+              1.0,
+              1.0
+            ],
+            "wins": 26
+          },
+          "vastitas borealis nova": {
+            "completed_games": 26,
+            "failures": 0,
+            "loses_to_opponent": false,
+            "losses": 0,
+            "mean_generations": 18.653846153846153,
+            "mean_vp_margin": 57.88461538461539,
+            "status": "supported",
+            "ties": 0,
+            "total_games": 26,
+            "win_rate": 1.0,
+            "win_rate_ci_95": [
+              1.0,
+              1.0
+            ],
+            "wins": 26
+          }
+        },
+        "schema_version": "eval-report-v1",
+        "ties": 0,
+        "total_decisions": 61890,
+        "total_games": 104,
+        "win_rate": 1.0,
+        "win_rate_ci_95": [
+          1.0,
+          1.0
+        ],
+        "wins": 104
+      },
+      "seat_swapped": true,
+      "seed_keys": [
+        "dev-0000",
+        "dev-0001",
+        "dev-0002",
+        "dev-0003",
+        "dev-0004",
+        "dev-0005",
+        "dev-0006",
+        "dev-0007",
+        "dev-0008",
+        "dev-0009",
+        "dev-0010",
+        "dev-0011",
+        "dev-0012"
+      ],
+      "wall_time_s": 1501.9948417000705
+    }
+  },
+  "schema_version": "warmstart-gate-v1",
+  "val": {
+    "branch": {
+      "overall": {
+        "acc": 0.6596679619815082,
+        "correct": 142766,
+        "total": 216421
+      },
+      "per_gen": {
+        "gen 1": {
+          "acc": 0.0,
+          "correct": 0,
+          "total": 0
+        },
+        "gen 10+": {
+          "acc": 0.5539300854819654,
+          "correct": 15941,
+          "total": 28778
+        },
+        "gen 2-5": {
+          "acc": 0.7270014025245441,
+          "correct": 64794,
+          "total": 89125
+        },
+        "gen 6-9": {
+          "acc": 0.6296412838263058,
+          "correct": 62031,
+          "total": 98518
+        }
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.6853818917551846,
+          "correct": 1355,
+          "total": 1977
+        },
+        "hellas": {
+          "acc": 0.6620978109326622,
+          "correct": 36567,
+          "total": 55229
+        },
+        "tharsis": {
+          "acc": 0.6585361217934503,
+          "correct": 103944,
+          "total": 157841
+        },
+        "vastitas borealis nova": {
+          "acc": 0.6550218340611353,
+          "correct": 900,
+          "total": 1374
+        }
+      }
+    },
+    "card_action": {
+      "overall": {
+        "acc": 0.7411625748755589,
+        "correct": 17570,
+        "total": 23706
+      },
+      "per_gen": {
+        "gen 1": {
+          "acc": 0.0,
+          "correct": 0,
+          "total": 0
+        },
+        "gen 10+": {
+          "acc": 0.7085113374958922,
+          "correct": 4312,
+          "total": 6086
+        },
+        "gen 2-5": {
+          "acc": 0.7723083839064958,
+          "correct": 3436,
+          "total": 4449
+        },
+        "gen 6-9": {
+          "acc": 0.7457292536633513,
+          "correct": 9822,
+          "total": 13171
+        }
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.8358974358974359,
+          "correct": 163,
+          "total": 195
+        },
+        "hellas": {
+          "acc": 0.74455414511832,
+          "correct": 4751,
+          "total": 6381
+        },
+        "tharsis": {
+          "acc": 0.7400743318978231,
+          "correct": 12545,
+          "total": 16951
+        },
+        "vastitas borealis nova": {
+          "acc": 0.6201117318435754,
+          "correct": 111,
+          "total": 179
+        }
+      }
+    },
+    "composite": {
+      "inputs": {
+        "branch_top1": 0.6596679619815082,
+        "card_action_top1": 0.7411625748755589,
+        "corp_top1": 0.7266320474777448,
+        "draft_top1": 0.7243121270951283,
+        "midgame_val_brier": 0.1628487337153525,
+        "prelude0_top1": 0.8121290801186943,
+        "project_play_top1": 0.5783437078939456,
+        "research_buy_acc": 0.9505150161330355,
+        "standard_project_top1": 0.7023671577553385
+      },
+      "score": 0.6231932085244792
+    },
+    "corp": {
+      "overall": {
+        "acc": 0.7266320474777448,
+        "correct": 3918,
+        "loss": 0.5459836229726186,
+        "total": 5392
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.7222222222222222,
+          "correct": 39,
+          "loss": 0.0,
+          "total": 54
+        },
+        "hellas": {
+          "acc": 0.746177370030581,
+          "correct": 976,
+          "loss": 0.0,
+          "total": 1308
+        },
+        "tharsis": {
+          "acc": 0.7210235825388861,
+          "correct": 2874,
+          "loss": 0.0,
+          "total": 3986
+        },
+        "vastitas borealis nova": {
+          "acc": 0.6590909090909091,
+          "correct": 29,
+          "loss": 0.0,
+          "total": 44
+        }
+      }
+    },
+    "draft": {
+      "overall": {
+        "acc": 0.7243121270951283,
+        "correct": 71260,
+        "total": 98383
+      },
+      "per_gen": {
+        "gen 1": {
+          "acc": 0.0,
+          "correct": 0,
+          "total": 0
+        },
+        "gen 10+": {
+          "acc": 0.7298250195873596,
+          "correct": 5589,
+          "total": 7658
+        },
+        "gen 2-5": {
+          "acc": 0.7293308706544995,
+          "correct": 39882,
+          "total": 54683
+        },
+        "gen 6-9": {
+          "acc": 0.71552633039232,
+          "correct": 25789,
+          "total": 36042
+        }
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.7006960556844548,
+          "correct": 604,
+          "total": 862
+        },
+        "hellas": {
+          "acc": 0.7277927461139896,
+          "correct": 17558,
+          "total": 24125
+        },
+        "tharsis": {
+          "acc": 0.7235756709194897,
+          "correct": 52630,
+          "total": 72736
+        },
+        "vastitas borealis nova": {
+          "acc": 0.7090909090909091,
+          "correct": 468,
+          "total": 660
+        }
+      }
+    },
+    "prelude_pair": {
+      "overall": {
+        "acc": 0.524666172106825,
+        "correct": 2829,
+        "loss": 0.0,
+        "total": 5392
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.5740740740740741,
+          "correct": 31,
+          "loss": 0.0,
+          "total": 54
+        },
+        "hellas": {
+          "acc": 0.5412844036697247,
+          "correct": 708,
+          "loss": 0.0,
+          "total": 1308
+        },
+        "tharsis": {
+          "acc": 0.518314099347717,
+          "correct": 2066,
+          "loss": 0.0,
+          "total": 3986
+        },
+        "vastitas borealis nova": {
+          "acc": 0.5454545454545454,
+          "correct": 24,
+          "loss": 0.0,
+          "total": 44
+        }
+      }
+    },
+    "prelude_step1_cond": {
+      "overall": {
+        "acc": 0.6778560830860534,
+        "correct": 7310,
+        "loss": 0.0,
+        "total": 10784
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.7314814814814815,
+          "correct": 79,
+          "loss": 0.0,
+          "total": 108
+        },
+        "hellas": {
+          "acc": 0.6953363914373089,
+          "correct": 1819,
+          "loss": 0.0,
+          "total": 2616
+        },
+        "tharsis": {
+          "acc": 0.6713497240341194,
+          "correct": 5352,
+          "loss": 0.0,
+          "total": 7972
+        },
+        "vastitas borealis nova": {
+          "acc": 0.6818181818181818,
+          "correct": 60,
+          "loss": 0.0,
+          "total": 88
+        }
+      }
+    },
+    "prelude_top1": {
+      "overall": {
+        "acc": 0.8121290801186943,
+        "correct": 4379,
+        "loss": 1.198247722772887,
+        "total": 5392
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.7962962962962963,
+          "correct": 43,
+          "loss": 0.0,
+          "total": 54
+        },
+        "hellas": {
+          "acc": 0.8348623853211009,
+          "correct": 1092,
+          "loss": 0.0,
+          "total": 1308
+        },
+        "tharsis": {
+          "acc": 0.8045659809332665,
+          "correct": 3207,
+          "loss": 0.0,
+          "total": 3986
+        },
+        "vastitas borealis nova": {
+          "acc": 0.8409090909090909,
+          "correct": 37,
+          "loss": 0.0,
+          "total": 44
+        }
+      }
+    },
+    "project_buy": {
+      "done_acc": 0.7843100890207715,
+      "step0_acc": 0.9545623145400594,
+      "total": 5392
+    },
+    "project_play": {
+      "overall": {
+        "acc": 0.5783437078939456,
+        "correct": 51937,
+        "total": 89803
+      },
+      "per_gen": {
+        "gen 1": {
+          "acc": 0.0,
+          "correct": 0,
+          "total": 0
+        },
+        "gen 10+": {
+          "acc": 0.5014302851342622,
+          "correct": 5434,
+          "total": 10837
+        },
+        "gen 2-5": {
+          "acc": 0.6279488101968443,
+          "correct": 24436,
+          "total": 38914
+        },
+        "gen 6-9": {
+          "acc": 0.5509587536202937,
+          "correct": 22067,
+          "total": 40052
+        }
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.5542725173210161,
+          "correct": 480,
+          "total": 866
+        },
+        "hellas": {
+          "acc": 0.5744972375690608,
+          "correct": 12998,
+          "total": 22625
+        },
+        "tharsis": {
+          "acc": 0.5802668208162831,
+          "correct": 38145,
+          "total": 65737
+        },
+        "vastitas borealis nova": {
+          "acc": 0.5460869565217391,
+          "correct": 314,
+          "total": 575
+        }
+      }
+    },
+    "research_buy": {
+      "done": {
+        "overall": {
+          "acc": 0.8758066517746339,
+          "correct": 28229,
+          "total": 32232
+        },
+        "per_gen": {
+          "gen 1": {
+            "acc": 0.0,
+            "correct": 0,
+            "total": 0
+          },
+          "gen 10+": {
+            "acc": 0.8879380603096985,
+            "correct": 2179,
+            "total": 2454
+          },
+          "gen 2-5": {
+            "acc": 0.8726949566762942,
+            "correct": 15712,
+            "total": 18004
+          },
+          "gen 6-9": {
+            "acc": 0.8780363512824868,
+            "correct": 10338,
+            "total": 11774
+          }
+        },
+        "per_map": {
+          "elysium": {
+            "acc": 0.8943661971830986,
+            "correct": 254,
+            "total": 284
+          },
+          "hellas": {
+            "acc": 0.8753626844960263,
+            "correct": 6939,
+            "total": 7927
+          },
+          "tharsis": {
+            "acc": 0.8758820564516129,
+            "correct": 20853,
+            "total": 23808
+          },
+          "vastitas borealis nova": {
+            "acc": 0.8591549295774648,
+            "correct": 183,
+            "total": 213
+          }
+        }
+      },
+      "step0": {
+        "overall": {
+          "acc": 0.9505150161330355,
+          "correct": 30637,
+          "total": 32232
+        },
+        "per_gen": {
+          "gen 1": {
+            "acc": 0.0,
+            "correct": 0,
+            "total": 0
+          },
+          "gen 10+": {
+            "acc": 0.9372453137734311,
+            "correct": 2300,
+            "total": 2454
+          },
+          "gen 2-5": {
+            "acc": 0.9552877138413686,
+            "correct": 17199,
+            "total": 18004
+          },
+          "gen 6-9": {
+            "acc": 0.9459826736877867,
+            "correct": 11138,
+            "total": 11774
+          }
+        },
+        "per_map": {
+          "elysium": {
+            "acc": 0.9577464788732394,
+            "correct": 272,
+            "total": 284
+          },
+          "hellas": {
+            "acc": 0.9540809890248517,
+            "correct": 7563,
+            "total": 7927
+          },
+          "tharsis": {
+            "acc": 0.9493027553763441,
+            "correct": 22601,
+            "total": 23808
+          },
+          "vastitas borealis nova": {
+            "acc": 0.9436619718309859,
+            "correct": 201,
+            "total": 213
+          }
+        }
+      }
+    },
+    "standard_project": {
+      "overall": {
+        "acc": 0.7023671577553385,
+        "correct": 8486,
+        "total": 12082
+      },
+      "per_gen": {
+        "gen 1": {
+          "acc": 0.0,
+          "correct": 0,
+          "total": 0
+        },
+        "gen 10+": {
+          "acc": 0.73767258382643,
+          "correct": 4862,
+          "total": 6591
+        },
+        "gen 2-5": {
+          "acc": 0.6735340729001584,
+          "correct": 850,
+          "total": 1262
+        },
+        "gen 6-9": {
+          "acc": 0.6559470323953653,
+          "correct": 2774,
+          "total": 4229
+        }
+      },
+      "per_map": {
+        "elysium": {
+          "acc": 0.6886792452830188,
+          "correct": 73,
+          "total": 106
+        },
+        "hellas": {
+          "acc": 0.7182103610675039,
+          "correct": 1830,
+          "total": 2548
+        },
+        "tharsis": {
+          "acc": 0.6979880136986302,
+          "correct": 6522,
+          "total": 9344
+        },
+        "vastitas borealis nova": {
+          "acc": 0.7261904761904762,
+          "correct": 61,
+          "total": 84
+        }
+      }
+    },
+    "value": {
+      "midgame": {
+        "accuracy": 0.757864753285619,
+        "brier": 0.1628487337153525,
+        "ece": 0.06080442377120346,
+        "n": 55469,
+        "nll": 0.49449649313128213
+      },
+      "midgame_by_phase": {
+        "action": {
+          "accuracy": 0.7562631856540084,
+          "brier": 0.1638847833655558,
+          "ece": 0.06694905707448293,
+          "n": 30336,
+          "nll": 0.49954521152471615
+        },
+        "research": {
+          "accuracy": 0.7597978753033859,
+          "brier": 0.16159820245411954,
+          "ece": 0.05438466057209311,
+          "n": 25133,
+          "nll": 0.4884025958176621
+        }
+      },
+      "midgame_margin_mae": 0.23597541041390024,
+      "midgame_per_map": {
+        "elysium": {
+          "accuracy": 0.6763110307414105,
+          "brier": 0.2194362823435986,
+          "ece": 0.1379443918032096,
+          "n": 553,
+          "nll": 0.667812454988291
+        },
+        "hellas": {
+          "accuracy": 0.7546660312921928,
+          "brier": 0.16714683143326103,
+          "ece": 0.053278764379908375,
+          "n": 12591,
+          "nll": 0.5181525599204028
+        },
+        "tharsis": {
+          "accuracy": 0.7605298265675624,
+          "brier": 0.16024255347252422,
+          "ece": 0.06374083806362821,
+          "n": 41976,
+          "nll": 0.4834555678824599
+        },
+        "vastitas borealis nova": {
+          "accuracy": 0.6819484240687679,
+          "brier": 0.23157870252725143,
+          "ece": 0.1741934458566715,
+          "n": 349,
+          "nll": 0.6943721790791811
+        }
+      },
+      "per_gen": {
+        "gen 1": {
+          "accuracy": 0.6093163035311796,
+          "brier": 0.22933244978845269,
+          "ece": 0.039674151701000124,
+          "n": 2662,
+          "nll": 0.650986572281817
+        },
+        "gen 10+": {
+          "accuracy": 0.8337504940060598,
+          "brier": 0.11499458091535461,
+          "ece": 0.030542153634680852,
+          "n": 7591,
+          "nll": 0.35872482722698806
+        },
+        "gen 2-5": {
+          "accuracy": 0.71123462900217,
+          "brier": 0.19319017640314937,
+          "ece": 0.07485446898194262,
+          "n": 26267,
+          "nll": 0.5784660208117416
+        },
+        "gen 6-9": {
+          "accuracy": 0.787885798898709,
+          "brier": 0.14277942636374555,
+          "ece": 0.05507879497210702,
+          "n": 21611,
+          "nll": 0.44012673385576817
+        }
+      },
+      "temperature": 1.0
+    }
+  },
+  "value": {
+    "midgame": {
+      "accuracy": 0.757864753285619,
+      "brier": 0.1628487337153525,
+      "ece": 0.06080442377120346,
+      "n": 55469,
+      "nll": 0.49449649313128213
+    },
+    "midgame_by_phase": {
+      "action": {
+        "accuracy": 0.7562631856540084,
+        "brier": 0.1638847833655558,
+        "ece": 0.06694905707448293,
+        "n": 30336,
+        "nll": 0.49954521152471615
+      },
+      "research": {
+        "accuracy": 0.7597978753033859,
+        "brier": 0.16159820245411954,
+        "ece": 0.05438466057209311,
+        "n": 25133,
+        "nll": 0.4884025958176621
+      }
+    },
+    "midgame_margin_mae": 0.23597541041390024,
+    "midgame_per_map": {
+      "elysium": {
+        "accuracy": 0.6763110307414105,
+        "brier": 0.2194362823435986,
+        "ece": 0.1379443918032096,
+        "n": 553,
+        "nll": 0.667812454988291
+      },
+      "hellas": {
+        "accuracy": 0.7546660312921928,
+        "brier": 0.16714683143326103,
+        "ece": 0.053278764379908375,
+        "n": 12591,
+        "nll": 0.5181525599204028
+      },
+      "tharsis": {
+        "accuracy": 0.7605298265675624,
+        "brier": 0.16024255347252422,
+        "ece": 0.06374083806362821,
+        "n": 41976,
+        "nll": 0.4834555678824599
+      },
+      "vastitas borealis nova": {
+        "accuracy": 0.6819484240687679,
+        "brier": 0.23157870252725143,
+        "ece": 0.1741934458566715,
+        "n": 349,
+        "nll": 0.6943721790791811
+      }
+    },
+    "per_gen": {
+      "gen 1": {
+        "accuracy": 0.6093163035311796,
+        "brier": 0.22933244978845269,
+        "ece": 0.039674151701000124,
+        "n": 2662,
+        "nll": 0.650986572281817
+      },
+      "gen 10+": {
+        "accuracy": 0.8337504940060598,
+        "brier": 0.11499458091535461,
+        "ece": 0.030542153634680852,
+        "n": 7591,
+        "nll": 0.35872482722698806
+      },
+      "gen 2-5": {
+        "accuracy": 0.71123462900217,
+        "brier": 0.19319017640314937,
+        "ece": 0.07485446898194262,
+        "n": 26267,
+        "nll": 0.5784660208117416
+      },
+      "gen 6-9": {
+        "accuracy": 0.787885798898709,
+        "brier": 0.14277942636374555,
+        "ece": 0.05507879497210702,
+        "n": 21611,
+        "nll": 0.44012673385576817
+      }
+    },
+    "temperature": 1.0
+  },
+  "version": "warmstart-v3"
+}
