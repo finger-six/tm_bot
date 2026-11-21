@@ -401,6 +401,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Smoke runs only: seeds per pairing (the schedule checks then fail).")
     parser.add_argument("--maps", nargs="+", default=None, help="Smoke runs only: subset of supported maps.")
     args = parser.parse_args(argv)
+    if args.seeds is not None and args.seeds < 1:
+        parser.error("--seeds must be at least 1")
 
     import torch
 
@@ -434,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         for spec in pairings_for(args.agent):
             raw = spec.candidate == "raw"
-            num_seeds = args.seeds or spec.num_seeds
+            num_seeds = spec.num_seeds if args.seeds is None else args.seeds
             signature = {
                 "pairing": spec.key, "agent": args.agent, "checkpoint": str(checkpoint),
                 "opponent": str(v1_checkpoint) if spec.opponent == "v1" else spec.opponent,
