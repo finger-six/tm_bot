@@ -40,3 +40,7 @@ An independently trained local Terraforming Mars agent inspired by structured de
 
 **Human-data warm-start**:
 Initial training from recorded human Terraforming Mars games before the agent improves through self-play.
+
+**Warm-start anchor**:
+The frozen human-data warm-start checkpoint an agent started from. Self-play keeps the agent close to it, uses it as an opponent, and measures regression against it.
+_Avoid_: Initial checkpoint, reference model.
