@@ -253,18 +253,34 @@ def build() -> Game:
     g.row(A, "standard_project", f"{a} plays standard project Power Plant | {a} pays 11 {MC}", reason="Power Plant",
           effects={A: {MC: -11}})
     g.row(A, "other", f"{a} increases Energy Production by 1", effects={A: {"Energy Production": 1}})
+    # ---- Action-phase roots (moves 52-57, #44): Alice ends her turn on her second action; Bram
+    # (hand-lost since move 45) builds a power plant; Alice plays and uses a second blue card.
+    g.row(A, "other", f"{a} skips second action")
+    g.row(B, "standard_project", f"{b} plays standard project Power Plant | {b} pays 11 {MC}", reason="Power Plant",
+          effects={B: {MC: -11}})
+    g.row(B, "other", f"{b} increases Energy Production by 1", effects={B: {"Energy Production": 1}})
+    g.row(A, "draw", f"{a} draws Search For Life", cards_kept={A: ["Search For Life"]}, effects={A: {"Hand Counter": 1}})
+    g.row(A, "play_card", f"{a} pays 3 {MC} | {a} plays card Search For Life", card_played="Search For Life",
+          effects={A: {MC: -3, "Count of Science tags": 1, "Hand Counter": -1, "Player Area Counter": 1}})
+    g.row(A, "activate_card", f"{a} activates Search For Life | {a} pays 1 {MC}", effects={A: {MC: -1}})
     g.row(B, "pass", f"{b} passes")
     g.row(A, "activate_card", f"{a} activates Tardigrades | {a} adds Microbe to Tardigrades", effects={A: {"Microbe": 1}})
     g.row(A, "play_card", f"{a} pays 13 {MC} | {a} plays card Trees | {a} increases Plant Production by 3 (immediate effect of Trees) | {a} gains 1 Plant (immediate effect of Trees)",
           card_played="Trees",
           effects={A: {MC: -13, "Plant Production": 3, "Plant": 1, "Count of Plant tags": 1, "Hand Counter": -1, "Player Area Counter": 1}})
-    # ---- Terminal row (move 55) -------------------------------------------------------------
+    # ---- Alice empties her hand and spends down to a Pass-only root (moves 61-64) ------------
+    g.row(A, "standard_project", f"{a} plays standard project Sell patents", reason="Sell patents")
+    g.row(A, "other", f"{a} discards 1 card/s (Sell patents) | {a} gains 1 {MC}", effects={A: {MC: 1, "Hand Counter": -1}})
+    g.row(A, "standard_project", f"{a} plays standard project Power Plant | {a} pays 11 {MC}", reason="Power Plant",
+          effects={A: {MC: -11}})
+    g.row(A, "other", f"{a} increases Energy Production by 1", effects={A: {"Energy Production": 1}})
+    # ---- Terminal row (move 65) -------------------------------------------------------------
     final_desc = (
         f"{a} passes | It is the end of the generation 3 and Mars is terraformed! | "
         f"{a} scores 23 point/s for Terraforming Rating | {b} scores 21 point/s for Terraforming Rating | "
         f"{a} scores 5 point/s for milestone | {b} scores 1 points for Greenery tiles | "
-        f"{a} has 16 {MC} left (for tiebreaker purposes) | {a} scores 28 TOTAL VP | "
-        f"{b} has 46 {MC} left (for tiebreaker purposes) | {b} scores 22 TOTAL VP | "
+        f"{a} has 2 {MC} left (for tiebreaker purposes) | {a} scores 28 TOTAL VP | "
+        f"{b} has 35 {MC} left (for tiebreaker purposes) | {b} scores 22 TOTAL VP | "
         f"The end of the game: {a} wins!"
     )
     g.row(A, "pass", final_desc)

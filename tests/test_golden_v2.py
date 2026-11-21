@@ -21,13 +21,23 @@ from tm_bot.data.cards import CardRegistry
 from tm_bot.data.extract import run_extraction
 from tm_bot.data.gates import evaluate_record
 from tm_bot.data.inventory import run_inventory
-from tm_bot.data.logstate import LogDecision, income_identity_mc, reconstruct_log_state
-from tm_bot.models.encode import CHOICE_CTX_DIM, OBS_SCALAR_DIM, encode_choice, encode_observation
+from tm_bot.data.logstate import ACTION_TASKS, LogDecision, income_identity_mc, reconstruct_log_state
+from tm_bot.models.encode import (
+    CHOICE_CTX_DIM,
+    OBS_SCALAR_DIM,
+    classify_prompt_type,
+    encode_choice,
+    encode_observation,
+)
 from tm_bot.models.vocab import UNK_ID, CardVocab
 from tm_bot.training.warmstart_builder import (
+    build_branch_choice,
+    build_card_action_choice,
     build_draft_pick_state_choice,
     build_midgame_value_observation,
+    build_project_card_choice,
     build_research_buy_choice,
+    build_standard_project_choice,
 )
 
 REPO = Path(__file__).resolve().parents[1]
@@ -148,7 +158,8 @@ def test_golden_snapshot_values(registry: CardRegistry) -> None:
     assert s["milestone_names"] == [] and s["award_names"] == []
 
     actions = {d.move_number: d for d in _decisions(res, A, "action")}
-    assert sorted(actions) == [30, 34, 50, 53]
+    # Gen-3 strided points move with the #44 rows inserted at moves 52-57 and 61-64.
+    assert sorted(actions) == [30, 34, 56, 60]
     s30 = actions[30].snapshot  # state after move 29: Media Group paid, Bram's greenery placed
     assert (s30["phase"], s30["me_mc"], s30["opp_mc"], s30["oxygen"], s30["opp_greeneries"]) == ("action", 53, 29, 1, 1)
     assert s30["me_hand"] == ["Comet", "Tardigrades", "Trees", "Wave Power"]
@@ -193,6 +204,135 @@ def test_golden_extraction_tables(tmp_path: Path) -> None:
     md = (out / "yield_report.md").read_text(encoding="utf-8")
     assert "research_buys" in md and "midgame_values" in md
 
+    tables = {name: pq.read_table(out / f"{name}.parquet").to_pylist() for name in (
+        "action_branches", "action_project_cards", "action_card_actions", "action_standard_projects")}
+    moves = {name: sorted((r["player_id"], r["move_number"]) for r in rows) for name, rows in tables.items()}
+    assert moves["action_branches"] == sorted(
+        [(A, m) for m in (25, 32, 34, 35, 37, 46, 50, 52, 56, 57, 59, 60, 61, 63)] + [(B, m) for m in (24, 26, 31, 33)])
+    assert moves["action_project_cards"] == [(A, 25), (A, 32), (A, 56), (B, 24)]
+    assert moves["action_card_actions"] == [(A, 57)]
+    assert moves["action_standard_projects"] == [(A, 50), (B, 26), (B, 53)]
+    for rows in tables.values():
+        assert all(r["chosen"] in r["menu"] and len(r["menu"]) >= 2 for r in rows)
+        assert all(r["phase"] == "action" and r["split"] in ("train", "val", "test") for r in rows)
+        assert all(r["path"].split("/")[0] == r["player_id"] for r in rows)  # own perspective
+    assert {r["move_number"]: r["turn_action"] for r in tables["action_branches"] if r["player_id"] == A}[52] == 1
+    assert report["examples"]["action_branches"] == 18
+    acts = report["action_tasks"]
+    assert (acts["branch"]["kept"], acts["branch"]["with_menu"], acts["branch"]["menu_miss"]) == (18, 20, 1)
+    assert acts["project_card"]["menu_miss_by_reason"] == {"requirement": 2}
+    assert acts["card_action"]["dropped_by_reason"] == {"single_candidate": 2}
+    assert acts["standard_project"]["dropped_by_reason"] == {"single_candidate": 1}
+    assert report["v2_quarantine"]["branch:hand_lost"] == 4  # Bram, moves 45, 48, 53, 58
+    assert "## Action-Phase Tasks (#44)" in md and "`gate5:bundled_pass_split`" in md
+
+
+# ---------------------------------------------------------------------------------------------
+# Action-phase menus (#44), hand-computed from the fixture
+# ---------------------------------------------------------------------------------------------
+
+_ROOT = ["fund_award", "standard_projects", "pass", "sell_patents"]
+# (kind, move) -> (menu, chosen, drop_reason) for Alice (seat 0), from her own perspective.
+EXPECTED_A: dict[tuple[str, int], tuple[list[str], str, str | None]] = {
+    # Move 25: M€ 59, temperature -28, 0 oceans. Trees (needs -4 C) and Wave Power (needs 3 oceans) are
+    # excluded; no Tharsis milestone is reached; no blue card yet; first action of the turn.
+    ("branch", 25): (["play_project_card", *_ROOT], "play_project_card", None),
+    ("project_card", 25): (["Comet", "Media Group", "Tardigrades"], "Media Group", None),
+    # Move 30: Builder needs 8 building tags (Alice has 1): the claim is not provable -> quarantined.
+    ("branch", 30): (["play_project_card", *_ROOT], "claim_milestone", "menu_miss:claim_milestone"),
+    ("branch", 32): (["play_project_card", *_ROOT], "play_project_card", None),
+    ("project_card", 32): (["Comet", "Tardigrades"], "Tardigrades", None),
+    ("branch", 34): (["card_action", "play_project_card", *_ROOT], "card_action", None),
+    ("card_action", 34): (["Tardigrades"], "Tardigrades", "single_candidate"),
+    # Move 35: Wave Power needs 3 oceans (the synthetic table has 0) -> quarantined.
+    ("branch", 35): (["play_project_card", *_ROOT], "play_project_card", None),
+    ("project_card", 35): (["Comet"], "Wave Power", "menu_miss:requirement"),
+    # Move 37: the bundled pass + transition + deal row; the pass sees generation-2 state (M€ 33).
+    ("branch", 37): (["play_project_card", *_ROOT], "pass", None),
+    # Move 46: Strip Mine would take Alice's energy production (1) below 0 -> excluded.
+    ("branch", 46): (["card_action", "play_project_card", *_ROOT], "play_project_card", None),
+    ("project_card", 46): (["Comet"], "Comet", "single_candidate"),
+    ("branch", 50): (["card_action", *_ROOT], "standard_projects", None),
+    ("standard_project", 50): (["Power Plant:SP", "Asteroid:SP", "Aquifer", "Greenery", "City"], "Power Plant:SP",
+                               None),
+    # Move 52: Alice's second action of the turn, Bram still active -> End Turn is legal.
+    ("branch", 52): (["card_action", "play_project_card", "end_turn", *_ROOT], "end_turn", None),
+    # Move 56: two playable hand cards (Strip Mine now affordable with 2 energy production); Trees excluded.
+    ("branch", 56): (["card_action", "play_project_card", *_ROOT], "play_project_card", None),
+    ("project_card", 56): (["Search For Life", "Strip Mine"], "Search For Life", None),
+    ("branch", 57): (["card_action", "play_project_card", "end_turn", *_ROOT], "card_action", None),
+    ("card_action", 57): (["Search For Life", "Tardigrades"], "Search For Life", None),
+    # Move 59: Search For Life was used this generation -> excluded; Bram has passed -> no End Turn.
+    ("branch", 59): (["card_action", "play_project_card", *_ROOT], "card_action", None),
+    ("card_action", 59): (["Tardigrades"], "Tardigrades", "single_candidate"),
+    # Move 60: Trees still needs -4 C -> quarantined.
+    ("branch", 60): (["play_project_card", *_ROOT], "play_project_card", None),
+    ("project_card", 60): (["Strip Mine"], "Trees", "menu_miss:requirement"),
+    # Move 61: M€ 12, Strip Mine unaffordable (12 + 2 steel x 2 < 25), award 14 unaffordable.
+    ("branch", 61): (["standard_projects", "pass", "sell_patents"], "sell_patents", None),
+    ("branch", 63): (["standard_projects", "pass"], "standard_projects", None),
+    ("standard_project", 63): (["Power Plant:SP"], "Power Plant:SP", "single_candidate"),
+    # Move 65: empty hand, M€ 2, no unused blue card, Bram passed -> only Pass (1 candidate, dropped).
+    ("branch", 65): (["pass"], "pass", "single_candidate"),
+}
+# Bram (seat 1), from his own perspective: exact hand in generation 2, hand-lost from move 45.
+EXPECTED_B: dict[tuple[str, int], tuple[list[str], str, str | None]] = {
+    # Capital (4 oceans), Heather (-14 C), Lichen (-24 C) fail requirements; Fuel Factory needs 1 energy
+    # production to lose; Cartel costs 8 - 3 (Teractor) = 5.
+    ("branch", 24): (["play_project_card", *_ROOT], "play_project_card", None),
+    ("project_card", 24): (["Cartel", "Earth Office", "Solar Wind Power"], "Cartel", None),
+    ("branch", 26): (["play_project_card", *_ROOT], "standard_projects", None),
+    ("standard_project", 26): (["Power Plant:SP", "Asteroid:SP", "Aquifer", "Greenery", "City"], "Greenery", None),
+    ("branch", 31): (["play_project_card", *_ROOT], "fund_award", None),
+    ("branch", 33): (["play_project_card", *_ROOT], "pass", None),
+    ("branch", 45): ([], "play_project_card", "hand_lost"),
+    ("project_card", 45): ([], "Solar Wind Power", "hand_lost"),
+    ("branch", 48): ([], "sell_patents", "hand_lost"),
+    # A standard project needs only M€: kept after the hand loss.
+    ("branch", 53): ([], "standard_projects", "hand_lost"),
+    ("standard_project", 53): (["Power Plant:SP", "Asteroid:SP", "Aquifer", "Greenery", "City"], "Power Plant:SP",
+                               None),
+    ("branch", 58): ([], "pass", "hand_lost"),
+}
+
+
+@pytest.mark.parametrize("pid,expected", [(A, EXPECTED_A), (B, EXPECTED_B)])
+def test_golden_action_menus(pid: str, expected: dict, registry: CardRegistry) -> None:
+    res = _reconstruct(_load(pid), registry)
+    got = {(d.kind, d.move_number): (d.payload["menu"], d.payload["chosen"], d.drop_reason)
+           for d in res.decisions if d.player_id == pid and d.kind in ACTION_TASKS}
+    assert got == expected
+    for (kind, _), (menu, chosen, drop) in expected.items():
+        if drop is None:
+            assert chosen in menu and len(menu) >= 2  # every kept row's menu contains its chosen candidate
+
+
+def test_golden_action_rows_use_pre_move_state(registry: CardRegistry) -> None:
+    res = _reconstruct(_load(A), registry)
+    by = {(d.kind, d.move_number): d for d in res.decisions if d.player_id == A}
+    # The bundled pass (move 37) is a generation-2 decision on pre-transition state, before the deal row
+    # applies the production phase (the deal-boundary point of the same row reads 58 M€).
+    assert by[("branch", 37)].generation == 2 and by[("branch", 37)].snapshot["me_mc"] == 33
+    assert by[("deal_boundary", 37)].generation == 3 and by[("deal_boundary", 37)].snapshot["me_mc"] == 58
+    assert by[("branch", 56)].snapshot["me_hand"] == ["Search For Life", "Strip Mine", "Trees"]
+    assert by[("branch", 57)].snapshot["me_hand"] == ["Strip Mine", "Trees"]  # Search For Life was played at 56
+    assert by[("branch", 52)].payload["turn_action"] == 1 and by[("branch", 56)].payload["turn_action"] == 0
+    assert res.counts_by_player[A]["gate5:bundled_pass_split"] == 1
+    assert res.counts_by_player[A]["gate5:cancel"] == 1  # move 29: never a decision
+    assert not [d for d in res.decisions if d.move_number == 29]
+
+
+def test_space_and_payment_prompts_never_emit_rows(registry: CardRegistry) -> None:
+    res = _reconstruct(_load(A), registry)
+    assert {d.kind for d in res.decisions} == {"draft_pick", "research_buy", "deal_boundary", "action", *ACTION_TASKS}
+    # Move 47 is Comet's nested ocean placement (a `space` prompt): no decision of any kind.
+    assert not [d for d in res.decisions if d.move_number == 47]
+    counts = res.counts_by_player[A]
+    assert counts["excluded:space"] == 1 and counts["excluded:payment"] == 10 and counts["excluded:prelude_play"] == 2
+    # Paid roots emit only the branch and the card / project choice, never a payment row.
+    paid = {d.kind for d in res.decisions if d.move_number == 25}
+    assert paid == {"branch", "project_card"}
+
 
 # ---------------------------------------------------------------------------------------------
 # Encoder invariants
@@ -210,7 +350,11 @@ def _all_rows(registry: CardRegistry) -> list[tuple[str, LogDecision]]:
 def test_golden_encoder_invariants(registry: CardRegistry, vocab: CardVocab) -> None:
     rows = _all_rows(registry)
     kinds = {d.kind for _, d in rows}
-    assert kinds == {"draft_pick", "research_buy", "deal_boundary", "action"}
+    assert kinds == {"draft_pick", "research_buy", "deal_boundary", "action", *ACTION_TASKS}
+    action_builders = {"branch": build_branch_choice, "project_card": build_project_card_choice,
+                       "card_action": build_card_action_choice, "standard_project": build_standard_project_choice}
+    prompt_types = {"branch": "branch", "project_card": "project_card", "card_action": "card_action",
+                    "standard_project": "standard_project"}
     for _, d in rows:
         row = {"map": "Tharsis", "seat": d.seat, "generation": d.generation, **d.payload, **d.snapshot}
         if d.kind == "draft_pick":
@@ -221,6 +365,14 @@ def test_golden_encoder_invariants(registry: CardRegistry, vocab: CardVocab) -> 
             targets = list(row["kept_cards"])
             assert choice.candidates[-1].id == "done"
             assert len(choice.candidates) == 5
+        elif d.kind in action_builders:
+            obs, choice = action_builders[d.kind](row)
+            assert classify_prompt_type(choice, obs) == prompt_types[d.kind]
+            assert len(choice.candidates) == len(row["menu"]) >= 2
+            if d.kind == "branch":
+                targets = [choice.candidates[list(row["menu"]).index(row["chosen"])].id]
+            else:
+                targets = [row["chosen"]]
         else:
             obs, choice, targets = build_midgame_value_observation(row), None, []
         enc = encode_observation(obs, vocab)
@@ -234,7 +386,7 @@ def test_golden_encoder_invariants(registry: CardRegistry, vocab: CardVocab) -> 
             for t in targets:
                 assert 0 <= ids.index(t) < len(ids)
             for c in choice.candidates:
-                if c.id != "done":
+                if c.id != "done" and choice.kind != "branch":
                     assert vocab.card_id(c.id) != UNK_ID, c.id
 
 
@@ -254,7 +406,7 @@ def test_golden_causality_truncation(registry: CardRegistry) -> None:
         full = _reconstruct(data, registry)
         action_moves = {d.move_number for d in full.decisions if d.kind == "action"}
         full_feats = {(d.kind, d.player_id, d.move_number): _features(d) for d in full.decisions}
-        for k in (16, 19, 22, 23, 30, 37, 40, 44, 46, 52):
+        for k in (16, 19, 22, 23, 25, 30, 35, 37, 40, 44, 46, 52, 56, 57, 59, 61, 63):
             cut = copy.deepcopy(data)
             cut["moves"] = cut["moves"][:k]
             part = _reconstruct_unchecked(cut, registry, action_moves=action_moves)

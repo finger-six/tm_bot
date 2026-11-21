@@ -79,7 +79,7 @@
  },
  "metadata": {
   "parsed_at": "2026-01-03T10:00:00",
-  "total_moves": 55,
+  "total_moves": 65,
   "scraper_version": "v2025.10.07.1844"
  },
  "table_id": "900000001",
@@ -6235,10 +6235,10 @@
   {
    "move_number": 52,
    "timestamp": "14:10:51",
-   "player_id": "10000002",
-   "player_name": "Bram Fixture",
-   "action_type": "pass",
-   "description": "Bram Fixture passes",
+   "player_id": "10000001",
+   "player_name": "Alice Testa",
+   "action_type": "other",
+   "description": "Alice Testa skips second action",
    "card_played": null,
    "card_drafted": null,
    "tile_placed": null,
@@ -6364,17 +6364,17 @@
   {
    "move_number": 53,
    "timestamp": "14:10:52",
-   "player_id": "10000001",
-   "player_name": "Alice Testa",
-   "action_type": "activate_card",
-   "description": "Alice Testa activates Tardigrades | Alice Testa adds Microbe to Tardigrades",
+   "player_id": "10000002",
+   "player_name": "Bram Fixture",
+   "action_type": "standard_project",
+   "description": "Bram Fixture plays standard project Power Plant | Bram Fixture pays 11 M€",
    "card_played": null,
    "card_drafted": null,
    "tile_placed": null,
    "tile_location": null,
    "card_options": null,
    "cards_kept": null,
-   "reason": null,
+   "reason": "Power Plant",
    "game_state": {
     "move_number": 53,
     "generation": 3,
@@ -6451,7 +6451,7 @@
       "Count of Plant tags": 0,
       "Count of Space tags": 0,
       "Count of Earth tags": 2,
-      "Microbe": 2,
+      "Microbe": 1,
       "Count of Microbe tags": 1,
       "Count of Building tags": 1,
       "Plant Production": 0,
@@ -6471,7 +6471,7 @@
       "Heat Production": 0,
       "Count of Power tags": 1,
       "Count of Jovian tags": 0,
-      "M€": 46,
+      "M€": 35,
       "Steel": 0,
       "Count of played Events cards": 0,
       "Titanium Production": 0,
@@ -6493,11 +6493,11 @@
   {
    "move_number": 54,
    "timestamp": "14:10:53",
-   "player_id": "10000001",
-   "player_name": "Alice Testa",
-   "action_type": "play_card",
-   "description": "Alice Testa pays 13 M€ | Alice Testa plays card Trees | Alice Testa increases Plant Production by 3 (immediate effect of Trees) | Alice Testa gains 1 Plant (immediate effect of Trees)",
-   "card_played": "Trees",
+   "player_id": "10000002",
+   "player_name": "Bram Fixture",
+   "action_type": "other",
+   "description": "Bram Fixture increases Energy Production by 1",
+   "card_played": null,
    "card_drafted": null,
    "tile_placed": null,
    "tile_location": null,
@@ -6560,30 +6560,30 @@
     "player_trackers": {
      "10000001": {
       "Count of Wild tags": 0,
-      "Hand Counter": 1,
+      "Hand Counter": 2,
       "Count of Animal tags": 0,
       "Count of Science tags": 2,
       "Count of City tags": 0,
-      "Player Area Counter": 9,
+      "Player Area Counter": 8,
       "Heat": 0,
       "Titanium": 2,
       "Steel Production": 1,
       "Heat Production": 0,
       "Count of Power tags": 1,
       "Count of Jovian tags": 0,
-      "M€": 16,
+      "M€": 29,
       "Steel": 0,
       "Count of played Events cards": 2,
       "Titanium Production": 0,
-      "Plant": 1,
+      "Plant": 0,
       "Energy": 0,
-      "Count of Plant tags": 1,
+      "Count of Plant tags": 0,
       "Count of Space tags": 0,
       "Count of Earth tags": 2,
-      "Microbe": 2,
+      "Microbe": 1,
       "Count of Microbe tags": 1,
       "Count of Building tags": 1,
-      "Plant Production": 3,
+      "Plant Production": 0,
       "M€ Production": 4,
       "Energy Production": 2
      },
@@ -6600,7 +6600,7 @@
       "Heat Production": 0,
       "Count of Power tags": 1,
       "Count of Jovian tags": 0,
-      "M€": 46,
+      "M€": 35,
       "Steel": 0,
       "Count of played Events cards": 0,
       "Titanium Production": 0,
@@ -6614,7 +6614,7 @@
       "Count of Building tags": 1,
       "Plant Production": 1,
       "M€ Production": 14,
-      "Energy Production": 1
+      "Energy Production": 2
      }
     }
    }
@@ -6624,14 +6624,18 @@
    "timestamp": "14:10:54",
    "player_id": "10000001",
    "player_name": "Alice Testa",
-   "action_type": "pass",
-   "description": "Alice Testa passes | It is the end of the generation 3 and Mars is terraformed! | Alice Testa scores 23 point/s for Terraforming Rating | Bram Fixture scores 21 point/s for Terraforming Rating | Alice Testa scores 5 point/s for milestone | Bram Fixture scores 1 points for Greenery tiles | Alice Testa has 16 M€ left (for tiebreaker purposes) | Alice Testa scores 28 TOTAL VP | Bram Fixture has 46 M€ left (for tiebreaker purposes) | Bram Fixture scores 22 TOTAL VP | The end of the game: Alice Testa wins!",
+   "action_type": "draw",
+   "description": "Alice Testa draws Search For Life",
    "card_played": null,
    "card_drafted": null,
    "tile_placed": null,
    "tile_location": null,
    "card_options": null,
-   "cards_kept": null,
+   "cards_kept": {
+    "10000001": [
+     "Search For Life"
+    ]
+   },
    "reason": null,
    "game_state": {
     "move_number": 55,
@@ -6689,9 +6693,138 @@
     "player_trackers": {
      "10000001": {
       "Count of Wild tags": 0,
-      "Hand Counter": 1,
+      "Hand Counter": 3,
       "Count of Animal tags": 0,
       "Count of Science tags": 2,
+      "Count of City tags": 0,
+      "Player Area Counter": 8,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 1,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 29,
+      "Steel": 0,
+      "Count of played Events cards": 2,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 0,
+      "Count of Space tags": 0,
+      "Count of Earth tags": 2,
+      "Microbe": 1,
+      "Count of Microbe tags": 1,
+      "Count of Building tags": 1,
+      "Plant Production": 0,
+      "M€ Production": 4,
+      "Energy Production": 2
+     },
+     "10000002": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 5,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 1,
+      "Count of City tags": 0,
+      "Player Area Counter": 6,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 0,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 35,
+      "Steel": 0,
+      "Count of played Events cards": 0,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 1,
+      "Count of Earth tags": 4,
+      "Microbe": 0,
+      "Count of Microbe tags": 0,
+      "Count of Building tags": 1,
+      "Plant Production": 1,
+      "M€ Production": 14,
+      "Energy Production": 2
+     }
+    }
+   }
+  },
+  {
+   "move_number": 56,
+   "timestamp": "14:10:55",
+   "player_id": "10000001",
+   "player_name": "Alice Testa",
+   "action_type": "play_card",
+   "description": "Alice Testa pays 3 M€ | Alice Testa plays card Search For Life",
+   "card_played": "Search For Life",
+   "card_drafted": null,
+   "tile_placed": null,
+   "tile_location": null,
+   "card_options": null,
+   "cards_kept": null,
+   "reason": null,
+   "game_state": {
+    "move_number": 56,
+    "generation": 3,
+    "temperature": -26,
+    "oxygen": 1,
+    "oceans": 1,
+    "player_vp": {
+     "10000001": {
+      "total": 28,
+      "total_details": {
+       "tr": 23,
+       "awards": 0,
+       "milestones": 5,
+       "cities": 0,
+       "greeneries": 0,
+       "cards": 0
+      }
+     },
+     "10000002": {
+      "total": 22,
+      "total_details": {
+       "tr": 21,
+       "awards": 0,
+       "milestones": 0,
+       "cities": 0,
+       "greeneries": 1,
+       "cards": 0
+      },
+      "details": {
+       "greeneries": {
+        "Tharsis Hex 5,6": {
+         "vp": 1
+        }
+       }
+      }
+     }
+    },
+    "milestones": {
+     "Builder": {
+      "claimed_by": "Alice Testa",
+      "player_id": "10000001",
+      "move_number": 30,
+      "timestamp": "14:10:29"
+     }
+    },
+    "awards": {
+     "Banker": {
+      "funded_by": "Bram Fixture",
+      "player_id": "10000002",
+      "move_number": 31,
+      "timestamp": "14:10:30"
+     }
+    },
+    "player_trackers": {
+     "10000001": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 2,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 3,
       "Count of City tags": 0,
       "Player Area Counter": 9,
       "Heat": 0,
@@ -6700,7 +6833,523 @@
       "Heat Production": 0,
       "Count of Power tags": 1,
       "Count of Jovian tags": 0,
-      "M€": 16,
+      "M€": 26,
+      "Steel": 0,
+      "Count of played Events cards": 2,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 0,
+      "Count of Space tags": 0,
+      "Count of Earth tags": 2,
+      "Microbe": 1,
+      "Count of Microbe tags": 1,
+      "Count of Building tags": 1,
+      "Plant Production": 0,
+      "M€ Production": 4,
+      "Energy Production": 2
+     },
+     "10000002": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 5,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 1,
+      "Count of City tags": 0,
+      "Player Area Counter": 6,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 0,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 35,
+      "Steel": 0,
+      "Count of played Events cards": 0,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 1,
+      "Count of Earth tags": 4,
+      "Microbe": 0,
+      "Count of Microbe tags": 0,
+      "Count of Building tags": 1,
+      "Plant Production": 1,
+      "M€ Production": 14,
+      "Energy Production": 2
+     }
+    }
+   }
+  },
+  {
+   "move_number": 57,
+   "timestamp": "14:10:56",
+   "player_id": "10000001",
+   "player_name": "Alice Testa",
+   "action_type": "activate_card",
+   "description": "Alice Testa activates Search For Life | Alice Testa pays 1 M€",
+   "card_played": null,
+   "card_drafted": null,
+   "tile_placed": null,
+   "tile_location": null,
+   "card_options": null,
+   "cards_kept": null,
+   "reason": null,
+   "game_state": {
+    "move_number": 57,
+    "generation": 3,
+    "temperature": -26,
+    "oxygen": 1,
+    "oceans": 1,
+    "player_vp": {
+     "10000001": {
+      "total": 28,
+      "total_details": {
+       "tr": 23,
+       "awards": 0,
+       "milestones": 5,
+       "cities": 0,
+       "greeneries": 0,
+       "cards": 0
+      }
+     },
+     "10000002": {
+      "total": 22,
+      "total_details": {
+       "tr": 21,
+       "awards": 0,
+       "milestones": 0,
+       "cities": 0,
+       "greeneries": 1,
+       "cards": 0
+      },
+      "details": {
+       "greeneries": {
+        "Tharsis Hex 5,6": {
+         "vp": 1
+        }
+       }
+      }
+     }
+    },
+    "milestones": {
+     "Builder": {
+      "claimed_by": "Alice Testa",
+      "player_id": "10000001",
+      "move_number": 30,
+      "timestamp": "14:10:29"
+     }
+    },
+    "awards": {
+     "Banker": {
+      "funded_by": "Bram Fixture",
+      "player_id": "10000002",
+      "move_number": 31,
+      "timestamp": "14:10:30"
+     }
+    },
+    "player_trackers": {
+     "10000001": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 2,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 3,
+      "Count of City tags": 0,
+      "Player Area Counter": 9,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 1,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 25,
+      "Steel": 0,
+      "Count of played Events cards": 2,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 0,
+      "Count of Space tags": 0,
+      "Count of Earth tags": 2,
+      "Microbe": 1,
+      "Count of Microbe tags": 1,
+      "Count of Building tags": 1,
+      "Plant Production": 0,
+      "M€ Production": 4,
+      "Energy Production": 2
+     },
+     "10000002": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 5,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 1,
+      "Count of City tags": 0,
+      "Player Area Counter": 6,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 0,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 35,
+      "Steel": 0,
+      "Count of played Events cards": 0,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 1,
+      "Count of Earth tags": 4,
+      "Microbe": 0,
+      "Count of Microbe tags": 0,
+      "Count of Building tags": 1,
+      "Plant Production": 1,
+      "M€ Production": 14,
+      "Energy Production": 2
+     }
+    }
+   }
+  },
+  {
+   "move_number": 58,
+   "timestamp": "14:10:57",
+   "player_id": "10000002",
+   "player_name": "Bram Fixture",
+   "action_type": "pass",
+   "description": "Bram Fixture passes",
+   "card_played": null,
+   "card_drafted": null,
+   "tile_placed": null,
+   "tile_location": null,
+   "card_options": null,
+   "cards_kept": null,
+   "reason": null,
+   "game_state": {
+    "move_number": 58,
+    "generation": 3,
+    "temperature": -26,
+    "oxygen": 1,
+    "oceans": 1,
+    "player_vp": {
+     "10000001": {
+      "total": 28,
+      "total_details": {
+       "tr": 23,
+       "awards": 0,
+       "milestones": 5,
+       "cities": 0,
+       "greeneries": 0,
+       "cards": 0
+      }
+     },
+     "10000002": {
+      "total": 22,
+      "total_details": {
+       "tr": 21,
+       "awards": 0,
+       "milestones": 0,
+       "cities": 0,
+       "greeneries": 1,
+       "cards": 0
+      },
+      "details": {
+       "greeneries": {
+        "Tharsis Hex 5,6": {
+         "vp": 1
+        }
+       }
+      }
+     }
+    },
+    "milestones": {
+     "Builder": {
+      "claimed_by": "Alice Testa",
+      "player_id": "10000001",
+      "move_number": 30,
+      "timestamp": "14:10:29"
+     }
+    },
+    "awards": {
+     "Banker": {
+      "funded_by": "Bram Fixture",
+      "player_id": "10000002",
+      "move_number": 31,
+      "timestamp": "14:10:30"
+     }
+    },
+    "player_trackers": {
+     "10000001": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 2,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 3,
+      "Count of City tags": 0,
+      "Player Area Counter": 9,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 1,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 25,
+      "Steel": 0,
+      "Count of played Events cards": 2,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 0,
+      "Count of Space tags": 0,
+      "Count of Earth tags": 2,
+      "Microbe": 1,
+      "Count of Microbe tags": 1,
+      "Count of Building tags": 1,
+      "Plant Production": 0,
+      "M€ Production": 4,
+      "Energy Production": 2
+     },
+     "10000002": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 5,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 1,
+      "Count of City tags": 0,
+      "Player Area Counter": 6,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 0,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 35,
+      "Steel": 0,
+      "Count of played Events cards": 0,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 1,
+      "Count of Earth tags": 4,
+      "Microbe": 0,
+      "Count of Microbe tags": 0,
+      "Count of Building tags": 1,
+      "Plant Production": 1,
+      "M€ Production": 14,
+      "Energy Production": 2
+     }
+    }
+   }
+  },
+  {
+   "move_number": 59,
+   "timestamp": "14:10:58",
+   "player_id": "10000001",
+   "player_name": "Alice Testa",
+   "action_type": "activate_card",
+   "description": "Alice Testa activates Tardigrades | Alice Testa adds Microbe to Tardigrades",
+   "card_played": null,
+   "card_drafted": null,
+   "tile_placed": null,
+   "tile_location": null,
+   "card_options": null,
+   "cards_kept": null,
+   "reason": null,
+   "game_state": {
+    "move_number": 59,
+    "generation": 3,
+    "temperature": -26,
+    "oxygen": 1,
+    "oceans": 1,
+    "player_vp": {
+     "10000001": {
+      "total": 28,
+      "total_details": {
+       "tr": 23,
+       "awards": 0,
+       "milestones": 5,
+       "cities": 0,
+       "greeneries": 0,
+       "cards": 0
+      }
+     },
+     "10000002": {
+      "total": 22,
+      "total_details": {
+       "tr": 21,
+       "awards": 0,
+       "milestones": 0,
+       "cities": 0,
+       "greeneries": 1,
+       "cards": 0
+      },
+      "details": {
+       "greeneries": {
+        "Tharsis Hex 5,6": {
+         "vp": 1
+        }
+       }
+      }
+     }
+    },
+    "milestones": {
+     "Builder": {
+      "claimed_by": "Alice Testa",
+      "player_id": "10000001",
+      "move_number": 30,
+      "timestamp": "14:10:29"
+     }
+    },
+    "awards": {
+     "Banker": {
+      "funded_by": "Bram Fixture",
+      "player_id": "10000002",
+      "move_number": 31,
+      "timestamp": "14:10:30"
+     }
+    },
+    "player_trackers": {
+     "10000001": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 2,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 3,
+      "Count of City tags": 0,
+      "Player Area Counter": 9,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 1,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 25,
+      "Steel": 0,
+      "Count of played Events cards": 2,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 0,
+      "Count of Space tags": 0,
+      "Count of Earth tags": 2,
+      "Microbe": 2,
+      "Count of Microbe tags": 1,
+      "Count of Building tags": 1,
+      "Plant Production": 0,
+      "M€ Production": 4,
+      "Energy Production": 2
+     },
+     "10000002": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 5,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 1,
+      "Count of City tags": 0,
+      "Player Area Counter": 6,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 0,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 35,
+      "Steel": 0,
+      "Count of played Events cards": 0,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 1,
+      "Count of Earth tags": 4,
+      "Microbe": 0,
+      "Count of Microbe tags": 0,
+      "Count of Building tags": 1,
+      "Plant Production": 1,
+      "M€ Production": 14,
+      "Energy Production": 2
+     }
+    }
+   }
+  },
+  {
+   "move_number": 60,
+   "timestamp": "14:10:59",
+   "player_id": "10000001",
+   "player_name": "Alice Testa",
+   "action_type": "play_card",
+   "description": "Alice Testa pays 13 M€ | Alice Testa plays card Trees | Alice Testa increases Plant Production by 3 (immediate effect of Trees) | Alice Testa gains 1 Plant (immediate effect of Trees)",
+   "card_played": "Trees",
+   "card_drafted": null,
+   "tile_placed": null,
+   "tile_location": null,
+   "card_options": null,
+   "cards_kept": null,
+   "reason": null,
+   "game_state": {
+    "move_number": 60,
+    "generation": 3,
+    "temperature": -26,
+    "oxygen": 1,
+    "oceans": 1,
+    "player_vp": {
+     "10000001": {
+      "total": 28,
+      "total_details": {
+       "tr": 23,
+       "awards": 0,
+       "milestones": 5,
+       "cities": 0,
+       "greeneries": 0,
+       "cards": 0
+      }
+     },
+     "10000002": {
+      "total": 22,
+      "total_details": {
+       "tr": 21,
+       "awards": 0,
+       "milestones": 0,
+       "cities": 0,
+       "greeneries": 1,
+       "cards": 0
+      },
+      "details": {
+       "greeneries": {
+        "Tharsis Hex 5,6": {
+         "vp": 1
+        }
+       }
+      }
+     }
+    },
+    "milestones": {
+     "Builder": {
+      "claimed_by": "Alice Testa",
+      "player_id": "10000001",
+      "move_number": 30,
+      "timestamp": "14:10:29"
+     }
+    },
+    "awards": {
+     "Banker": {
+      "funded_by": "Bram Fixture",
+      "player_id": "10000002",
+      "move_number": 31,
+      "timestamp": "14:10:30"
+     }
+    },
+    "player_trackers": {
+     "10000001": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 1,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 3,
+      "Count of City tags": 0,
+      "Player Area Counter": 10,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 1,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 12,
       "Steel": 0,
       "Count of played Events cards": 2,
       "Titanium Production": 0,
@@ -6729,7 +7378,7 @@
       "Heat Production": 0,
       "Count of Power tags": 1,
       "Count of Jovian tags": 0,
-      "M€": 46,
+      "M€": 35,
       "Steel": 0,
       "Count of played Events cards": 0,
       "Titanium Production": 0,
@@ -6743,7 +7392,652 @@
       "Count of Building tags": 1,
       "Plant Production": 1,
       "M€ Production": 14,
-      "Energy Production": 1
+      "Energy Production": 2
+     }
+    }
+   }
+  },
+  {
+   "move_number": 61,
+   "timestamp": "14:11:00",
+   "player_id": "10000001",
+   "player_name": "Alice Testa",
+   "action_type": "standard_project",
+   "description": "Alice Testa plays standard project Sell patents",
+   "card_played": null,
+   "card_drafted": null,
+   "tile_placed": null,
+   "tile_location": null,
+   "card_options": null,
+   "cards_kept": null,
+   "reason": "Sell patents",
+   "game_state": {
+    "move_number": 61,
+    "generation": 3,
+    "temperature": -26,
+    "oxygen": 1,
+    "oceans": 1,
+    "player_vp": {
+     "10000001": {
+      "total": 28,
+      "total_details": {
+       "tr": 23,
+       "awards": 0,
+       "milestones": 5,
+       "cities": 0,
+       "greeneries": 0,
+       "cards": 0
+      }
+     },
+     "10000002": {
+      "total": 22,
+      "total_details": {
+       "tr": 21,
+       "awards": 0,
+       "milestones": 0,
+       "cities": 0,
+       "greeneries": 1,
+       "cards": 0
+      },
+      "details": {
+       "greeneries": {
+        "Tharsis Hex 5,6": {
+         "vp": 1
+        }
+       }
+      }
+     }
+    },
+    "milestones": {
+     "Builder": {
+      "claimed_by": "Alice Testa",
+      "player_id": "10000001",
+      "move_number": 30,
+      "timestamp": "14:10:29"
+     }
+    },
+    "awards": {
+     "Banker": {
+      "funded_by": "Bram Fixture",
+      "player_id": "10000002",
+      "move_number": 31,
+      "timestamp": "14:10:30"
+     }
+    },
+    "player_trackers": {
+     "10000001": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 1,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 3,
+      "Count of City tags": 0,
+      "Player Area Counter": 10,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 1,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 12,
+      "Steel": 0,
+      "Count of played Events cards": 2,
+      "Titanium Production": 0,
+      "Plant": 1,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 0,
+      "Count of Earth tags": 2,
+      "Microbe": 2,
+      "Count of Microbe tags": 1,
+      "Count of Building tags": 1,
+      "Plant Production": 3,
+      "M€ Production": 4,
+      "Energy Production": 2
+     },
+     "10000002": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 5,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 1,
+      "Count of City tags": 0,
+      "Player Area Counter": 6,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 0,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 35,
+      "Steel": 0,
+      "Count of played Events cards": 0,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 1,
+      "Count of Earth tags": 4,
+      "Microbe": 0,
+      "Count of Microbe tags": 0,
+      "Count of Building tags": 1,
+      "Plant Production": 1,
+      "M€ Production": 14,
+      "Energy Production": 2
+     }
+    }
+   }
+  },
+  {
+   "move_number": 62,
+   "timestamp": "14:11:01",
+   "player_id": "10000001",
+   "player_name": "Alice Testa",
+   "action_type": "other",
+   "description": "Alice Testa discards 1 card/s (Sell patents) | Alice Testa gains 1 M€",
+   "card_played": null,
+   "card_drafted": null,
+   "tile_placed": null,
+   "tile_location": null,
+   "card_options": null,
+   "cards_kept": null,
+   "reason": null,
+   "game_state": {
+    "move_number": 62,
+    "generation": 3,
+    "temperature": -26,
+    "oxygen": 1,
+    "oceans": 1,
+    "player_vp": {
+     "10000001": {
+      "total": 28,
+      "total_details": {
+       "tr": 23,
+       "awards": 0,
+       "milestones": 5,
+       "cities": 0,
+       "greeneries": 0,
+       "cards": 0
+      }
+     },
+     "10000002": {
+      "total": 22,
+      "total_details": {
+       "tr": 21,
+       "awards": 0,
+       "milestones": 0,
+       "cities": 0,
+       "greeneries": 1,
+       "cards": 0
+      },
+      "details": {
+       "greeneries": {
+        "Tharsis Hex 5,6": {
+         "vp": 1
+        }
+       }
+      }
+     }
+    },
+    "milestones": {
+     "Builder": {
+      "claimed_by": "Alice Testa",
+      "player_id": "10000001",
+      "move_number": 30,
+      "timestamp": "14:10:29"
+     }
+    },
+    "awards": {
+     "Banker": {
+      "funded_by": "Bram Fixture",
+      "player_id": "10000002",
+      "move_number": 31,
+      "timestamp": "14:10:30"
+     }
+    },
+    "player_trackers": {
+     "10000001": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 0,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 3,
+      "Count of City tags": 0,
+      "Player Area Counter": 10,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 1,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 13,
+      "Steel": 0,
+      "Count of played Events cards": 2,
+      "Titanium Production": 0,
+      "Plant": 1,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 0,
+      "Count of Earth tags": 2,
+      "Microbe": 2,
+      "Count of Microbe tags": 1,
+      "Count of Building tags": 1,
+      "Plant Production": 3,
+      "M€ Production": 4,
+      "Energy Production": 2
+     },
+     "10000002": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 5,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 1,
+      "Count of City tags": 0,
+      "Player Area Counter": 6,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 0,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 35,
+      "Steel": 0,
+      "Count of played Events cards": 0,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 1,
+      "Count of Earth tags": 4,
+      "Microbe": 0,
+      "Count of Microbe tags": 0,
+      "Count of Building tags": 1,
+      "Plant Production": 1,
+      "M€ Production": 14,
+      "Energy Production": 2
+     }
+    }
+   }
+  },
+  {
+   "move_number": 63,
+   "timestamp": "14:11:02",
+   "player_id": "10000001",
+   "player_name": "Alice Testa",
+   "action_type": "standard_project",
+   "description": "Alice Testa plays standard project Power Plant | Alice Testa pays 11 M€",
+   "card_played": null,
+   "card_drafted": null,
+   "tile_placed": null,
+   "tile_location": null,
+   "card_options": null,
+   "cards_kept": null,
+   "reason": "Power Plant",
+   "game_state": {
+    "move_number": 63,
+    "generation": 3,
+    "temperature": -26,
+    "oxygen": 1,
+    "oceans": 1,
+    "player_vp": {
+     "10000001": {
+      "total": 28,
+      "total_details": {
+       "tr": 23,
+       "awards": 0,
+       "milestones": 5,
+       "cities": 0,
+       "greeneries": 0,
+       "cards": 0
+      }
+     },
+     "10000002": {
+      "total": 22,
+      "total_details": {
+       "tr": 21,
+       "awards": 0,
+       "milestones": 0,
+       "cities": 0,
+       "greeneries": 1,
+       "cards": 0
+      },
+      "details": {
+       "greeneries": {
+        "Tharsis Hex 5,6": {
+         "vp": 1
+        }
+       }
+      }
+     }
+    },
+    "milestones": {
+     "Builder": {
+      "claimed_by": "Alice Testa",
+      "player_id": "10000001",
+      "move_number": 30,
+      "timestamp": "14:10:29"
+     }
+    },
+    "awards": {
+     "Banker": {
+      "funded_by": "Bram Fixture",
+      "player_id": "10000002",
+      "move_number": 31,
+      "timestamp": "14:10:30"
+     }
+    },
+    "player_trackers": {
+     "10000001": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 0,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 3,
+      "Count of City tags": 0,
+      "Player Area Counter": 10,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 1,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 2,
+      "Steel": 0,
+      "Count of played Events cards": 2,
+      "Titanium Production": 0,
+      "Plant": 1,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 0,
+      "Count of Earth tags": 2,
+      "Microbe": 2,
+      "Count of Microbe tags": 1,
+      "Count of Building tags": 1,
+      "Plant Production": 3,
+      "M€ Production": 4,
+      "Energy Production": 2
+     },
+     "10000002": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 5,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 1,
+      "Count of City tags": 0,
+      "Player Area Counter": 6,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 0,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 35,
+      "Steel": 0,
+      "Count of played Events cards": 0,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 1,
+      "Count of Earth tags": 4,
+      "Microbe": 0,
+      "Count of Microbe tags": 0,
+      "Count of Building tags": 1,
+      "Plant Production": 1,
+      "M€ Production": 14,
+      "Energy Production": 2
+     }
+    }
+   }
+  },
+  {
+   "move_number": 64,
+   "timestamp": "14:11:03",
+   "player_id": "10000001",
+   "player_name": "Alice Testa",
+   "action_type": "other",
+   "description": "Alice Testa increases Energy Production by 1",
+   "card_played": null,
+   "card_drafted": null,
+   "tile_placed": null,
+   "tile_location": null,
+   "card_options": null,
+   "cards_kept": null,
+   "reason": null,
+   "game_state": {
+    "move_number": 64,
+    "generation": 3,
+    "temperature": -26,
+    "oxygen": 1,
+    "oceans": 1,
+    "player_vp": {
+     "10000001": {
+      "total": 28,
+      "total_details": {
+       "tr": 23,
+       "awards": 0,
+       "milestones": 5,
+       "cities": 0,
+       "greeneries": 0,
+       "cards": 0
+      }
+     },
+     "10000002": {
+      "total": 22,
+      "total_details": {
+       "tr": 21,
+       "awards": 0,
+       "milestones": 0,
+       "cities": 0,
+       "greeneries": 1,
+       "cards": 0
+      },
+      "details": {
+       "greeneries": {
+        "Tharsis Hex 5,6": {
+         "vp": 1
+        }
+       }
+      }
+     }
+    },
+    "milestones": {
+     "Builder": {
+      "claimed_by": "Alice Testa",
+      "player_id": "10000001",
+      "move_number": 30,
+      "timestamp": "14:10:29"
+     }
+    },
+    "awards": {
+     "Banker": {
+      "funded_by": "Bram Fixture",
+      "player_id": "10000002",
+      "move_number": 31,
+      "timestamp": "14:10:30"
+     }
+    },
+    "player_trackers": {
+     "10000001": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 0,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 3,
+      "Count of City tags": 0,
+      "Player Area Counter": 10,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 1,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 2,
+      "Steel": 0,
+      "Count of played Events cards": 2,
+      "Titanium Production": 0,
+      "Plant": 1,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 0,
+      "Count of Earth tags": 2,
+      "Microbe": 2,
+      "Count of Microbe tags": 1,
+      "Count of Building tags": 1,
+      "Plant Production": 3,
+      "M€ Production": 4,
+      "Energy Production": 3
+     },
+     "10000002": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 5,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 1,
+      "Count of City tags": 0,
+      "Player Area Counter": 6,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 0,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 35,
+      "Steel": 0,
+      "Count of played Events cards": 0,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 1,
+      "Count of Earth tags": 4,
+      "Microbe": 0,
+      "Count of Microbe tags": 0,
+      "Count of Building tags": 1,
+      "Plant Production": 1,
+      "M€ Production": 14,
+      "Energy Production": 2
+     }
+    }
+   }
+  },
+  {
+   "move_number": 65,
+   "timestamp": "14:11:04",
+   "player_id": "10000001",
+   "player_name": "Alice Testa",
+   "action_type": "pass",
+   "description": "Alice Testa passes | It is the end of the generation 3 and Mars is terraformed! | Alice Testa scores 23 point/s for Terraforming Rating | Bram Fixture scores 21 point/s for Terraforming Rating | Alice Testa scores 5 point/s for milestone | Bram Fixture scores 1 points for Greenery tiles | Alice Testa has 2 M€ left (for tiebreaker purposes) | Alice Testa scores 28 TOTAL VP | Bram Fixture has 35 M€ left (for tiebreaker purposes) | Bram Fixture scores 22 TOTAL VP | The end of the game: Alice Testa wins!",
+   "card_played": null,
+   "card_drafted": null,
+   "tile_placed": null,
+   "tile_location": null,
+   "card_options": null,
+   "cards_kept": null,
+   "reason": null,
+   "game_state": {
+    "move_number": 65,
+    "generation": 3,
+    "temperature": -26,
+    "oxygen": 1,
+    "oceans": 1,
+    "player_vp": {
+     "10000001": {
+      "total": 28,
+      "total_details": {
+       "tr": 23,
+       "awards": 0,
+       "milestones": 5,
+       "cities": 0,
+       "greeneries": 0,
+       "cards": 0
+      }
+     },
+     "10000002": {
+      "total": 22,
+      "total_details": {
+       "tr": 21,
+       "awards": 0,
+       "milestones": 0,
+       "cities": 0,
+       "greeneries": 1,
+       "cards": 0
+      },
+      "details": {
+       "greeneries": {
+        "Tharsis Hex 5,6": {
+         "vp": 1
+        }
+       }
+      }
+     }
+    },
+    "milestones": {
+     "Builder": {
+      "claimed_by": "Alice Testa",
+      "player_id": "10000001",
+      "move_number": 30,
+      "timestamp": "14:10:29"
+     }
+    },
+    "awards": {
+     "Banker": {
+      "funded_by": "Bram Fixture",
+      "player_id": "10000002",
+      "move_number": 31,
+      "timestamp": "14:10:30"
+     }
+    },
+    "player_trackers": {
+     "10000001": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 0,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 3,
+      "Count of City tags": 0,
+      "Player Area Counter": 10,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 1,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 2,
+      "Steel": 0,
+      "Count of played Events cards": 2,
+      "Titanium Production": 0,
+      "Plant": 1,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 0,
+      "Count of Earth tags": 2,
+      "Microbe": 2,
+      "Count of Microbe tags": 1,
+      "Count of Building tags": 1,
+      "Plant Production": 3,
+      "M€ Production": 4,
+      "Energy Production": 3
+     },
+     "10000002": {
+      "Count of Wild tags": 0,
+      "Hand Counter": 5,
+      "Count of Animal tags": 0,
+      "Count of Science tags": 1,
+      "Count of City tags": 0,
+      "Player Area Counter": 6,
+      "Heat": 0,
+      "Titanium": 2,
+      "Steel Production": 0,
+      "Heat Production": 0,
+      "Count of Power tags": 1,
+      "Count of Jovian tags": 0,
+      "M€": 35,
+      "Steel": 0,
+      "Count of played Events cards": 0,
+      "Titanium Production": 0,
+      "Plant": 0,
+      "Energy": 0,
+      "Count of Plant tags": 1,
+      "Count of Space tags": 1,
+      "Count of Earth tags": 4,
+      "Microbe": 0,
+      "Count of Microbe tags": 0,
+      "Count of Building tags": 1,
+      "Plant Production": 1,
+      "M€ Production": 14,
+      "Energy Production": 2
      }
     }
    }

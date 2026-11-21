@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tm_bot.agents.card_data import CardSpec, load_card_data
+from tm_bot.data import actionmenu
 from tm_bot.data.logstate import SNAPSHOT_TAGS
 from tm_bot.env.types import (
     SUPPORTED_MAPS,
@@ -698,6 +699,99 @@ def build_research_buy_choice(
     cands.append(Candidate(id="done", label=f"Done ({len(picked_set)} selected)"))
     choice = Choice(seat=obs["actor"], kind="multi_card", prompt="Select card(s) to buy", candidates=tuple(cands))
     return obs, choice
+
+
+# Root branch labels as the adapter prints them (`formatEngineTitle` of the engine option titles in
+# `Player.getActions`); convert-plants and fund-award titles carry a number.
+_BRANCH_LABELS: dict[str, str] = {
+    "claim_milestone": "Claim a milestone",
+    "convert_heat": "Convert 8 heat into temperature",
+    "card_action": "Perform an action from a played card",
+    "play_project_card": "Play project card",
+    "end_turn": "End Turn",
+    "standard_projects": "Standard projects",
+    "pass": "Pass for this generation",
+    "sell_patents": "Sell patents",
+}
+
+
+def branch_label(key: str, row: Mapping[str, Any]) -> str:
+    """Adapter label of one root branch key for the row's pre-move state."""
+    if key == "convert_plants":
+        return f"Convert {actionmenu.plants_for_greenery(row)} plants into greenery"
+    if key == "fund_award":
+        return f"Fund an award ({actionmenu.award_cost(row)} M€)"
+    return _BRANCH_LABELS[key]
+
+
+def _action_observation(
+    row: Mapping[str, Any],
+    cards_by_name: Mapping[str, CardSpec] | None,
+    templates: Mapping[str, dict[str, Any]] | None,
+) -> ActorObservation:
+    obs = build_state_observation(row, phase="action", cards_by_name=cards_by_name, templates=templates)
+    actor = obs["actor"]
+    obs["public"]["activePlayer"] = actor
+    for p in obs["public"]["players"]:
+        p["isActive"] = p["seat"] == actor
+    return obs
+
+
+def build_branch_choice(
+    row: Mapping[str, Any],
+    *,
+    cards_by_name: Mapping[str, CardSpec] | None = None,
+    templates: Mapping[str, dict[str, Any]] | None = None,
+) -> tuple[ActorObservation, Choice]:
+    """Root action `branch` prompt (the engine's `getActions` OrOptions) for an `action_branches` row.
+
+    Candidates follow `row["menu"]` (engine push order), so the target index is
+    `row["menu"].index(row["chosen"])`. Ids are the adapter's `branch:<i>`, `i` being the option's
+    index in the engine's pushed list (the menu plus the always-pushed `Standard projects` and `Pass`).
+    """
+    obs = _action_observation(row, cards_by_name, templates)
+    menu = [str(k) for k in row["menu"]]
+    pushed = [k for k in actionmenu.BRANCH_ORDER if k in menu or k in actionmenu.ALWAYS_PUSHED]
+    cands = tuple(Candidate(id=f"branch:{pushed.index(k)}", label=branch_label(k, row)) for k in menu)
+    prompt = "Take your first action" if int(row["turn_action"]) == 0 else "Take your next action"
+    return obs, Choice(seat=obs["actor"], kind="branch", prompt=prompt, candidates=cands)
+
+
+def build_project_card_choice(
+    row: Mapping[str, Any],
+    *,
+    cards_by_name: Mapping[str, CardSpec] | None = None,
+    templates: Mapping[str, dict[str, Any]] | None = None,
+) -> tuple[ActorObservation, Choice]:
+    """`Play project card` prompt (adapter kind `project_card`) over the row's playable hand cards."""
+    obs = _action_observation(row, cards_by_name, templates)
+    cands = tuple(Candidate(id=c, label=c) for c in sorted(str(c) for c in row["menu"]))
+    return obs, Choice(seat=obs["actor"], kind="project_card", prompt="Play project card", candidates=cands)
+
+
+def build_card_action_choice(
+    row: Mapping[str, Any],
+    *,
+    cards_by_name: Mapping[str, CardSpec] | None = None,
+    templates: Mapping[str, dict[str, Any]] | None = None,
+) -> tuple[ActorObservation, Choice]:
+    """Blue-card action pick (the engine's `SelectCard` after the root branch; adapter kind `card`)."""
+    obs = _action_observation(row, cards_by_name, templates)
+    cands = tuple(Candidate(id=c, label=c) for c in sorted(str(c) for c in row["menu"]))
+    return obs, Choice(seat=obs["actor"], kind="card", prompt="Perform an action from a played card",
+                       candidates=cands)
+
+
+def build_standard_project_choice(
+    row: Mapping[str, Any],
+    *,
+    cards_by_name: Mapping[str, CardSpec] | None = None,
+    templates: Mapping[str, dict[str, Any]] | None = None,
+) -> tuple[ActorObservation, Choice]:
+    """`Standard projects` prompt (adapter kind `project_card`); the adapter lists the candidates by name."""
+    obs = _action_observation(row, cards_by_name, templates)
+    cands = tuple(Candidate(id=c, label=c) for c in sorted(str(c) for c in row["menu"]))
+    return obs, Choice(seat=obs["actor"], kind="project_card", prompt="Standard projects", candidates=cands)
 
 
 def build_midgame_value_observation(

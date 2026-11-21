@@ -35,7 +35,7 @@ from tm_bot.data.gates import (
     evaluate_record,
 )
 from tm_bot.data.inventory import DEFAULT_INDEX_PATH, _get_peak_rss_bytes, normalize_map
-from tm_bot.data.logstate import LogDecision, LogStateResult, reconstruct_log_state
+from tm_bot.data.logstate import ACTION_TASKS, LogDecision, LogStateResult, reconstruct_log_state
 from tm_bot.data.splits import SplitName, assign_split
 
 DEFAULT_WARMSTART_DIR = Path("data") / "warmstart"
@@ -172,6 +172,32 @@ _MIDGAME_VALUES_SCHEMA = pa.schema(
     ]
 )
 
+
+def _action_schema(*extra: tuple[str, pa.DataType]) -> pa.Schema:
+    """One action-phase policy table (#44): a reconstructed candidate `menu` and the `chosen` key."""
+    return pa.schema(
+        [
+            *_TABLE_KEY_FIELDS,
+            ("generation", pa.int32()),
+            ("move_number", pa.int32()),
+            ("menu", _STR_LIST),
+            ("chosen", pa.string()),
+            *extra,
+            *_SPLIT_FIELDS,
+            *_SNAPSHOT_FIELDS,
+        ]
+    )
+
+
+# Decision kind (`tm_bot.data.logstate.ACTION_TASKS`) -> table name and schema.
+_ACTION_TABLES: dict[str, tuple[str, pa.Schema]] = {
+    "branch": ("action_branches", _action_schema(("turn_action", pa.int32()))),
+    "project_card": ("action_project_cards", _action_schema()),
+    "card_action": ("action_card_actions", _action_schema()),
+    "standard_project": ("action_standard_projects", _action_schema()),
+}
+assert set(_ACTION_TABLES) == set(ACTION_TASKS)
+
 _SETUP_OUTCOMES_SCHEMA = pa.schema(
     [
         ("path", pa.string()),
@@ -206,8 +232,34 @@ class _EvaluatedPerspective:
 _NEW_TABLES: tuple[tuple[str, pa.Schema], ...] = (
     ("research_buys", _RESEARCH_BUYS_SCHEMA),
     ("midgame_values", _MIDGAME_VALUES_SCHEMA),
+    *_ACTION_TABLES.values(),
 )
-_ALL_KINDS: tuple[str, ...] = ("setup_choices", "draft_picks", "setup_outcomes", "research_buys", "midgame_values")
+_ALL_KINDS: tuple[str, ...] = (
+    "setup_choices", "draft_picks", "setup_outcomes", "research_buys", "midgame_values",
+    *(name for name, _ in _ACTION_TABLES.values()),
+)
+# Drop reasons of an action-task row that had a reconstructed menu (the menu-quality denominator).
+_MENU_CHECKED_PREFIXES: tuple[str, ...] = ("menu_miss:", "single_candidate", "state_sanity:")
+
+
+def action_task_summary(examples: dict[str, int], v2_counts: dict[str, int]) -> dict[str, dict[str, Any]]:
+    """Per action task: kept rows, rows with a reconstructed menu, and the chosen-outside-menu share."""
+    out: dict[str, dict[str, Any]] = {}
+    for kind, (name, _) in _ACTION_TABLES.items():
+        drops = {k[len(kind) + 1:]: v for k, v in v2_counts.items() if k.startswith(f"{kind}:")}
+        kept = int(examples.get(name, 0))
+        checked = kept + sum(v for k, v in drops.items() if k.startswith(_MENU_CHECKED_PREFIXES))
+        misses = {k[len("menu_miss:"):]: v for k, v in drops.items() if k.startswith("menu_miss:")}
+        out[kind] = {
+            "table": name,
+            "kept": kept,
+            "with_menu": checked,
+            "menu_miss": sum(misses.values()),
+            "menu_miss_rate": round(sum(misses.values()) / checked, 4) if checked else 0.0,
+            "menu_miss_by_reason": dict(sorted(misses.items())),
+            "dropped_by_reason": dict(sorted(drops.items())),
+        }
+    return out
 
 
 def _v2_clean(persp: _EvaluatedPerspective) -> bool:
@@ -349,6 +401,7 @@ def format_yield_report_markdown(report: dict[str, Any]) -> str:
         f"- `setup_outcomes`: {examples['setup_outcomes']:,}",
         f"- `research_buys`: {examples.get('research_buys', 0):,}",
         f"- `midgame_values`: {examples.get('midgame_values', 0):,}",
+        *(f"- `{name}`: {examples.get(name, 0):,}" for name, _ in _ACTION_TABLES.values()),
         f"- `draft_picks` without a gen 2+ snapshot (a generation 1 pick, or the table failed a table-level v2 gate): "
         f"{examples.get('draft_picks_without_snapshot', 0):,}",
         "",
@@ -405,6 +458,24 @@ def format_yield_report_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- `{reason}`: {cnt:,}")
     else:
         lines.append("- (none)")
+
+    actions = report.get("action_tasks") or {}
+    if actions:
+        lines.extend(["", "## Action-Phase Tasks (#44)", ""])
+        lines.append("`with menu` counts rows that reached menu reconstruction (kept, `single_candidate`,")
+        lines.append("`menu_miss:*`, `state_sanity:*`); `menu miss` is the share whose chosen candidate was outside")
+        lines.append("the reconstructed menu. Gate 5 strips (`gate5:*`) and nested prompts excluded from warm start")
+        lines.append("(`excluded:*`) are listed with the other v2 counts above.")
+        lines.append("")
+        lines.append("| Task | Table | Kept | With menu | Menu miss | Miss share |")
+        lines.append("| --- | --- | ---: | ---: | ---: | ---: |")
+        for kind, a in actions.items():
+            lines.append(f"| `{kind}` | `{a['table']}` | {a['kept']:,} | {a['with_menu']:,} | {a['menu_miss']:,} | "
+                         f"{100 * a['menu_miss_rate']:.2f}% |")
+        for kind, a in actions.items():
+            lines.extend(["", f"### `{kind}` drops by reason", ""])
+            for reason, cnt in a["dropped_by_reason"].items() or [("(none)", 0)]:
+                lines.append(f"- `{reason}`: {cnt:,}")
 
     if draft_diag["dropped_by_reason"]:
         lines.extend(["", "## Dropped Draft Rows by Reason", ""])
@@ -472,7 +543,7 @@ def run_extraction(
                 "passed_setup_tables": int(ms["passed_setup_tables"]),
                 "passed_outcome_tables": int(ms["passed_outcome_tables"]),
                 "quarantined_tables_by_reason": Counter(ms["quarantined_tables_by_reason"]),
-                "examples": dict(ms["examples"]),
+                "examples": {**{k: 0 for k in _ALL_KINDS}, **ms["examples"]},
             }
         train_players: set[str] = set(saved["train_players"])
         test_table_players: dict[str, tuple[str, ...]] = {
@@ -672,6 +743,18 @@ def run_extraction(
                 new_bufs["research_buys"].append(row)
                 example_counts["research_buys"] += 1
                 by_map[group_map_bucket]["examples"]["research_buys"] += 1
+
+            # Action-phase policy rows (setup-passed tables, conceded ones included; resignation rows
+            # never become decisions).
+            for d in decisions.values():
+                if d.kind not in _ACTION_TABLES or d.drop_reason is not None:
+                    continue
+                name = _ACTION_TABLES[d.kind][0]
+                row = _decision_row(chosen_persp, current_tid, ev.map_name or group_map_bucket, d, split)
+                row.update(d.payload)
+                new_bufs[name].append(row)
+                example_counts[name] += 1
+                by_map[group_map_bucket]["examples"][name] += 1
 
         # Emit setup_outcomes only if an outcome-passing perspective exists
         outcome_passing = [p for p in setup_passing if p.evaluation.outcome.passed]
@@ -1009,9 +1092,11 @@ def run_extraction(
             "setup_outcomes": example_counts["setup_outcomes"],
             "research_buys": example_counts["research_buys"],
             "midgame_values": example_counts["midgame_values"],
+            **{name: example_counts[name] for name, _ in _ACTION_TABLES.values()},
             "draft_picks_without_snapshot": example_counts["draft_picks_without_snapshot"],
         },
         "v2_quarantine": dict(sorted(v2_counts.items())),
+        "action_tasks": action_task_summary(dict(example_counts), dict(v2_counts)),
         "splits": {
             "setup_choices": {**setup_splits, "test_player_holdout": setup_holdout},
             "draft_picks": {**draft_splits, "test_player_holdout": draft_holdout},

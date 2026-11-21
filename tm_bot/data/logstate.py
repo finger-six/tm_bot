@@ -36,6 +36,23 @@ public hand count.
 Research-buy gate (Gate 3): the packet is the seat's 3 verified picks plus the final 1-card pass
 packet (4 distinct cards), `kept <= packet`, `paid == 3 * |kept|` from the row's own payment text,
 and the reconstructed M€ covers the payment; discards are the set difference.
+
+Action-root and attribution gate (Gate 5, #44). A gen 2+ row is a root decision of seat `player_id`
+when its own segments carry a root verb (`plays card`, `plays standard project`, `activates`,
+`claims milestone`, `funds ... award`, `skips second action`, a bare `pays 8 Heat` / `pays 8 Plant`
+conversion) or `action_type` is `pass` (`passes`, or the bundled pass + generation transition +
+deal row, whose pass is observed on pre-transition state). The description pronoun "You" is never
+used. Stripped and counted (`gate5:<reason>`), never emitted: `NAME other` rows, cancellations,
+resignations (`concedes the game`; never a `Pass`), `skips rest of actions`, a root verb whose
+segment names the other seat, unsupported standard projects and unclassifiable root rows. Each root
+emits a `branch` decision and, for its kind, a `project_card`, `card_action` or `standard_project`
+decision, with a menu from `tm_bot.data.actionmenu` built on the same pre-move state. A chosen
+candidate outside its menu drops the row as `menu_miss:<reason>`; a menu with fewer than 2
+candidates drops it as `single_candidate`. `branch`, `project_card` and `card_action` need the
+exact tracked hand (forward quarantine `hand_lost`); `standard_project` only needs M€ (its menu
+does not read the hand), so it is kept after a hand loss. Nested prompts that never emit rows are
+counted per row as `excluded:<type>` (`space` placements, `payment` on paid roots, `player`
+targets, effect `other_card` targets, gen-1 `prelude_play`).
 """
 
 from __future__ import annotations
@@ -43,11 +60,13 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Collection
+from typing import Any, Collection, Mapping
 
+from tm_bot.agents.card_data import CardSpec, load_card_data
+from tm_bot.data import actionmenu
 from tm_bot.data.cards import CardRegistry
 from tm_bot.data.gates import DraftExtractionResult, SetupGateResult, VerifiedDraftPick
-from tm_bot.data.inventory import _opt_str
+from tm_bot.data.inventory import _opt_str, normalize_map
 
 MC = "M€"
 STOCK_KEYS: tuple[tuple[str, str], ...] = (
@@ -82,6 +101,13 @@ _DRAWS_COUNT_RE = re.compile(r"^draws (?:\d+ cards?|a card)\s*(?:\(.*\))?$")
 _DRAWS_NAMED_RE = re.compile(r"^draws (.+?)\s*(?:\(.*\))?$")
 _DISCARDS_COUNT_RE = re.compile(r"^discards (\d+|a) card(?:/s|s)?\b")
 _DISCARDS_NAMED_RE = re.compile(r"^discards (.+?)\s*(?:\(.*\))?$")
+_STANDARD_PROJECT_RE = re.compile(r"^plays standard project (.+)$")
+_FUNDS_AWARD_RE = re.compile(r"^funds (.+) award$")
+_CONVERT_RE = re.compile(r"^pays (\d+) (Heat|Plant)$")
+_PLACES_RE = re.compile(r"^places .+ on ")
+_TARGET_VERBS = ("reduces ", "loses ", "removes ")
+_RESIGN_MARKERS = ("concedes the game", "resigns")
+ACTION_TASKS: tuple[str, ...] = ("branch", "project_card", "card_action", "standard_project")
 
 
 def income_identity_mc(
@@ -97,7 +123,7 @@ def income_identity_mc(
 
 @dataclass(frozen=True)
 class LogDecision:
-    kind: str  # "draft_pick" | "research_buy" | "deal_boundary" | "action"
+    kind: str  # "draft_pick" | "research_buy" | "deal_boundary" | "action" | one of ACTION_TASKS
     player_id: str
     seat: int
     generation: int
@@ -138,6 +164,11 @@ class _Seat:
     offer: set[str] = field(default_factory=set)
     research: list[dict[str, Any]] = field(default_factory=list)
     discarded_seen: list[str] = field(default_factory=list)
+    # Action-phase public state of the current generation (#44).
+    used_actions: set[str] = field(default_factory=set)
+    turn_actions: int = 0
+    passed: bool = False
+    last_played: str | None = None
 
 
 @dataclass
@@ -222,9 +253,12 @@ def reconstruct_log_state(
     drafts: DraftExtractionResult,
     card_registry: CardRegistry,
     action_moves: Collection[int] | None = None,
+    cards_by_name: Mapping[str, CardSpec] | None = None,
 ) -> LogStateResult:
     """Single pass over one perspective's moves; see the module docstring for the rules."""
     result = LogStateResult()
+    specs = cards_by_name if cards_by_name is not None else load_card_data()
+    map_name = (normalize_map(_opt_str(data.get("map"))) or "").lower()
     moves = data.get("moves")
     if not isinstance(moves, list) or not setup.passed:
         result.table_reason = "missing_moves" if not isinstance(moves, list) else "setup_failed"
@@ -330,11 +364,167 @@ def reconstruct_log_state(
         return snap
 
     def emit(kind: str, st: _Seat, move: int, gs: dict[str, Any], phase: str, payload: dict[str, Any],
-             drop: str | None = None) -> None:
+             drop: str | None = None, snap: dict[str, Any] | None = None) -> None:
         result.decisions.append(
             LogDecision(kind=kind, player_id=st.pid, seat=st.seat, generation=gen, move_number=move,
-                        snapshot=snapshot(st, gs, phase), payload=payload, drop_reason=drop)
+                        snapshot=snap if snap is not None else snapshot(st, gs, phase), payload=payload,
+                        drop_reason=drop)
         )
+
+    def classify_root(st: _Seat, act: str | None, segs: list[str], deal: bool,
+                      nxt: dict[str, Any] | None) -> tuple[str, Any] | None:
+        """Gate 5: `(root, detail)`, `("strip", reason)`, or None for a non-root row of seat `st`.
+
+        A bare `pays N Plant` row is also how an attacked seat loses plants, so it is a greenery
+        conversion only when the seat's next row places the greenery (`nxt`, a label-side lookahead
+        that never feeds a feature); a bare `pays 8 Heat` needs the temperature raise on its row.
+        """
+        parts = [split_actor(seg) for seg in segs]
+        rests = [rest for _, rest in parts]
+        if any(marker in rest for rest in rests for marker in _RESIGN_MARKERS):
+            return "strip", "resignation"
+        if any(rest == "cancels their move" for rest in rests):
+            return "strip", "cancel"
+        if any(rest.startswith("skips rest of actions") for rest in rests):
+            return "strip", "skip_rest"
+        if len(parts) == 1 and rests[0] == "other":
+            return "strip", "other_row"
+        for who, rest in parts:
+            root: tuple[str, Any] | None = None
+            if rest.startswith("plays card ") and act in ("play_card", "pass"):
+                card = card_registry.resolve(rest[len("plays card "):].strip())
+                root = ("play_card", card) if card is not None else ("strip", "unresolvable_card")
+            elif (mt := _STANDARD_PROJECT_RE.match(rest)) and act == "standard_project":
+                name = mt.group(1).strip().lower()
+                if name == "sell patents":
+                    root = ("sell_patents", None)
+                elif name in actionmenu.LOG_STANDARD_PROJECTS:
+                    root = ("standard_project", actionmenu.LOG_STANDARD_PROJECTS[name])
+                else:
+                    root = ("strip", "unsupported_standard_project")
+            elif rest.startswith("activates ") and act == "activate_card":
+                card = card_registry.resolve(rest[len("activates "):].strip())
+                root = ("card_action", card) if card is not None else ("strip", "unresolvable_card")
+            elif rest.startswith("claims milestone ") and act == "claim_milestone":
+                root = ("claim_milestone", rest[len("claims milestone "):].strip())
+            elif (mt := _FUNDS_AWARD_RE.match(rest)) and act == "fund_award":
+                root = ("fund_award", mt.group(1).strip())
+            elif rest.startswith("skips second action"):
+                root = ("end_turn", None)
+            if root is not None:
+                return root if who is st or root[0] == "strip" else ("strip", "attribution_mismatch")
+        who, rest = parts[0] if parts else (None, "")
+        conv = _CONVERT_RE.match(rest) if who is st and act in ("other", None) else None
+        if act == "convert_heat" or (conv and conv.group(2) == "Heat"
+                                     and any(w is st and r.startswith("increases Temperature") for w, r in parts)):
+            return "convert_heat", None
+        nxt_segs = _segments(nxt.get("description")) if nxt and _opt_str(nxt.get("player_id")) == st.pid else []
+        nxt_who, nxt_rest = split_actor(nxt_segs[0]) if nxt_segs else (None, "")
+        places_greenery = nxt_who is st and nxt_rest.startswith("places Greenery")
+        if act == "convert_plants" or (conv and conv.group(2) == "Plant" and places_greenery):
+            return "convert_plants", int(conv.group(1)) if conv else None
+        if act == "pass" and (deal or any(w is st and r == "passes" for w, r in parts)):
+            return "pass", None
+        if act in ROOT_ACTION_TYPES or act == "pass":
+            return "strip", "unclassified_root"
+        return None
+
+    def action_decisions(st: _Seat, move: int, gs_prev: dict[str, Any], root: str, detail: Any) -> None:
+        """Emit the `branch` row and the root's sub-task row from pre-move state (rows <= move - 1)."""
+        opp = next(s for s in seats.values() if s.pid != st.pid)
+        snap = snapshot(st, gs_prev, "action")
+        exact = st.hand_lost_at is None
+
+        def finish(kind: str, payload: dict[str, Any], drop: str | None) -> None:
+            if drop is not None:
+                result.count(st.pid, f"{kind}:{drop}")
+            emit(kind, st, move, gs_prev, "action", payload, drop, snap=snap)
+
+        chosen = actionmenu.ROOT_TO_BRANCH[root]
+        menu: list[str] = []
+        drop = None
+        if not exact:
+            drop = "hand_lost"
+        else:
+            menu = actionmenu.branch_menu(snap, map_name=map_name, specs=specs, used_actions=st.used_actions,
+                                          turn_action=st.turn_actions, opp_passed=opp.passed,
+                                          last_played=st.last_played)
+            if root == "convert_plants" and detail is not None and detail != actionmenu.plants_for_greenery(snap):
+                drop = "state_sanity:convert_amount"
+            elif chosen == "end_turn" and chosen not in menu:
+                # The platform logs `skips second action` after the opponent passed too; the engine
+                # then offers no End Turn (the skip ends the seat's generation).
+                drop = "menu_miss:end_turn_" + ("opponent_passed" if opp.passed else "first_action")
+            elif chosen not in menu:
+                drop = f"menu_miss:{chosen}"
+            elif len(menu) < 2:
+                drop = "single_candidate"
+        finish("branch", {"menu": menu, "chosen": chosen, "turn_action": st.turn_actions}, drop)
+
+        if root == "play_card":
+            menu, drop = [], None
+            if not exact:
+                drop = "hand_lost"
+            else:
+                menu, unchecked = actionmenu.playable_project_cards(snap, specs, st.last_played)
+                spec = specs.get(detail)
+                if detail not in st.hand or spec is None:
+                    drop = "menu_miss:not_in_hand"
+                elif (failure := actionmenu.card_playability(spec, snap, st.last_played)[0]) is not None:
+                    drop = f"menu_miss:{failure}"
+                elif len(menu) < 2:
+                    drop = "single_candidate"
+                if drop is None and unchecked:
+                    result.count(st.pid, "project_card:menu_has_unchecked_requirement")
+            finish("project_card", {"menu": menu, "chosen": detail}, drop)
+        elif root == "card_action":
+            menu, drop = [], None
+            if not exact:
+                drop = "hand_lost"
+            else:
+                menu = actionmenu.unused_action_cards(snap, specs, st.used_actions)
+                spec = specs.get(detail)
+                if detail not in st.tableau:
+                    drop = "menu_miss:not_in_tableau"
+                elif spec is None or not spec.has_action:
+                    drop = "menu_miss:no_action"
+                elif detail in st.used_actions:
+                    drop = "menu_miss:used"
+                elif len(menu) < 2:
+                    drop = "single_candidate"
+            finish("card_action", {"menu": menu, "chosen": detail}, drop)
+        elif root == "standard_project":
+            menu = actionmenu.standard_project_menu(snap)
+            drop = "menu_miss:unaffordable" if detail not in menu else "single_candidate" if len(menu) < 2 else None
+            finish("standard_project", {"menu": menu, "chosen": detail}, drop)
+
+    def count_excluded(st: _Seat, act: str | None, segs: list[str], root: tuple[str, Any] | None) -> None:
+        """Count the nested prompts a row shows evidence of; they never emit warm-start rows (#38 2D)."""
+        parts = [split_actor(seg) for seg in segs]
+        if any(_PLACES_RE.match(rest) for who, rest in parts if who is not None):
+            result.count(st.pid, "excluded:space")
+        if root is not None and root[0] in ("play_card", "standard_project", "claim_milestone", "fund_award",
+                                            "card_action") and any(
+                who is st and rest.startswith("pays ") for who, rest in parts):
+            result.count(st.pid, "excluded:payment")
+        if any(who is not None and who is not st and rest.startswith(_TARGET_VERBS) for who, rest in parts):
+            result.count(st.pid, "excluded:player")
+        if root is None and act == "other" and any(who is st and rest.startswith("adds ") for who, rest in parts):
+            result.count(st.pid, "excluded:other_card")
+
+    def after_root(st: _Seat, root: str, detail: Any) -> None:
+        """Advance the generation's turn state once a root decision is applied."""
+        for other in seats.values():
+            if other is not st:
+                other.turn_actions = 0
+        if root == "end_turn":
+            st.turn_actions = 0
+        elif root == "pass":
+            st.passed, st.turn_actions, st.last_played = True, 0, None
+        else:
+            st.turn_actions = (st.turn_actions + 1) % 2
+        if root == "card_action":
+            st.used_actions.add(detail)
 
     def end_research_window(move: int) -> None:
         nonlocal research_open
@@ -432,6 +622,25 @@ def reconstruct_log_state(
                     result.count(st.pid, "action:hand_lost")
                 emit("action", st, move, prev_gs, "action", {}, drop)
 
+        # Action-phase roots (Gate 5). A bundled deal row's pass is observed here, on the
+        # pre-transition state of the generation it ends (`gen` is not advanced yet).
+        if prev_gs is not None and gen >= 2 and pid in seats:
+            st = seats[pid]
+            root = classify_root(st, act, segs, is_deal, moves[idx + 1] if idx + 1 < len(moves) else None)
+            if root is not None and root[0] == "strip":
+                result.count(pid, f"gate5:{root[1]}")
+                if root[1] == "skip_rest":
+                    st.turn_actions = 0
+                root = None
+            elif root is not None:
+                if research_open and not is_deal:
+                    end_research_window(move)
+                if is_deal:
+                    result.count(pid, "gate5:bundled_pass_split")
+                action_decisions(st, move, prev_gs, *root)
+                after_root(st, *root)
+            count_excluded(st, act, segs, root)
+
         # ---- apply this row ---------------------------------------------------------------------
         trackers = gs.get("player_trackers") or {}
         prev_trackers = (prev_gs or {}).get("player_trackers") or {}
@@ -487,6 +696,8 @@ def reconstruct_log_state(
             for p in seats:
                 drafted_round[p] = []
                 kept_this_gen[p] = None
+                seats[p].used_actions = set()
+                seats[p].turn_actions, seats[p].passed, seats[p].last_played = 0, False, None
                 checks[p] = _IncomeCheck(generation=gen, expected=seats[p].stocks["mc"], deal_index=idx)
 
         opts = m.get("card_options")
@@ -541,10 +752,12 @@ def reconstruct_log_state(
                     lose_hand(who, move, "unresolvable_play")
                     continue
                 who.tableau.append(card)
+                who.last_played = card
                 if card in who.hand:
                     who.hand.discard(card)
                 elif card in who.preludes_in_hand:
                     who.preludes_in_hand.discard(card)
+                    result.count(who.pid, "excluded:prelude_play")
                 elif card in who.offer:
                     who.offer.discard(card)
                     who.discarded_seen.extend(sorted(who.offer))
