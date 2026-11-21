@@ -28,7 +28,10 @@ HUMAN_AUX_WEIGHT_START = 0.5
 HUMAN_AUX_WEIGHT_END = 0.1
 HUMAN_AUX_DECAY_FROM_H = 2.0
 HUMAN_AUX_DECAY_TO_H = 8.0
-HUMAN_AUX_MAX_ROWS = 2_000_000
+# #39 §1d: "target <= 2M rows" so the learner stays under the 20.0 GiB RAM guard. Measured
+# on the real cache, 2M rows add ~2.9 GiB of working set; the unguarded v1 milestone-main
+# learner peaked at 18.0 GiB, so 1M rows (~1.4 GiB) keeps the v2 peak near 19.5 GiB.
+HUMAN_AUX_MAX_ROWS = 1_000_000
 KL_ANCHOR_BETA = 0.05
 
 _MASKED_LOGIT = -1e9

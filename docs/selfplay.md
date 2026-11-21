@@ -161,12 +161,17 @@ CE(policy, visits) + 1.0·BCE(win_logit, o) + 0.3·SmoothL1(vp_margin_pred, m)
   continued across `--resume`), read once per cycle before its updates.
 - **Resident human sample** ([`human_aux.py`](../tm_bot/training/human_aux.py)):
   at run start the learner loads `data/warmstart` and its encoded cache, draws
-  at most `human_aux_max_rows` = 2,000,000 train rows once (split across the
+  at most `human_aux_max_rows` = 1,000,000 train rows once (split across the
   sampler's pools in proportion to their per-step draws; a smaller pool is taken
   whole), copies the chosen cache rows into RAM and releases the memory maps. At
-  ~1.6 KB per cached row that is ~3.0 GiB at 2M rows (plus the small generation-1
-  setup tables), well under the 20.0 GiB learner guard, which counts mapped pages
-  too. Human rows only, never `b1-v2` (#36).
+  ~1.4 KB per cached row that is ~1.4 GiB at 1M rows (plus the small generation-1
+  setup tables). #39 allows up to 2M; a real-cache load of 2M rows measured 2.72 GiB
+  of cache rows and +2.9 GiB of steady working set, and the unguarded v1
+  `milestone-main` learner peaked at 18.0 GiB (p99 14.0 GiB), so 2M rows could cross
+  the 20.0 GiB guard late in a run; 1M keeps the projected peak near 19.5 GiB. The
+  one-time load (~45 s) transiently touches most of the mapped cache (peak working
+  set 15.3 GiB at 2M rows) before the guard's first per-cycle check; those pages are
+  file-backed and released with the maps. Human rows only, never `b1-v2` (#36).
 - The shared pieces (`HumanAuxSchedule`, `pad_anchor_logits`, `kl_to_anchor` in
   [`anchor_loss.py`](../tm_bot/models/anchor_loss.py); `load_human_aux_sample`,
   `HumanAuxLoss` in `human_aux.py`) are for the comparator's PPO learner too (#50).

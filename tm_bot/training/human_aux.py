@@ -7,9 +7,9 @@ warm-start tables, never from `b1-v2` games (#36).
 
 The learner must stay under its 20.0 GiB RAM guard, which counts the process working set,
 so memory-mapped pages it touches count too. `build_human_aux_sample` therefore draws a
-fixed random subset of at most `max_rows` (default 2M) train rows once, at run start, and
-copies the encoded-cache rows it chose into RAM (`resident_table`, ~1.6 KB per row:
-~3.0 GiB at 2M rows). The full cache is released afterwards and never read again. The
+fixed random subset of at most `max_rows` (default 1M) train rows once, at run start, and
+copies the encoded-cache rows it chose into RAM (`resident_table`, ~1.4 KB per row:
+measured 2.72 GiB at 2M rows). The full cache is released afterwards and never read again. The
 generation-1 setup tables stay loaded whole (they are small); only the chosen setup rows
 are sampled. Rows are split across the sampler's pools in proportion to the rows each pool
 contributes per step, so every pool cycles through its share at the same rate; a pool
@@ -80,7 +80,9 @@ def allocate_rows(
     """Rows to keep per pool: proportional to `draws`, capped by `available`, sum <= `max_rows`.
 
     Water-filling: a pool whose proportional share exceeds its size is taken whole and
-    the rows it frees are shared among the remaining pools by the same rule.
+    the rows it frees are shared among the remaining pools by the same rule. Rows lost to
+    flooring go one each to the pools with the largest remainders, so the total is
+    `min(max_rows, sum(available))` and a tiny cap never leaves every pool empty.
     """
     if max_rows < 0:
         raise ValueError(f"max_rows must be >= 0, got {max_rows}")
@@ -94,6 +96,10 @@ def allocate_rows(
         if not full:
             for n in active:
                 out[n] = int(share[n])
+            leftover = remaining - sum(out[n] for n in active)
+            by_remainder = sorted(active, key=lambda n: (out[n] - share[n], n))
+            for n in by_remainder[:leftover]:
+                out[n] += 1
             break
         for n in full:
             out[n] = int(available[n])

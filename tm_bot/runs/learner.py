@@ -358,7 +358,7 @@ class AlphaZeroLearner:
             stats.margin_loss = _mean_of(stats.per_step, "margin_loss")
             stats.kl_anchor = _mean_of(stats.per_step, "kl_anchor")
             stats.human_aux_loss = _mean_of(stats.per_step, "human_aux_loss")
-            if stats.human_aux_loss is not None:
+            if self.human_aux is not None:
                 stats.human_aux_weight = human_weight
             stats.total_loss = _mean_of(stats.per_step, "total_loss")
         self.model.eval()

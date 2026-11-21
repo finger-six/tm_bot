@@ -185,7 +185,7 @@ def test_learner_reads_lambda_from_the_training_clock(hours: float, expected: fl
 
 def test_run_config_records_the_v2_learner_defaults() -> None:
     cfg = RunConfig("x").to_dict()
-    assert cfg["human_aux_max_rows"] == 2_000_000
+    assert cfg["human_aux_max_rows"] == 1_000_000
     assert cfg["kl_anchor_beta"] == pytest.approx(0.05)
     assert cfg["w_margin"] == pytest.approx(0.3)
     assert cfg["w_value"] == pytest.approx(1.0) and cfg["w_policy"] == pytest.approx(1.0)
@@ -196,17 +196,19 @@ def test_run_config_records_the_v2_learner_defaults() -> None:
 def test_allocate_rows_is_proportional_to_draws_capped_by_pool_size() -> None:
     out = allocate_rows({"a": 1_000, "b": 30, "c": 1_000, "empty": 0}, {"a": 2, "b": 1, "c": 1, "empty": 5}, 400)
     assert out["b"] == 30  # its 100-row share exceeds the pool: taken whole
-    assert out["a"] == 246 and out["c"] == 123  # the remaining 370 split 2:1 (floored)
+    assert out["a"] == 247 and out["c"] == 123  # the remaining 370 split 2:1, flooring remainder to a
     assert out["empty"] == 0
-    assert sum(out.values()) <= 400
+    assert sum(out.values()) == 400
+    # A cap below one row per pool still fills the cap instead of flooring every pool to 0.
+    tiny = allocate_rows({"a": 1_000, "b": 1_000, "c": 1_000}, {"a": 512, "b": 64, "c": 64}, 2)
+    assert sum(tiny.values()) == 2 and tiny["a"] >= 1
     assert allocate_rows({"a": 5, "b": 5}, {"a": 1, "b": 1}, 100) == {"a": 5, "b": 5}
 
 
 @pytest.mark.parametrize("cap", [10, 25])
 def test_resident_human_sample_honours_the_row_cap(golden_data: WarmstartData, cap: int) -> None:  # noqa: F811
     sample = build_human_aux_sample(golden_data, max_rows=cap, rng=np.random.default_rng(0), weights=TINY_WARMSTART)
-    assert 0 < sample.num_rows <= cap
-    assert sample.num_rows >= cap - len(sample.pools)  # only flooring is lost
+    assert sample.num_rows == cap
     # Cached rows are resident copies holding exactly the sampled rows, all train split.
     by_cache: dict[str, int] = {}
     for pool, rows in sample.pools.items():
