@@ -10,33 +10,32 @@ DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
 DEFAULT_BOOTSTRAP_SEED = 0
 
 
-def paired_bootstrap_ci(
-    pair_totals: Sequence[tuple[float, int]],
+def cluster_bootstrap_mean_ci(
+    cluster_totals: Sequence[tuple[float, int]],
     *,
     n_resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES,
     confidence: float = 0.95,
     rng_seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> tuple[float | None, tuple[float, float] | None]:
-    """Compute mean win rate and paired bootstrap percentile CI over `(points, completed_count)` pairs.
+    """Per-game mean and cluster bootstrap percentile CI over `(value_sum, count)` clusters.
 
-    Each element of `pair_totals` is one resampling cluster of seat-swapped games (a whole seed
-    for the overall rate, a `(seed_key, map)` pair for per-map rates): `points` is the sum of
-    Agent A scores (`win=1.0, tie=0.5, loss=0.0`), and `completed_count` is the number of
-    completed games in the cluster. Clusters with `completed_count <= 0` are ignored.
+    Each element is one resampling cluster: `value_sum` is the sum of a per-game value over
+    the cluster's `count` games. Clusters with `count <= 0` are ignored. The CI is not
+    clipped, so it also serves signed quantities such as a paired score difference.
     """
     if n_resamples < 1:
         raise ValueError(f"n_resamples must be >= 1, got {n_resamples}")
     if not (0.0 < confidence < 1.0):
         raise ValueError(f"confidence must be in (0, 1), got {confidence}")
 
-    valid = [(float(pts), int(cnt)) for pts, cnt in pair_totals if cnt > 0]
+    valid = [(float(pts), int(cnt)) for pts, cnt in cluster_totals if cnt > 0]
     if not valid:
         return None, None
 
     points = np.array([pts for pts, _ in valid], dtype=np.float64)
     counts = np.array([cnt for _, cnt in valid], dtype=np.float64)
     total_count = float(counts.sum())
-    mean_wr = float(points.sum() / total_count)
+    mean = float(points.sum() / total_count)
 
     m = len(valid)
     rng = np.random.default_rng(rng_seed)
@@ -53,9 +52,29 @@ def paired_bootstrap_ci(
 
     alpha = (1.0 - confidence) / 2.0
     low, high = np.quantile(boot_means, [alpha, 1.0 - alpha])
-    ci_low = float(np.clip(low, 0.0, 1.0))
-    ci_high = float(np.clip(high, 0.0, 1.0))
-    return mean_wr, (ci_low, ci_high)
+    return mean, (float(low), float(high))
+
+
+def paired_bootstrap_ci(
+    pair_totals: Sequence[tuple[float, int]],
+    *,
+    n_resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES,
+    confidence: float = 0.95,
+    rng_seed: int = DEFAULT_BOOTSTRAP_SEED,
+) -> tuple[float | None, tuple[float, float] | None]:
+    """Compute mean win rate and paired bootstrap percentile CI over `(points, completed_count)` pairs.
+
+    Each element of `pair_totals` is one resampling cluster of seat-swapped games (a whole seed
+    for the overall rate, a `(seed_key, map)` pair for per-map rates): `points` is the sum of
+    Agent A scores (`win=1.0, tie=0.5, loss=0.0`), and `completed_count` is the number of
+    completed games in the cluster. Clusters with `completed_count <= 0` are ignored.
+    """
+    mean_wr, ci = cluster_bootstrap_mean_ci(
+        pair_totals, n_resamples=n_resamples, confidence=confidence, rng_seed=rng_seed
+    )
+    if ci is None:
+        return mean_wr, None
+    return mean_wr, (float(np.clip(ci[0], 0.0, 1.0)), float(np.clip(ci[1], 0.0, 1.0)))
 
 
 def percentile_ms(samples: Sequence[float], pct: float) -> float | None:
