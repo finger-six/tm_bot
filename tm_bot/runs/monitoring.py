@@ -71,6 +71,11 @@ class CycleMetrics:
     policy_loss: float | None = None
     value_loss: float | None = None
     total_loss: float | None = None
+    # v2 learner terms (#49): unweighted cycle means, and λ_h at the cycle's update.
+    margin_loss: float | None = None
+    kl_anchor: float | None = None
+    human_aux_loss: float | None = None
+    human_aux_weight: float | None = None
     policy_entropy: float | None = None
     target_policy_entropy: float | None = None
     value_calibration: dict[str, Any] = field(default_factory=dict)

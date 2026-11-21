@@ -14,6 +14,15 @@ from tm_bot.agents.play_rules import (
     SELFPLAY_RULES_VERSION,
     PlayTemperatureSchedule,
 )
+from tm_bot.models.anchor_loss import (
+    HUMAN_AUX_DECAY_FROM_H,
+    HUMAN_AUX_DECAY_TO_H,
+    HUMAN_AUX_MAX_ROWS,
+    HUMAN_AUX_WEIGHT_END,
+    HUMAN_AUX_WEIGHT_START,
+    KL_ANCHOR_BETA,
+    HumanAuxSchedule,
+)
 from tm_bot.search.config import (
     FALLBACK_NUM_SIMULATIONS,
     V2_NUM_SIMULATIONS,
@@ -103,6 +112,23 @@ class RunConfig:
     w_policy: float = 1.0
     w_value: float = 1.0
     use_amp: bool = True
+    # v2 main learner loss (#39 §1c-1d, §3; #49):
+    # CE(policy, visits) + w_value·BCE(win_logit, o) + w_margin·SmoothL1(vp_margin_pred, m)
+    # + λ_h·L_human + kl_anchor_beta·KL(π_θ ‖ π_anchor). λ_h runs on the training clock:
+    # `human_aux_weight_start` through hour `human_aux_decay_from_h`, linear to
+    # `human_aux_weight_end` at `human_aux_decay_to_h`. L_human samples a resident set of
+    # at most `human_aux_max_rows` train rows from `human_aux_data_dir` (default
+    # `data/warmstart`) and its encoded cache (`human_aux_cache_dir`, default
+    # `<data_dir>_cache`). A `random_init` run (pure self-play) drops both anchor terms.
+    w_margin: float = 0.3
+    kl_anchor_beta: float = KL_ANCHOR_BETA
+    human_aux_weight_start: float = HUMAN_AUX_WEIGHT_START
+    human_aux_weight_end: float = HUMAN_AUX_WEIGHT_END
+    human_aux_decay_from_h: float = HUMAN_AUX_DECAY_FROM_H
+    human_aux_decay_to_h: float = HUMAN_AUX_DECAY_TO_H
+    human_aux_max_rows: int = HUMAN_AUX_MAX_ROWS
+    human_aux_data_dir: str | None = None
+    human_aux_cache_dir: str | None = None
     seed: int = 42
 
     # PPO hyperparameters for the comparator agent kind (ignored by the main agent).
@@ -215,6 +241,14 @@ class RunConfig:
             raise ValueError("learner_batch_size must be >= 1")
         if self.buffer_capacity < 1:
             raise ValueError("buffer_capacity must be >= 1")
+        if self.w_margin < 0.0 or self.kl_anchor_beta < 0.0:
+            raise ValueError(
+                f"w_margin and kl_anchor_beta must be >= 0, got {self.w_margin}, "
+                f"{self.kl_anchor_beta}"
+            )
+        if self.human_aux_max_rows < 1:
+            raise ValueError(f"human_aux_max_rows must be >= 1, got {self.human_aux_max_rows}")
+        self.human_aux_schedule  # validates the schedule
         if self.keep_last_checkpoints < 1:
             raise ValueError("keep_last_checkpoints must be >= 1")
         if self.checkpoint_interval_s <= 0.0:
@@ -250,6 +284,16 @@ class RunConfig:
     @property
     def run_dir(self) -> Path:
         return Path(self.output_root) / self.run_name
+
+    @property
+    def human_aux_schedule(self) -> HumanAuxSchedule:
+        """λ_h over training hours for the human-data auxiliary loss (#39 §1d)."""
+        return HumanAuxSchedule(
+            start=self.human_aux_weight_start,
+            end=self.human_aux_weight_end,
+            decay_from_h=self.human_aux_decay_from_h,
+            decay_to_h=self.human_aux_decay_to_h,
+        )
 
     @property
     def play_temperature(self) -> PlayTemperatureSchedule:

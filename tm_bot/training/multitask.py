@@ -266,6 +266,18 @@ def compute_multitask_step_losses(
     return total, stats
 
 
+def multitask_loss_groups(
+    model: nn.Module, weights: WarmstartConfig | None, batches: Mapping[str, Any]
+) -> Iterator[tuple[dict[str, float], torch.Tensor]]:
+    """`(stats, weighted loss)` per independent forward group of `compute_multitask_step_losses`.
+
+    Back-propagating each group as it is yielded gives the summed loss's gradient with one
+    group's activations alive at a time (as `train_one_step` does).
+    """
+    _check_batch_keys(batches)
+    return _loss_groups(model, weights or WarmstartConfig(), batches)
+
+
 def _to_device(value: Any, device: torch.device) -> Any:
     if isinstance(value, Mapping):
         return {k: v.to(device, non_blocking=True) for k, v in value.items()}

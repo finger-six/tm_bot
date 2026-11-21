@@ -278,7 +278,21 @@ class SelfPlayRunner:
                 config.warmstart_checkpoint, map_location=device
             )
         model.eval()
-        learner = AlphaZeroLearner(config, model, device=device)
+        human_aux = None
+        if not config.random_init:
+            # A random-init run is pure self-play, without the warm-start anchors (#39 §4).
+            from tm_bot.training.human_aux import HumanAuxLoss, load_human_aux_sample
+
+            human_aux = HumanAuxLoss(
+                load_human_aux_sample(
+                    config.human_aux_data_dir,
+                    config.human_aux_cache_dir,
+                    max_rows=config.human_aux_max_rows,
+                    seed=config.seed,
+                ),
+                rng=np.random.default_rng(config.seed + 1),
+            )
+        learner = AlphaZeroLearner(config, model, device=device, human_aux=human_aux)
         engine = SelfPlayEngine(
             config,
             model=model,
@@ -301,6 +315,7 @@ class SelfPlayRunner:
             clock=time.monotonic,
         )
         runner.optimizer = learner.optimizer
+        learner.training_clock = runner.training_s
 
         def evaluator(candidate: Path, opponent: Path | None, *, num_games: int) -> DevResult:
             candidate_factory = dev_agent_factory(
@@ -675,6 +690,10 @@ class SelfPlayRunner:
             policy_loss=None if learner_stats is None else learner_stats.policy_loss,
             value_loss=None if learner_stats is None else learner_stats.value_loss,
             total_loss=None if learner_stats is None else learner_stats.total_loss,
+            margin_loss=None if learner_stats is None else learner_stats.margin_loss,
+            kl_anchor=None if learner_stats is None else learner_stats.kl_anchor,
+            human_aux_loss=None if learner_stats is None else learner_stats.human_aux_loss,
+            human_aux_weight=None if learner_stats is None else learner_stats.human_aux_weight,
             policy_entropy=probe_entropy,
             target_policy_entropy=batch.entropy,
             value_calibration=calibration or {},

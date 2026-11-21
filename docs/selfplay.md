@@ -137,12 +137,51 @@ Each row also carries the v2 fields (`DecisionSample` in
   None when the run has no anchor.
 
 `AlphaZeroLearner` ([`learner.py`](../tm_bot/runs/learner.py)) samples decisions
-from the replay buffer and runs a masked policy cross-entropy plus value BCE.
+from the replay buffer (v1 buffer, batch, LR and updates per cycle) and minimises
+the v2 loss (#39 §1c-1d, §3; #49):
+
+```
+CE(policy, visits) + 1.0·BCE(win_logit, o) + 0.3·SmoothL1(vp_margin_pred, m)
+  + λ_h·L_human + 0.05·KL(π_θ ‖ π_anchor)
+```
+
+- `win_logit` trains on the terminal outcome alone (target `(o + 1) / 2`, so
+  0 / 0.5 / 1); `vp_margin_pred` on the row's `margin_target` m with
+  SmoothL1 (β 0.2).
+- **KL anchor**: mean KL from the learner's raw (τ = 1) policy to the recorded
+  `anchor_logits` over each row's legal candidates; rows without anchor logits
+  are left out. β = `kl_anchor_beta` = 0.05, constant.
+- **Human-data auxiliary loss** `L_human`: the full #38 multi-task warm-start
+  loss (every policy head, win and margin heads, `WarmstartConfig` weights and
+  per-task minibatches, ~3.3k rows) on one train-split human minibatch per
+  update, back-propagated group by group like the warm start. λ_h is 0.5 for
+  training hours 0-2, linear to 0.1 at hour 8, then 0.1
+  (`RunConfig.human_aux_schedule`). Hours are the run's training clock
+  (`SelfPlayRunner.training_s`: wall clock minus in-run dev evaluation,
+  continued across `--resume`), read once per cycle before its updates.
+- **Resident human sample** ([`human_aux.py`](../tm_bot/training/human_aux.py)):
+  at run start the learner loads `data/warmstart` and its encoded cache, draws
+  at most `human_aux_max_rows` = 2,000,000 train rows once (split across the
+  sampler's pools in proportion to their per-step draws; a smaller pool is taken
+  whole), copies the chosen cache rows into RAM and releases the memory maps. At
+  ~1.6 KB per cached row that is ~3.0 GiB at 2M rows (plus the small generation-1
+  setup tables), well under the 20.0 GiB learner guard, which counts mapped pages
+  too. Human rows only, never `b1-v2` (#36).
+- The shared pieces (`HumanAuxSchedule`, `pad_anchor_logits`, `kl_to_anchor` in
+  [`anchor_loss.py`](../tm_bot/models/anchor_loss.py); `load_human_aux_sample`,
+  `HumanAuxLoss` in `human_aux.py`) are for the comparator's PPO learner too (#50).
+- A `--random-init` run is pure self-play: it drops both anchor terms (no human
+  sample is loaded, β = 0), per #39 §4.
+
+Each cycle record logs every term separately: `policy_loss`, `value_loss`,
+`margin_loss`, `kl_anchor`, `human_aux_loss` (unweighted cycle means),
+`human_aux_weight` (λ_h) and `total_loss` (the weighted sum).
+
 Value-head calibration (Brier, ECE, reliability bins, win/loss/tie counts) is
 measured by `compute_value_calibration` on each cycle's newly finished games
 **before** they enter the buffer and before the optimizer step, with frozen
 weights, so the cycle record is out-of-sample for that update. Training records
-carry only training-batch losses (policy/value/total means); calibration is not
+carry only training-batch losses (the terms above); calibration is not
 mixed into them. Every parameter tensor is checked for finiteness after each
 optimizer step; a NaN/Inf loss or parameter stops the cycle and rolls the model
 and optimizer back to the last periodic checkpoint (a failed rollback is

@@ -44,3 +44,6 @@ Initial training from recorded human Terraforming Mars games before the agent im
 **Warm-start anchor**:
 The frozen human-data warm-start checkpoint an agent started from. Self-play keeps the agent close to it, uses it as an opponent, and measures regression against it.
 _Avoid_: Initial checkpoint, reference model.
+
+**Human-data auxiliary loss**:
+The human-data warm-start loss on a bounded sample of human training rows, added to every self-play update with a weight that decays over training time, so the agent keeps what it learned from human games. With a KL penalty toward the warm-start anchor, it is how self-play stays close to the anchor.
