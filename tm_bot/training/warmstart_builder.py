@@ -729,11 +729,23 @@ def _action_observation(
     cards_by_name: Mapping[str, CardSpec] | None,
     templates: Mapping[str, dict[str, Any]] | None,
 ) -> ActorObservation:
-    obs = build_state_observation(row, phase="action", cards_by_name=cards_by_name, templates=templates)
+    """Snapshot observation plus the row's public action-phase state (`turn_action`, `opp_passed`,
+    both seats' used blue-card actions). `availableBlueCardActionCount` is the reconstructed unused
+    blue-action card count (the engine's per-card `canAct` checks are not reconstructed)."""
+    specs = cards_by_name if cards_by_name is not None else load_card_data()
+    obs = build_state_observation(row, phase="action", cards_by_name=specs, templates=templates)
     actor = obs["actor"]
     obs["public"]["activePlayer"] = actor
+    me_used = sorted(str(c) for c in row["me_used_actions"])
     for p in obs["public"]["players"]:
         p["isActive"] = p["seat"] == actor
+        if p["seat"] == actor:
+            p["actionsTakenThisRound"] = int(row["turn_action"])
+            p["usedActions"] = me_used
+            p["availableBlueCardActionCount"] = len(actionmenu.unused_action_cards(row, specs, me_used))
+        else:
+            p["passed"] = bool(row["opp_passed"])
+            p["usedActions"] = sorted(str(c) for c in row["opp_used_actions"])
     return obs
 
 
@@ -748,6 +760,8 @@ def build_branch_choice(
     Candidates follow `row["menu"]` (engine push order), so the target index is
     `row["menu"].index(row["chosen"])`. Ids are the adapter's `branch:<i>`, `i` being the option's
     index in the engine's pushed list (the menu plus the always-pushed `Standard projects` and `Pass`).
+    The ids are exact only when the reconstructed menu equals the engine's: a claimable milestone the
+    snapshot can't prove (e.g. Polar Explorer) or a blue card whose `canAct` fails shifts later indices.
     """
     obs = _action_observation(row, cards_by_name, templates)
     menu = [str(k) for k in row["menu"]]

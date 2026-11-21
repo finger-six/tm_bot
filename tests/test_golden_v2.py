@@ -317,6 +317,10 @@ def test_golden_action_rows_use_pre_move_state(registry: CardRegistry) -> None:
     assert by[("branch", 56)].snapshot["me_hand"] == ["Search For Life", "Strip Mine", "Trees"]
     assert by[("branch", 57)].snapshot["me_hand"] == ["Strip Mine", "Trees"]  # Search For Life was played at 56
     assert by[("branch", 52)].payload["turn_action"] == 1 and by[("branch", 56)].payload["turn_action"] == 0
+    # Once the opponent has passed, the engine's `actionsTakenThisRound` keeps counting (no 2-action wrap).
+    assert [by[("branch", m)].payload["turn_action"] for m in (59, 60, 61, 63)] == [0, 1, 2, 3]
+    assert by[("branch", 61)].payload["opp_passed"] and not by[("branch", 52)].payload["opp_passed"]
+    assert by[("card_action", 57)].payload["me_used_actions"] == by[("branch", 57)].payload["me_used_actions"]
     assert res.counts_by_player[A]["gate5:bundled_pass_split"] == 1
     assert res.counts_by_player[A]["gate5:cancel"] == 1  # move 29: never a decision
     assert not [d for d in res.decisions if d.move_number == 29]

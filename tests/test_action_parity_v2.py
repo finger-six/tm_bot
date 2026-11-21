@@ -79,14 +79,16 @@ def live_prompts() -> dict[str, tuple[Choice, ActorObservation]]:
     return seen
 
 
-def _row_from_obs(obs: ActorObservation, *, menu: list[str], turn_action: int = 0) -> dict[str, Any]:
+def _row_from_obs(obs: ActorObservation, *, menu: list[str]) -> dict[str, Any]:
     """The live observation written in the warm-start snapshot column layout (`tm_bot.data.logstate`)."""
     pub, actor = obs["public"], obs["actor"]
     gp = pub["globalParameters"]
+    me, opp = pub["players"][actor], pub["players"][1 - actor]
     row: dict[str, Any] = {
         "map": pub["map"], "seat": actor, "generation": pub["generation"], "phase": "action",
         "temperature": gp["temperature"], "oxygen": gp["oxygenLevel"], "oceans": gp["oceans"],
-        "menu": menu, "turn_action": turn_action,
+        "menu": menu, "turn_action": me["actionsTakenThisRound"], "opp_passed": opp["passed"],
+        "me_used_actions": list(me["usedActions"]), "opp_used_actions": list(opp["usedActions"]),
     }
     for prefix, p in (("me", pub["players"][actor]), ("opp", pub["players"][1 - actor])):
         row[f"{prefix}_tr"] = p["terraformRating"]
@@ -124,6 +126,13 @@ def _assert_parity(live: Choice, live_obs: ActorObservation, built: Choice, buil
     # Every candidate feature except the hand-cost pair (2, 3), which reads the observation's hand.
     cols = [i for i in range(enc_live.cand_feats.shape[1]) if i not in (2, 3)]
     np.testing.assert_array_equal(enc_built.cand_feats[:, cols], enc_live.cand_feats[:, cols])
+    # The public action-phase state the warm row carries matches the live observation.
+    actor = live_obs["actor"]
+    lp, bp = live_obs["public"]["players"], built_obs["public"]["players"]
+    for key in ("actionsTakenThisRound", "availableBlueCardActionCount", "passed", "usedActions"):
+        assert bp[actor][key] == lp[actor][key], key
+    for key in ("passed", "usedActions"):
+        assert bp[1 - actor][key] == lp[1 - actor][key], key
 
 
 def test_root_branch_choice_matches_live_adapter(live_prompts, vocab: CardVocab) -> None:
@@ -133,8 +142,8 @@ def test_root_branch_choice_matches_live_adapter(live_prompts, vocab: CardVocab)
         probe = _row_from_obs(obs, menu=[key])
         label_to_key[branch_label(key, probe)] = key
     menu = [label_to_key[c.label] for c in live.candidates]
-    turn = 0 if live.prompt == "Take your first action" else 1
-    row = _row_from_obs(obs, menu=menu, turn_action=turn)
+    row = _row_from_obs(obs, menu=menu)
+    turn = row["turn_action"]
     built_obs, built = build_branch_choice(row)
     _assert_parity(live, obs, built, built_obs, vocab)
     # The reconstructed menu for the same state is the live legal set.

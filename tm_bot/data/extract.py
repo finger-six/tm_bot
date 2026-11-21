@@ -182,6 +182,10 @@ def _action_schema(*extra: tuple[str, pa.DataType]) -> pa.Schema:
             ("move_number", pa.int32()),
             ("menu", _STR_LIST),
             ("chosen", pa.string()),
+            ("turn_action", pa.int32()),
+            ("opp_passed", pa.bool_()),
+            ("me_used_actions", _STR_LIST),
+            ("opp_used_actions", _STR_LIST),
             *extra,
             *_SPLIT_FIELDS,
             *_SNAPSHOT_FIELDS,
@@ -191,7 +195,7 @@ def _action_schema(*extra: tuple[str, pa.DataType]) -> pa.Schema:
 
 # Decision kind (`tm_bot.data.logstate.ACTION_TASKS`) -> table name and schema.
 _ACTION_TABLES: dict[str, tuple[str, pa.Schema]] = {
-    "branch": ("action_branches", _action_schema(("turn_action", pa.int32()))),
+    "branch": ("action_branches", _action_schema()),
     "project_card": ("action_project_cards", _action_schema()),
     "card_action": ("action_card_actions", _action_schema()),
     "standard_project": ("action_standard_projects", _action_schema()),

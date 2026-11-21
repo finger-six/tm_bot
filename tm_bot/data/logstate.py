@@ -434,11 +434,15 @@ def reconstruct_log_state(
         opp = next(s for s in seats.values() if s.pid != st.pid)
         snap = snapshot(st, gs_prev, "action")
         exact = st.hand_lost_at is None
+        # Public action-phase state the live observation carries (`actionsTakenThisRound`, `passed`,
+        # `usedActions`); identical at the root and at its nested prompt.
+        ctx = {"turn_action": st.turn_actions, "opp_passed": opp.passed,
+               "me_used_actions": sorted(st.used_actions), "opp_used_actions": sorted(opp.used_actions)}
 
         def finish(kind: str, payload: dict[str, Any], drop: str | None) -> None:
             if drop is not None:
                 result.count(st.pid, f"{kind}:{drop}")
-            emit(kind, st, move, gs_prev, "action", payload, drop, snap=snap)
+            emit(kind, st, move, gs_prev, "action", {**payload, **ctx}, drop, snap=snap)
 
         chosen = actionmenu.ROOT_TO_BRANCH[root]
         menu: list[str] = []
@@ -459,7 +463,7 @@ def reconstruct_log_state(
                 drop = f"menu_miss:{chosen}"
             elif len(menu) < 2:
                 drop = "single_candidate"
-        finish("branch", {"menu": menu, "chosen": chosen, "turn_action": st.turn_actions}, drop)
+        finish("branch", {"menu": menu, "chosen": chosen}, drop)
 
         if root == "play_card":
             menu, drop = [], None
@@ -475,7 +479,7 @@ def reconstruct_log_state(
                 elif len(menu) < 2:
                     drop = "single_candidate"
                 if drop is None and unchecked:
-                    result.count(st.pid, "project_card:menu_has_unchecked_requirement")
+                    result.count(st.pid, "info:project_card_menu_has_unchecked_requirement")
             finish("project_card", {"menu": menu, "chosen": detail}, drop)
         elif root == "card_action":
             menu, drop = [], None
@@ -512,6 +516,9 @@ def reconstruct_log_state(
         if root is None and act == "other" and any(who is st and rest.startswith("adds ") for who, rest in parts):
             result.count(st.pid, "excluded:other_card")
 
+    def opp_has_passed(st: _Seat) -> bool:
+        return any(s.passed for s in seats.values() if s is not st)
+
     def after_root(st: _Seat, root: str, detail: Any) -> None:
         """Advance the generation's turn state once a root decision is applied."""
         for other in seats.values():
@@ -522,7 +529,11 @@ def reconstruct_log_state(
         elif root == "pass":
             st.passed, st.turn_actions, st.last_played = True, 0, None
         else:
-            st.turn_actions = (st.turn_actions + 1) % 2
+            # Engine `takeAction`: the turn ends after 2 actions only while the opponent is still in the
+            # generation; once it has passed, `actionsTakenThisRound` keeps counting up.
+            st.turn_actions += 1
+            if st.turn_actions >= 2 and not opp_has_passed(st):
+                st.turn_actions = 0
         if root == "card_action":
             st.used_actions.add(detail)
 
