@@ -23,9 +23,11 @@ decision; every field is overridable from the CLI.
 | --- | --- | --- |
 | Workers | 16 | Node adapter workers; one game per active worker |
 | Wall-clock budget | 24 h | Hard stop when reached (checked between cycles and inside the self-play batch loop) |
-| Simulations / searched decision | 64 | `--sims` |
+| Simulations / searched decision | 16 (8 with `--search-fallback`) | `--sims`; never below 8 x 4 (#39) |
 | Worlds (K) | 4 | `--worlds` |
-| Opponents | 60% latest / 30% last-10 pool / 10% B1 | `OpponentSampler` |
+| Play temperature | τ(g): 1.0 to g4, linear to 0.3 at g10, 0.3 after | every learned seat, action phase only |
+| Utility | U = o + 0.15·m | search leaves and terminals |
+| Opponents | 50% latest / 25% last-10 pool / 10% warm-start anchor / 15% B1 | `OpponentSampler` |
 | Replay buffer | last 200,000 decisions | `ReplayBuffer` |
 | Learner | AdamW, lr 5e-4, wd 2e-4, grad clip 1.0, batch 256 | same optimizer settings as warm start |
 | Checkpoints | every 30 min | monotonic `ckpt-XXXXXXXXX/` save counter, plus `best/` |
@@ -62,14 +64,41 @@ none of these are committed.
 ## Self-play
 
 Each game is one `train-*` seed and one supported map. The training seat is
-alternated; the other seat is an opponent sampled 60% from the latest network,
-30% from the last 10 frozen checkpoints, and 10% `b1` (the current `B1_VERSION`). With an empty pool (a
-fresh run) the pool share falls back to the latest network.
+alternated; the other seat is an opponent sampled 50% from the latest network,
+25% from the last 10 frozen checkpoints, 10% from the frozen warm-start anchor,
+and 15% `b1` (the current `B1_VERSION`). With an empty pool (a fresh run) the
+pool share falls back to the latest network.
+
+### v2 self-play rules (#48)
+
+The rules come from #39 (last comment, sections 1-2) and are shared by the main
+agent and the comparator. `RunConfig.selfplay_rules` is `"v2"`, and loading a
+run config without it raises, so a v1 run cannot be resumed under v2 code.
+
+- **Play temperature τ(g)** (`tm_bot/agents/play_rules.py`,
+  `PlayTemperatureSchedule`): 1.0 through generation 4, linear to 0.3 at
+  generation 10, 0.3 after, never 0. Every learned seat (learner, `latest`,
+  pool, anchor, and the `dev-*`/`eval-*` agents) samples action-phase decisions
+  at τ(g). Outside the action phase the main agent takes the most-visited root
+  or the policy argmax, and the comparator samples at τ 1. No learned seat
+  plays greedily in the action phase.
+- **Utility** U = o + 0.15·m, with o ∈ {+1, 0, -1} and
+  m = clip(my_vp - opp_vp, -60, 60) / 50, so any win outranks any loss. Search
+  leaves use (2p - 1) + 0.15·m̂ from the value and margin heads, and terminals
+  use U from the final scores. The value target stays o, so P(win) is
+  outcome-only.
+- **Search**: 16 simulations x K = 4. `--search-fallback` lowers this to
+  8 x 4 by setting `num_simulations` to 8.
+- **Anchor**: the frozen warm-start checkpoint (`warmstart_checkpoint`, also
+  for random-init runs). It plays as an opponent under the run's rules and
+  scores every recorded decision (see Targets).
+- **Mirror games** (opponent `latest`) record both seats. All other games
+  record only the training seat.
 
 `RecordingSearchAgent` ([`recorder.py`](../tm_bot/runs/recorder.py)) wraps both
 seats and records the ordered `(seat, candidate)` action history; it records
 the encoded observation/choice and candidate distribution **only for the
-training seat**. Encoding happens at record time, so a cycle does not retain
+training seat** (both seats in mirror games). Encoding happens at record time, so a cycle does not retain
 the raw decoded `ActorObservation` dicts and `Choice` objects (which cost
 ~423 KB per decision instead of ~10 KB encoded).
 The runner still passes only `(observation, choice[, sampler])` to
@@ -89,6 +118,20 @@ checks the encoding is seat-scoped).
 - **Value**: terminal utility from the acting seat's perspective: win `+1`,
   loss `-1`, exact tie `0`. The value head predicts win probability, so the
   loss uses `(u + 1) / 2` as the target.
+
+Each row also carries the v2 fields (`DecisionSample` in
+[`buffer.py`](../tm_bot/runs/buffer.py) and `PPOSample` in
+[`ppo.py`](../tm_bot/comparator/ppo.py)), which the learners consume
+(#49 main, #50 comparator):
+
+- `play_temperature`: the τ the seat sampled this decision at. It is 0.0 for an
+  argmax decision and None when the agent reported no τ (forced decisions).
+- `margin_target`: m for the row's seat at game end.
+- `anchor_logits`: float32[n] raw (τ = 1) policy logits of the frozen anchor
+  on the same encoded observation and choice. Index i is candidate i, in the
+  same order as `policy_target` and the action index. The values are computed
+  once per cycle in `assemble_batch` (`tm_bot/runs/anchor.py`), and they are
+  None when the run has no anchor.
 
 `AlphaZeroLearner` ([`learner.py`](../tm_bot/runs/learner.py)) samples decisions
 from the replay buffer and runs a masked policy cross-entropy plus value BCE.

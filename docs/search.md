@@ -38,9 +38,11 @@ For a searched decision the agent:
    action. Nested sub-choices inside the simulation are played greedily by the policy
    head (at most `max_nested_steps`) until the next searched decision or the end of the
    game. The leaf is scored by the value head (or the exact terminal result), from the
-   root actor's perspective.
+   root actor's perspective. Under the v2 rules the leaf is (2p - 1) + 0.15·m̂ and a
+   terminal is U = o + 0.15·m (see below).
 4. Picks the root action: most visits at temperature 0, otherwise sampled from
-   visits^(1/T). `action_temperature` overrides `temperature` in the action phase.
+   visits^(1/T). In the action phase T is τ(g) (`play_temperature`), or the flat v1
+   `action_temperature` when no schedule is set.
 
 Neural evaluation is batched on the GPU across all concurrent games: the runner groups
 searched decisions from every active game into one `act_batch_with_samplers` call, and
@@ -75,7 +77,27 @@ policy-head choice for that decision instead of failing the game (see
 ## Configuration
 
 `SearchConfig` fields: `num_simulations`, `num_worlds` (K), `c_puct`, `fpu_value`,
-`temperature`, `action_temperature`, `wave_size`, `max_nested_steps`.
+`temperature`, `action_temperature`, `wave_size`, `max_nested_steps`,
+`play_temperature`, `margin_weight`.
+
+### v2 rules (#48)
+
+`SearchConfig()` defaults to the #39 rules for self-play, `dev-*` and `eval-*`:
+16 simulations x K = 4, τ(g) at action-phase roots and action-phase policy-head
+picks (`play_temperature`: 1.0 through generation 4, linear to 0.3 at generation
+10, 0.3 after), and utility weight `margin_weight = 0.15`.
+`SearchConfig.v2(fallback=True)` is the 8 x 4 fallback. Non-action roots keep
+`temperature` (0 = most visits). The agent records the τ it used in
+`last_decision_temperature`, and its version tag gains the τ spec and `-u0.15`
+(for example `ismcts-s16-k4-tau1g4-0.3g10-u0.15-warmstart-v3`).
+
+`make_warmstart_search_agent` plays v2 by default, at 16 x 4, or 8 x 4 with
+`search_fallback=True` or `TM_SEARCH_FALLBACK=1`. Passing an
+`action_temperature` (argument or `TM_SEARCH_ACTION_TEMP`) without
+`play_temperature` selects the v1 `"flat"` rules, so the v1 spec strings below
+reproduce unchanged. The #47 gate pins `"flat"`.
+
+### v1 evaluated setting
 
 The evaluated setting, version tag `ismcts-s8-k4-warmstart-v2`, is the factory
 `tm_bot.search:make_warmstart_search_agent` with its defaults:

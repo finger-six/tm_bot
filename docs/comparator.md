@@ -66,15 +66,16 @@ start can be run with `--epochs 4` and no step cap.
 
 `ComparatorSelfPlayEngine` ([`selfplay.py`](../tm_bot/comparator/selfplay.py))
 plays `train-*` games through the same adapter runner and recorder as the main
-agent, with the same opponent sampling defaults: 60% latest comparator, 30%
-uniform from the last 10 frozen comparator checkpoints, 10% B1. The training
-seat samples from the masked policy at temperature 1 (`RunConfig` rejects any
-other `action_temperature` for comparator runs, because PPO recomputes the
-behavior log-probabilities at temperature 1, and the PPO update runs with
-dropout off so its ratio compares the same deterministic policy; dropout
-therefore acts only during the warm start); comparator opponents
-(latest and pool) still act greedily. That differs from evaluation play (see
-[Evaluation policy](#evaluation-policy)) and is a known limitation.
+agent, with the same v2 opponent mix (#48): 50% latest comparator, 25%
+uniform from the last 10 frozen comparator checkpoints, 10% the frozen
+comparator warm start (the anchor), 15% B1. Every comparator seat (learner,
+latest, pool, anchor) samples the masked policy at τ(g) in the action phase and
+at τ 1 elsewhere (see [selfplay.md](selfplay.md#v2-self-play-rules-48)). No seat
+plays greedily. Mirror games against latest record both seats, and GAE runs on
+each seat's trajectory separately. PPO still recomputes the behavior
+log-probabilities at τ 1, with dropout off so the ratio compares the same
+deterministic policy. Each row records the τ it was sampled at
+(`play_temperature`), so #50 can rescale the ratio.
 
 Each recorded training-seat decision stores the selected action, its behavior
 log-probability, the behavior value, and the terminal utility. GAE
@@ -119,9 +120,11 @@ improved from Brier 0.094 / ECE 0.233 (cycle 1) to Brier 0.053 / ECE 0.098
 ## Evaluation policy
 
 Dev evaluation, calibration and the eval-CLI factory play the comparator's
-**sampled** policy at temperature 1, seeded per seat
+**sampled** policy, seeded per seat
 (`comparator_eval_factory`, [`agent.py`](../tm_bot/comparator/agent.py)), not
-greedy argmax.
+greedy argmax. Since #48 they sample at τ(g) in the action phase and at τ 1
+elsewhere. Before #48 they sampled at a flat temperature 1, and the #47 gate
+still pins that (`make_comparator_agent(play_temperature="flat")`).
 
 Greedy play stalled the first in-run dev evaluation. Greedy comparator vs
 greedy warm start looped forever: on `tharsis` `dev-0000` the game reached
