@@ -20,7 +20,7 @@ class ResourceLimits:
     """Per-run resource ceilings from the local experiment budget (#10)."""
 
     workers_ram_gb: float = 6.0
-    learner_ram_gb: float = 10.0
+    learner_ram_gb: float = 20.0
     vram_gb: float = 12.0
     disk_gb: float = 50.0
 

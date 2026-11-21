@@ -10,7 +10,12 @@ from tm_bot.runs.errors import RunResourceError
 
 
 def current_rss_bytes() -> int | None:
-    """Return the current process resident set size in bytes, or None if unavailable."""
+    """Return the current process resident set size in bytes, or None if unavailable.
+
+    On Windows this is the process working set (`WorkingSetSize`), the same
+    quantity as Linux RSS. `PagefileUsage` is not used because it includes CUDA
+    driver commit that is not host RAM (#36).
+    """
     if sys.platform == "win32":
         try:
             from ctypes import wintypes
@@ -29,13 +34,23 @@ def current_rss_bytes() -> int | None:
                     ("PeakPagefileUsage", ctypes.c_size_t),
                 ]
 
+            # Explicit signatures: without them ctypes passes the pseudo-handle
+            # (-1) as a 32-bit int and the call fails on 64-bit Python (#35).
+            kernel32 = ctypes.WinDLL("kernel32")
+            get_current_process = kernel32.GetCurrentProcess
+            get_current_process.argtypes = []
+            get_current_process.restype = wintypes.HANDLE
+            get_memory_info = kernel32.K32GetProcessMemoryInfo
+            get_memory_info.argtypes = [
+                wintypes.HANDLE,
+                ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+                wintypes.DWORD,
+            ]
+            get_memory_info.restype = wintypes.BOOL
+
             counters = PROCESS_MEMORY_COUNTERS()
             counters.cb = ctypes.sizeof(counters)
-            handle = ctypes.windll.kernel32.GetCurrentProcess()
-            ok = ctypes.windll.psapi.GetProcessMemoryInfo(
-                handle, ctypes.byref(counters), counters.cb
-            )
-            if ok:
+            if get_memory_info(get_current_process(), ctypes.byref(counters), counters.cb):
                 return int(counters.WorkingSetSize)
         except Exception:
             return None

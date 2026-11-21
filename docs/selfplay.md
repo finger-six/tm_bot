@@ -37,12 +37,21 @@ decision; every field is overridable from the CLI.
 | Collapse (entropy) | <10% of the initial network's entropy within 2 h | |
 | Determinism spot check | every 1,000 self-play games | replay seed + action history |
 
-Resource limits live in `ResourceLimits`: learner + buffer <= 10 GB RSS and
+Resource limits live in `ResourceLimits`: learner + buffer <= 20.0 GiB RSS and
 VRAM <= 12 GB (checked every cycle; a breach stops the run as `resource_limit`),
 run outputs <= 50 GB under the gitignored `runs/` directory, and the configured
 worker count bounds engine workers (per-worker RSS is not measured separately;
 it is bounded by the 16-worker default). When CUDA is available, VRAM is also
 soft-capped with `torch.cuda.set_per_process_memory_fraction`.
+
+The RAM metric is the learner process's resident set: `/proc/self/statm` on
+Linux and the working set (`WorkingSetSize` from `K32GetProcessMemoryInfo`) on
+Windows. Windows `PagefileUsage` (private commit) is not used because it counts
+CUDA driver commit that is not host RAM. The 20.0 GiB default (#36) clears the
+v1 milestone peaks (17.2 GiB `milestone-main`, 16.2 GiB `milestone-pure`) while
+still stopping a leak before the 16 Node workers (<= 6 GiB) starve on the
+31.5 GiB host. Before #35 the Windows probe returned `None`, so v1 runs were
+never RAM-guarded.
 
 Run outputs (`runs/<run-name>/`): `config.json`, `state.json` + `state.pt`
 (resume), `checkpoints/`, `init/` (random-init runs only), `best/`,

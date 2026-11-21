@@ -1908,3 +1908,28 @@ def test_resume_with_missing_init_checkpoint_raises_resume_error(tmp_path: Path)
     )
     with pytest.raises(RunResumeError, match="init checkpoint"):
         resumed.run(resume=True, max_cycles=0)
+
+
+def test_current_rss_bytes_returns_positive_int() -> None:
+    from tm_bot.runs.resources import current_rss_bytes
+
+    rss = current_rss_bytes()
+    assert isinstance(rss, int)
+    # A Python process with numpy and torch loaded is well above 10 MiB.
+    assert rss > 10 * 1024**2
+
+
+def test_learner_ram_default_is_20_gib() -> None:
+    assert ResourceLimits().learner_ram_gb == 20.0
+
+
+def test_learner_memory_guard_fires_above_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tm_bot.runs import resources
+    from tm_bot.runs.errors import RunResourceError
+
+    limits = ResourceLimits(learner_ram_gb=1.0)
+    monkeypatch.setattr(resources, "current_rss_bytes", lambda: int(0.5 * 1024**3))
+    assert resources.check_learner_memory(limits)["rss_gb"] == pytest.approx(0.5)
+    monkeypatch.setattr(resources, "current_rss_bytes", lambda: int(1.5 * 1024**3))
+    with pytest.raises(RunResourceError, match="learner RAM"):
+        resources.check_learner_memory(limits)
