@@ -483,6 +483,9 @@ def test_comparator_run_trains_on_fresh_rollouts_and_keeps_none(tmp_path: Path) 
     assert summary.cycles == 3
     assert learner.rollout_sizes == [8, 8, 8]
     assert len(runner.buffer) == 0
+    # The comparator shares the v2 selection path; dev calibration stops it (#51).
+    assert runner.stopping.calibration_stops is True
+    assert [r.new_best_route for r in runner.logger.checkpoints][0] == "no_incumbent"
     state = torch.load(runner.manager.state_tensors_path, map_location="cpu", weights_only=False)
     assert "buffer" not in state
 
