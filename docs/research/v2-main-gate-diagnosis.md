@@ -2,7 +2,7 @@
 
 Measurement for [#57](https://github.com/finger-six/tm_bot/issues/57), feeding the fix tickets #58 (search/value) and #59 (space/payment).
 Checkpoint `runs/warmstart-v3/best`, gate report `docs/gate-warmstart-v3.md` (checks 25/26 FAIL: own VP 57.3 < 75, margin −55.1 < −35).
-Driver `tools/diag57.py` (this branch) plus the measurement hook `b296f96` (`ISMCTSAgent.last_root_stats`); no search default, gate threshold, encoder or training-data change.
+Driver `tools/diag57.py` (this branch) plus the measurement hook `2eb84b6` (`ISMCTSAgent.last_root_stats`); no search default, gate threshold, encoder or training-data change.
 
 ## Method
 
@@ -138,11 +138,11 @@ Raw policy's own deficit (−17.5) and its headroom above the −35 floor (17.5 
 
 ```
 # from the repo root, with data/ and runs/ present; W outside the repo
-python tools/diag57.py fit-t --work-dir W
-python tools/diag57.py run --work-dir W --name light
-python tools/diag57.py run --work-dir W --name prior_q --root prior_q
-python tools/diag57.py run --work-dir W --name hybrid_raw --sims 0 --hybrid
-python tools/diag57.py run --work-dir W --name hybrid_space --sims 0 --hybrid --hybrid-kinds space
-python tools/diag57.py table --work-dir W
-python tools/diag57.py analyze --work-dir W light raw prior_q hybrid_raw
+conda run -n tm_bot python tools/diag57.py fit-t --work-dir W
+conda run -n tm_bot python tools/diag57.py run --work-dir W --name light
+conda run -n tm_bot python tools/diag57.py run --work-dir W --name prior_q --root prior_q
+conda run -n tm_bot python tools/diag57.py run --work-dir W --name hybrid_raw --sims 0 --hybrid
+conda run -n tm_bot python tools/diag57.py run --work-dir W --name hybrid_space --sims 0 --hybrid --hybrid-kinds space
+conda run -n tm_bot python tools/diag57.py table --work-dir W
+conda run -n tm_bot python tools/diag57.py analyze --work-dir W light raw prior_q hybrid_raw
 ```
