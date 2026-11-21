@@ -17,12 +17,20 @@ from tm_bot.models.vocab import CardVocab
 from tm_bot.runs.buffer import DecisionSample, ReplayBuffer
 from tm_bot.runs.checkpoints import CheckpointManager
 from tm_bot.runs.config import RunConfig
+from tm_bot.eval.seeds import generate_seed_keys
 from tm_bot.runs.deveval import (
+    DevGame,
     DevResult,
     b1_agent_factory,
     build_checkpoint_metrics,
     dev_agent_factory,
+    dev_eval_interval,
+    dev_score,
+    dev_seed_count,
+    dev_win_rate,
     evaluate_dev_pairing,
+    games_on_seeds,
+    paired_delta_d,
 )
 from tm_bot.runs.errors import RunResourceError, RunResumeError
 from tm_bot.runs.learner import (
@@ -52,7 +60,7 @@ from tm_bot.runs.stopping import (
     StopDecision,
     StopKind,
     StoppingMonitor,
-    is_new_best,
+    new_best_route,
 )
 
 
@@ -70,7 +78,8 @@ class Learner(Protocol):
     def train(self, buffer: ReplayBuffer, *, updates: int | None = None) -> LearnerStats: ...
 
 
-DevEvaluator = Callable[[Path, Path | None], DevResult]
+# `evaluator(candidate, opponent, num_games=n)`: opponent None is `b1-v2`.
+DevEvaluator = Callable[..., DevResult]
 
 _HARD_STOPS = frozenset(
     {
@@ -79,6 +88,8 @@ _HARD_STOPS = frozenset(
         StopKind.STEP_CAP,
         StopKind.NONFINITE_LOSS,
         StopKind.RESOURCE_LIMIT,
+        # A stalled or rule-broken self-play run must not spend more on dev games.
+        StopKind.GAME_SHAPE,
     }
 )
 
@@ -102,6 +113,8 @@ class RunSummary:
     summary_path: Path
     init: str = "warmstart"
     init_checkpoint: Path | None = None
+    best_dev_score: float | None = None
+    anchor_dev_score: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -115,6 +128,8 @@ class RunSummary:
             "training_s": self.training_s,
             "dev_eval_s": self.dev_eval_s,
             "best_dev_win_rate": self.best_dev_win_rate,
+            "best_dev_score": self.best_dev_score,
+            "anchor_dev_score": self.anchor_dev_score,
             "best_checkpoint": str(self.best_checkpoint) if self.best_checkpoint else None,
             "last_checkpoint": str(self.last_checkpoint) if self.last_checkpoint else None,
             "init": self.init,
@@ -172,11 +187,17 @@ class SelfPlayRunner:
         )
         self.logger = MonitorLogger(self.manager.metrics_path)
         self.stopping = StoppingMonitor(
-            collapse_win_rate_drop=config.collapse_win_rate_drop,
-            collapse_checkpoints=config.collapse_checkpoints,
             entropy_collapse_fraction=config.entropy_collapse_fraction,
             entropy_collapse_window_s=config.entropy_collapse_window_s,
-            plateau_checkpoints=config.plateau_checkpoints,
+            plateau_s=config.plateau_s,
+            regression_anchor_win_rate=config.regression_anchor_win_rate,
+            margin_collapse_drop=config.margin_collapse_drop,
+            calibration_ece=config.calibration_ece,
+            consecutive_evaluations=config.stop_consecutive_evaluations,
+            # Calibration stops the comparator; for main it is a diagnostic (#40).
+            calibration_stops=config.agent_kind == "comparator",
+            game_shape_median_generations=config.game_shape_median_generations,
+            game_shape_window_s=config.game_shape_window_s,
             step_cap=config.step_cap,
         )
         if config.agent_kind == "comparator":
@@ -197,11 +218,21 @@ class SelfPlayRunner:
         self.last_checkpoint_step: int | None = None
         # A random-init run saves its fresh weights in <run>/init and uses them
         # as the first previous-best opponent (#27); warm-started runs use the
-        # recorded warm-start checkpoint instead.
+        # recorded warm-start checkpoint instead. Either is the run's warm-start
+        # anchor: the incumbent until a first new best, and the `a` opponent (#40).
         self.init_checkpoint: Path | None = None
         self.previous_best_fallback: Path | None = (
             Path(config.warmstart_checkpoint) if config.warmstart_checkpoint else None
         )
+        # Floor-aware selection state (#40 section 1): the incumbent's per-game
+        # b1-v2 results for the paired dD, its D, and the anchor's own D.
+        self.incumbent_b1_games: tuple[DevGame, ...] | None = None
+        self.best_dev_score: float | None = None
+        self.anchor_dev_score: float | None = None
+        # Dev-eval cadence on the training clock, doubled by the cost cap (#40 section 2).
+        self.dev_eval_interval_s = float(config.dev_eval_interval_s)
+        self.last_dev_eval_training_s = 0.0
+        self.last_dev_eval_step: int | None = None
         self._elapsed_base = 0.0
         # Wall clock spent in in-run dev evaluation; it is off the training clock (#26).
         self.dev_eval_s = 0.0
@@ -271,7 +302,7 @@ class SelfPlayRunner:
         )
         runner.optimizer = learner.optimizer
 
-        def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+        def evaluator(candidate: Path, opponent: Path | None, *, num_games: int) -> DevResult:
             candidate_factory = dev_agent_factory(
                 candidate, device=device, search_config=config.search_config()
             )
@@ -285,13 +316,14 @@ class SelfPlayRunner:
             return evaluate_dev_pairing(
                 candidate_factory=candidate_factory,
                 opponent_factory=opponent_factory,
-                num_games=config.dev_games_per_opponent,
+                num_games=num_games,
                 maps=config.maps,
                 seed_start=config.dev_seed_start,
                 num_workers=config.workers,
                 batch_size=config.batch_size,
                 agent_a_name="candidate",
-                agent_b_name="b1" if opponent is None else "previous_best",
+                agent_b_name="b1" if opponent is None else "checkpoint",
+                record_values="main" if opponent is None else None,
             )
 
         runner.evaluator = evaluator
@@ -347,7 +379,7 @@ class SelfPlayRunner:
                 version=f"dev-{Path(checkpoint).name}",
             )
 
-        def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+        def evaluator(candidate: Path, opponent: Path | None, *, num_games: int) -> DevResult:
             candidate_factory = comparator_factory(candidate)
             opponent_factory = (
                 b1_agent_factory()
@@ -357,13 +389,14 @@ class SelfPlayRunner:
             return evaluate_dev_pairing(
                 candidate_factory=candidate_factory,
                 opponent_factory=opponent_factory,
-                num_games=config.dev_games_per_opponent,
+                num_games=num_games,
                 maps=config.maps,
                 seed_start=config.dev_seed_start,
                 num_workers=config.workers,
                 batch_size=config.batch_size,
                 agent_a_name="comparator",
-                agent_b_name="b1" if opponent is None else "previous_best",
+                agent_b_name="b1" if opponent is None else "checkpoint",
+                record_values="comparator" if opponent is None else None,
             )
 
         runner.evaluator = evaluator
@@ -445,13 +478,20 @@ class SelfPlayRunner:
             self.stopping.set_entropy_baseline(
                 float(entropy_baseline), elapsed_s=self._elapsed_base - self.dev_eval_s
             )
-        stopping = state.get("stopping") or {}
-        if stopping.get("best_dev_win_rate") is not None:
-            self.stopping.best_dev_win_rate = float(stopping["best_dev_win_rate"])
-        self.stopping.below_best_streak = int(stopping.get("below_best_streak", 0))
-        self.stopping.checkpoints_without_improvement = int(
-            stopping.get("checkpoints_without_improvement", 0)
+        self.stopping.load_state_dict(state.get("stopping") or {})
+        games = state.get("incumbent_b1_games")
+        self.incumbent_b1_games = (
+            None if games is None else tuple(DevGame.from_dict(g) for g in games)
         )
+        for name in ("best_dev_score", "anchor_dev_score"):
+            value = state.get(name)
+            setattr(self, name, None if value is None else float(value))
+        self.dev_eval_interval_s = float(
+            state.get("dev_eval_interval_s", self.config.dev_eval_interval_s)
+        )
+        self.last_dev_eval_training_s = float(state.get("last_dev_eval_training_s", 0.0))
+        step = state.get("last_dev_eval_step")
+        self.last_dev_eval_step = None if step is None else int(step)
         self.logger.load_existing()
         return True
 
@@ -482,11 +522,17 @@ class SelfPlayRunner:
             "seed_cursor": getattr(self.engine, "seed_cursor", None),
             "determinism_checks_done": self._determinism_checks_done,
             "entropy_baseline": self.stopping.entropy_baseline,
-            "stopping": {
-                "best_dev_win_rate": self.stopping.best_dev_win_rate,
-                "below_best_streak": self.stopping.below_best_streak,
-                "checkpoints_without_improvement": self.stopping.checkpoints_without_improvement,
-            },
+            "stopping": self.stopping.state_dict(),
+            "best_dev_score": self.best_dev_score,
+            "anchor_dev_score": self.anchor_dev_score,
+            "incumbent_b1_games": (
+                None
+                if self.incumbent_b1_games is None
+                else [g.to_dict() for g in self.incumbent_b1_games]
+            ),
+            "dev_eval_interval_s": self.dev_eval_interval_s,
+            "last_dev_eval_training_s": self.last_dev_eval_training_s,
+            "last_dev_eval_step": self.last_dev_eval_step,
             "stop": self._stop.to_dict(),
         }
 
@@ -619,6 +665,7 @@ class SelfPlayRunner:
             mean_generations=(float(np.mean(generations)) if generations else None),
             min_generations=(int(min(generations)) if generations else None),
             max_generations=(int(max(generations)) if generations else None),
+            median_generations=(float(np.median(generations)) if generations else None),
             mean_vp_margin=(float(np.mean(margins)) if margins else None),
             vp_histogram=histogram,
             opponent_kinds=kinds,
@@ -706,13 +753,10 @@ class SelfPlayRunner:
         recorder = batch.recorders[index]
         return determinism_check(batch.games[index], recorder.actions)
 
-    def _checkpoint_and_evaluate(self, elapsed: float) -> None:
+    def _save_checkpoint(self, elapsed: float) -> bool:
+        """Save a periodic checkpoint for the opponent pool; False on a disk-cap stop."""
         if self.model is None or self.vocab is None:
-            return
-        previous_best = self.manager.best_checkpoint()
-        if previous_best is None:
-            previous_best = self.previous_best_fallback
-
+            return False
         try:
             self.last_checkpoint = self.manager.save(
                 step=self.steps,
@@ -737,76 +781,171 @@ class SelfPlayRunner:
                 reason=str(exc),
                 details={"elapsed_s": elapsed},
             )
-            return
+            return False
         self.last_checkpoint_training_s = elapsed
         self.last_checkpoint_step = self.steps
-        # Make the new checkpoint resumable before spending time on dev games.
-        self._save_state()
-
-        if self.evaluator is not None:
-            t_eval = self.clock()
-            try:
-                vs_b1 = self.evaluator(self.last_checkpoint, None)
-                vs_best = (
-                    self.evaluator(self.last_checkpoint, previous_best)
-                    if previous_best is not None
-                    else None
-                )
-            finally:
-                self.dev_eval_s += self.clock() - t_eval
-            win_rate = vs_b1.win_rate
-            new_best = is_new_best(
-                win_rate,
-                self.best_dev_win_rate,
-                None if vs_best is None else vs_best.win_rate_ci_95,
-            )
-            if new_best:
-                try:
-                    self.manager.save_best(
-                        model=self.model,
-                        vocab=self.vocab,
-                        metadata={
-                            "version": f"selfplay-{self.config.run_name}",
-                            "cycle": self.cycle,
-                            "step": self.steps,
-                            "selfplay_games": self.selfplay_games,
-                            "dev_win_rate_vs_b1": win_rate,
-                            "temperature": getattr(self.model, "temperature", None),
-                            **self._init_metadata(),
-                        },
-                    )
-                except RunResourceError as exc:
-                    self._stop = StopDecision(
-                        stopped=True,
-                        kind=StopKind.RESOURCE_LIMIT,
-                        reason=str(exc),
-                        details={"elapsed_s": elapsed},
-                    )
-                    return
-                self.best_dev_win_rate = win_rate
-            wall = self.elapsed_s()
-            record = build_checkpoint_metrics(
-                cycle=self.cycle,
-                elapsed_s=wall,
-                step=self.steps,
-                games=self.selfplay_games,
-                checkpoint=self.last_checkpoint,
-                vs_b1=vs_b1,
-                vs_previous_best=vs_best,
-                new_best=bool(new_best),
-                best_dev_win_rate=self.best_dev_win_rate,
-                training_s=wall - self.dev_eval_s,
-                dev_eval_s=self.dev_eval_s,
-            )
-            self.logger.log_checkpoint(record)
-            decision = self.stopping.observe_checkpoint(record)
-            if decision.stopped and not self._stop.stopped:
-                self._stop = decision
-
         setter = getattr(self.engine, "set_opponent_pool", None)
         if callable(setter):
             pool = self.manager.list_checkpoints()[-self.config.opponent_pool_size :]
             setter(pool)
+        # Make the new checkpoint resumable before spending time on dev games.
+        self._save_state()
+        return True
+
+    def _dev_eval_pending(self) -> bool:
+        """The newest checkpoint exists and has not been dev-evaluated yet."""
+        return (
+            self.evaluator is not None
+            and self.model is not None
+            and self.vocab is not None
+            and self.last_checkpoint is not None
+            and self.last_checkpoint_step is not None
+            and self.last_dev_eval_step != self.last_checkpoint_step
+            and not (self._stop.stopped and self._stop.kind in _HARD_STOPS)
+        )
+
+    def _anchor_seed_keys(self) -> list[str]:
+        count = dev_seed_count(self.config.dev_anchor_games, self.config.maps)
+        return [
+            k.key for k in generate_seed_keys("dev", count, start=self.config.dev_seed_start)
+        ]
+
+    def _dev_evaluate(self, elapsed: float) -> None:
+        """Dev-evaluate the newest checkpoint and apply floor-aware selection (#40 sections 1-2).
+
+        Pairings: `b1-v2` (dev score D, ECE), the incumbent best (head-to-head h),
+        and the warm-start anchor (a). Until a first new best the anchor is the
+        incumbent, so `a` comes from the incumbent pairing's anchor seeds, and the
+        anchor's own `b1-v2` games are measured once for the paired dD.
+        """
+        assert self.evaluator is not None and self.last_checkpoint is not None
+        config = self.config
+        candidate = self.last_checkpoint
+        anchor = self.previous_best_fallback
+        best = self.manager.best_checkpoint()
+        incumbent = best if best is not None else anchor
+        anchor_is_incumbent = best is None and anchor is not None
+
+        t_eval = self.clock()
+        baseline_s = 0.0
+        vs_anchor: DevResult | None = None
+        try:
+            if incumbent is not None and self.incumbent_b1_games is None:
+                t_base = self.clock()
+                baseline = self.evaluator(
+                    incumbent, None, num_games=config.dev_games_per_opponent
+                )
+                baseline_s = self.clock() - t_base
+                self.incumbent_b1_games = baseline.records
+                self.best_dev_score = dev_score(baseline.records)
+                if anchor_is_incumbent:
+                    self.anchor_dev_score = self.best_dev_score
+            vs_b1 = self.evaluator(candidate, None, num_games=config.dev_games_per_opponent)
+            vs_best = (
+                self.evaluator(candidate, incumbent, num_games=config.dev_games_per_opponent)
+                if incumbent is not None
+                else None
+            )
+            if anchor is not None and not anchor_is_incumbent:
+                vs_anchor = self.evaluator(candidate, anchor, num_games=config.dev_anchor_games)
+        finally:
+            eval_wall_s = self.clock() - t_eval
+            self.dev_eval_s += eval_wall_s
+
+        anchor_games: tuple[DevGame, ...] = ()
+        anchor_win_rate: float | None = None
+        if vs_anchor is not None:
+            anchor_games = vs_anchor.records
+            anchor_win_rate = vs_anchor.win_rate
+        elif anchor_is_incumbent and vs_best is not None:
+            anchor_games = games_on_seeds(vs_best.records, self._anchor_seed_keys())
+            anchor_win_rate = dev_win_rate(anchor_games)
+        failures = (
+            vs_b1.failures
+            + (0 if vs_best is None else vs_best.failures)
+            + (0 if vs_anchor is None else vs_anchor.failures)
+        )
+        score = dev_score(vs_b1.records)
+        delta: float | None = None
+        delta_ci: tuple[float, float] | None = None
+        if incumbent is not None and self.incumbent_b1_games is not None:
+            delta, delta_ci = paired_delta_d(vs_b1.records, self.incumbent_b1_games)
+        route = new_best_route(
+            failures=failures,
+            anchor_win_rate=anchor_win_rate,
+            head_to_head=None if vs_best is None else vs_best.win_rate,
+            head_to_head_ci_95=None if vs_best is None else vs_best.win_rate_ci_95,
+            delta_d_ci_95=delta_ci,
+        )
+        if route is not None:
+            try:
+                self.manager.save_best(
+                    model=self.model,  # type: ignore[arg-type]
+                    vocab=self.vocab,  # type: ignore[arg-type]
+                    metadata={
+                        "version": f"selfplay-{config.run_name}",
+                        "cycle": self.cycle,
+                        "step": self.last_checkpoint_step,
+                        "selfplay_games": self.selfplay_games,
+                        "dev_win_rate_vs_b1": vs_b1.win_rate,
+                        "dev_score_vs_b1": score,
+                        "new_best_route": route,
+                        "temperature": getattr(self.model, "temperature", None),
+                        **self._init_metadata(),
+                    },
+                )
+            except RunResourceError as exc:
+                self._stop = StopDecision(
+                    stopped=True,
+                    kind=StopKind.RESOURCE_LIMIT,
+                    reason=str(exc),
+                    details={"elapsed_s": elapsed},
+                )
+                return
+            self.best_dev_win_rate = vs_b1.win_rate
+            self.best_dev_score = score
+            self.incumbent_b1_games = vs_b1.records
+
+        # The one-time anchor baseline is not part of the recurring cost.
+        self.dev_eval_interval_s = dev_eval_interval(
+            eval_wall_s - baseline_s,
+            base_interval_s=config.dev_eval_interval_s,
+            cost_fraction=config.dev_eval_cost_fraction,
+        )
+        self.last_dev_eval_training_s = elapsed
+        self.last_dev_eval_step = self.last_checkpoint_step
+
+        wall = self.elapsed_s()
+        record = build_checkpoint_metrics(
+            cycle=self.cycle,
+            elapsed_s=wall,
+            step=int(self.last_checkpoint_step or 0),
+            games=self.selfplay_games,
+            checkpoint=candidate,
+            vs_b1=vs_b1,
+            vs_previous_best=vs_best,
+            new_best=route is not None,
+            best_dev_win_rate=self.best_dev_win_rate,
+            training_s=wall - self.dev_eval_s,
+            dev_eval_s=self.dev_eval_s,
+            dev_score_vs_b1=score,
+            best_dev_score_vs_b1=self.best_dev_score,
+            dev_score_delta=delta,
+            dev_score_delta_ci_95=delta_ci,
+            dev_win_rate_vs_anchor=anchor_win_rate,
+            dev_anchor_games=(
+                vs_anchor.games if vs_anchor is not None else len(anchor_games)
+            ),
+            dev_ece_vs_b1=vs_b1.ece,
+            dev_failures=failures,
+            new_best_route=route,
+            dev_eval_wall_s=eval_wall_s,
+            dev_eval_interval_s=self.dev_eval_interval_s,
+        )
+        self.logger.log_checkpoint(record)
+        decision = self.stopping.observe_checkpoint(record)
+        if decision.stopped and not self._stop.stopped:
+            self._stop = decision
         self._save_state()
 
     def _rollback(self) -> tuple[bool, str]:
@@ -931,7 +1070,7 @@ class SelfPlayRunner:
                     )
 
             determinism = self._maybe_determinism_check(batch)
-            self._log_cycle(
+            cycle_record = self._log_cycle(
                 batch,
                 learner_stats=learner_stats,
                 calibration=calibration,
@@ -941,6 +1080,11 @@ class SelfPlayRunner:
             )
             if determinism is not None:
                 self.logger.log_determinism(determinism)
+            shape = self.stopping.observe_game_shape(
+                cycle_record.median_generations, elapsed_s=elapsed
+            )
+            if shape.stopped and not self._stop.stopped:
+                self._stop = shape
 
             if not self._stop.stopped:
                 try:
@@ -962,20 +1106,29 @@ class SelfPlayRunner:
             if step_decision.stopped and not self._stop.stopped:
                 self._stop = step_decision
 
+            # Checkpoints are saved every `checkpoint_interval_s` of training clock
+            # for the opponent pool; the newest is dev-evaluated when the (cost-
+            # capped) dev cadence is due, and before a soft stop or the last cycle.
             # A model that has not trained since the last checkpoint is already saved.
+            closing = (self._stop.stopped and self._stop.kind not in _HARD_STOPS) or (
+                max_cycles is not None and self.cycle >= max_cycles
+            )
             due = (
                 self.model is not None
                 and self.vocab is not None
                 and (self.last_checkpoint is None or self.last_checkpoint_step != self.steps)
                 and (
-                    (self._stop.stopped and self._stop.kind not in _HARD_STOPS)
+                    closing
                     or elapsed - self.last_checkpoint_training_s
                     >= self.config.checkpoint_interval_s
-                    or (max_cycles is not None and self.cycle >= max_cycles)
                 )
             )
+            saved = False
             if due and not (self._stop.stopped and self._stop.kind in _HARD_STOPS):
-                self._checkpoint_and_evaluate(elapsed)
+                saved = self._save_checkpoint(elapsed)
+            eval_due = elapsed - self.last_dev_eval_training_s >= self.dev_eval_interval_s
+            if self._dev_eval_pending() and (closing or (saved and eval_due)):
+                self._dev_evaluate(elapsed)
 
             if self._stop.stopped:
                 break
@@ -1016,7 +1169,9 @@ class SelfPlayRunner:
                     )
         elif self.model is not None and self.vocab is not None and self.evaluator is not None:
             if not unchanged:
-                self._checkpoint_and_evaluate(elapsed)
+                self._save_checkpoint(elapsed)
+            if self._dev_eval_pending():
+                self._dev_evaluate(elapsed)
         elif self.model is not None and self.vocab is not None and not unchanged:
             try:
                 self.last_checkpoint = self.manager.save(
@@ -1055,6 +1210,8 @@ class SelfPlayRunner:
             summary_path=summary_path,
             init="random" if self.config.random_init else "warmstart",
             init_checkpoint=self.init_checkpoint,
+            best_dev_score=self.best_dev_score,
+            anchor_dev_score=self.anchor_dev_score,
         )
         (self.manager.run_dir / "run_summary.json").write_text(
             json.dumps(run_summary.to_dict(), indent=2, sort_keys=True) + "\n",

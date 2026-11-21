@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
@@ -439,7 +440,7 @@ class _RecordingPPOLearner:
         return LearnerStats(updates=1, policy_loss=1.0, value_loss=0.5, total_loss=1.5)
 
 
-def _dev_result(_checkpoint: Path, _opponent: Path | None) -> DevResult:
+def _dev_result(_checkpoint: Path, _opponent: Path | None, **_: Any) -> DevResult:
     return DevResult(
         games=8,
         completed=8,

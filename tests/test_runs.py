@@ -35,6 +35,7 @@ from tm_bot.runs.buffer import (
 from tm_bot.runs.checkpoints import CheckpointManager
 from tm_bot.runs.config import ResourceLimits, RunConfig
 from tm_bot.runs.deveval import (
+    DevGame,
     DevResult,
     _load_policy_value_agent,
     build_dev_games,
@@ -66,7 +67,7 @@ from tm_bot.runs.selfplay import (
     replay_game,
     utility_for_seat,
 )
-from tm_bot.runs.stopping import StopKind, StoppingMonitor, is_new_best
+from tm_bot.runs.stopping import StopKind, StoppingMonitor
 
 _CARDS = load_card_data()
 _VOCAB = CardVocab.from_card_data(_CARDS)
@@ -268,36 +269,6 @@ def test_nonfinite_loss_rule_fires() -> None:
         assert decision.kind is StopKind.NONFINITE_LOSS
 
 
-def _checkpoint_record(cycle: int, win_rate: float, *, elapsed_s: float = 0.0) -> CheckpointMetrics:
-    return CheckpointMetrics(
-        cycle=cycle,
-        elapsed_s=elapsed_s,
-        step=cycle,
-        games=cycle * 10,
-        checkpoint=f"ckpt-{cycle:09d}",
-        dev_games=100,
-        dev_win_rate_vs_b1=win_rate,
-        dev_win_rate_vs_b1_ci_95=(win_rate - 0.05, win_rate + 0.05),
-        dev_win_rate_vs_previous_best=0.5,
-        dev_win_rate_vs_previous_best_ci_95=(0.45, 0.55),
-        dev_mean_vp_margin_vs_b1=0.0,
-        new_best=False,
-        best_dev_win_rate_vs_b1=win_rate,
-    )
-
-
-def test_collapse_win_rate_rule_fires_after_three_checkpoints() -> None:
-    monitor = StoppingMonitor(collapse_win_rate_drop=0.15, collapse_checkpoints=3)
-    assert monitor.observe_checkpoint(_checkpoint_record(1, 0.80)).stopped is False
-    assert monitor.observe_checkpoint(_checkpoint_record(2, 0.70)).stopped is False
-    assert monitor.observe_checkpoint(_checkpoint_record(3, 0.60)).stopped is False
-    assert monitor.observe_checkpoint(_checkpoint_record(4, 0.64)).stopped is False
-    decision = monitor.observe_checkpoint(_checkpoint_record(5, 0.63))
-    assert decision.stopped is True
-    assert decision.kind is StopKind.COLLAPSE_WIN_RATE
-    assert decision.details["streak"] == 3
-
-
 def test_collapse_entropy_rule_only_within_two_hours() -> None:
     monitor = StoppingMonitor(entropy_collapse_fraction=0.10, entropy_collapse_window_s=7200.0)
     monitor.set_entropy_baseline(2.0)
@@ -307,51 +278,6 @@ def test_collapse_entropy_rule_only_within_two_hours() -> None:
     later = StoppingMonitor(entropy_collapse_fraction=0.10, entropy_collapse_window_s=7200.0)
     later.set_entropy_baseline(2.0)
     assert later.observe_entropy(0.1, elapsed_s=7201.0).stopped is False
-
-
-def test_plateau_rule_fires_after_twelve_checkpoints_without_a_new_best() -> None:
-    monitor = StoppingMonitor(plateau_checkpoints=12)
-    assert monitor.observe_checkpoint(_checkpoint_record(1, 0.50)).stopped is False
-    for cycle in range(2, 13):
-        assert monitor.observe_checkpoint(_checkpoint_record(cycle, 0.49)).stopped is False
-    decision = monitor.observe_checkpoint(_checkpoint_record(13, 0.49))
-    assert decision.stopped is True
-    assert decision.kind is StopKind.PLATEAU
-    assert decision.details["checkpoints_without_improvement"] == 12
-
-
-def _tied_record(cycle: int, win_rate: float, vs_best_ci: tuple[float, float]) -> CheckpointMetrics:
-    return dataclasses.replace(
-        _checkpoint_record(cycle, win_rate),
-        dev_win_rate_vs_previous_best=sum(vs_best_ci) / 2.0,
-        dev_win_rate_vs_previous_best_ci_95=vs_best_ci,
-    )
-
-
-def test_is_new_best_breaks_vs_b1_ties_on_significant_win_over_previous_best() -> None:
-    assert is_new_best(0.0, None, None) is True
-    assert is_new_best(0.1, 0.0, (0.0, 0.2)) is True
-    assert is_new_best(0.0, 0.1, (0.9, 1.0)) is False
-    assert is_new_best(0.0, 0.0, (0.51, 0.8)) is True
-    assert is_new_best(0.0, 0.0, (0.5, 0.8)) is False
-    assert is_new_best(0.0, 0.0, None) is False
-    assert is_new_best(None, None, (0.9, 1.0)) is False
-
-
-def test_plateau_does_not_fire_while_tied_checkpoints_beat_previous_best() -> None:
-    monitor = StoppingMonitor(plateau_checkpoints=12)
-    for cycle in range(1, 20):
-        decision = monitor.observe_checkpoint(_tied_record(cycle, 0.0, (0.6, 0.8)))
-        assert decision.stopped is False
-    assert monitor.checkpoints_without_improvement == 0
-
-
-def test_plateau_fires_when_tied_checkpoints_do_not_beat_previous_best() -> None:
-    monitor = StoppingMonitor(plateau_checkpoints=12)
-    for cycle in range(1, 13):
-        assert monitor.observe_checkpoint(_tied_record(cycle, 0.0, (0.4, 0.6))).stopped is False
-    decision = monitor.observe_checkpoint(_tied_record(13, 0.0, (0.4, 0.6)))
-    assert decision.kind is StopKind.PLATEAU
 
 
 def test_learner_step_cap_rule_fires() -> None:
@@ -721,16 +647,41 @@ class _SharpeningLearner(_FakeLearner):
         return LearnerStats(updates=1, policy_loss=1.0, value_loss=0.5, total_loss=1.5)
 
 
-def _fake_dev(_checkpoint: Path, _opponent: Path | None) -> DevResult:
+def _dev_records(num_games: int, *, margin: int = 5) -> tuple[DevGame, ...]:
+    """Seat-swapped `dev-*` records: the candidate wins in seat 0, loses in seat 1."""
+    return tuple(
+        DevGame(seed, map_name, seat, ok=True, outcome=1 if seat == 0 else -1,
+                vp_margin=margin if seat == 0 else -margin, generations=14)
+        for seed, map_name, seat in build_dev_games(num_games)
+    )
+
+
+def _fake_dev(_checkpoint: Path, _opponent: Path | None, *, num_games: int = 4) -> DevResult:
+    records = _dev_records(num_games)
     return DevResult(
-        games=16,
-        completed=16,
+        games=len(records),
+        completed=len(records),
         failures=0,
         win_rate=0.5,
         win_rate_ci_95=(0.3, 0.7),
         mean_vp_margin=0.0,
         report={},
+        records=records,
     )
+
+
+def _improving_dev(
+    _checkpoint: Path, opponent: Path | None, *, num_games: int = 4, _calls=[0]
+) -> DevResult:
+    """b1-v2 margin improves 5 VP per evaluated checkpoint; even head-to-head."""
+    if opponent is not None:
+        return _fake_dev(_checkpoint, opponent, num_games=num_games)
+    _calls[0] += 1
+    records = tuple(
+        DevGame(seed, map_name, seat, ok=True, outcome=-1, vp_margin=-60 + 5 * _calls[0])
+        for seed, map_name, seat in build_dev_games(num_games)
+    )
+    return DevResult(len(records), len(records), 0, 0.0, (0.0, 0.0), None, {}, records=records)
 
 
 def _run_config(tmp_path: Path, name: str, **overrides: Any) -> RunConfig:
@@ -742,7 +693,11 @@ def _run_config(tmp_path: Path, name: str, **overrides: Any) -> RunConfig:
         updates_per_cycle=1,
         learner_batch_size=2,
         checkpoint_interval_s=1e-6,
+        dev_eval_interval_s=1e-6,
+        # Every checkpoint is dev-evaluated unless a test exercises the cost cap.
+        dev_eval_cost_fraction=1e12,
         dev_games_per_opponent=4,
+        dev_anchor_games=2,
         keep_last_checkpoints=2,
         determinism_check_every_games=1_000,
         limits=ResourceLimits(disk_gb=50.0),
@@ -769,7 +724,8 @@ def test_resume_continues_from_last_good_checkpoint(tmp_path: Path) -> None:
     assert first.last_checkpoint.name.startswith("ckpt-")
     assert len(runner.buffer) == 2
     assert first.best_dev_win_rate == pytest.approx(0.5)
-    assert runner.stopping.best_dev_win_rate == pytest.approx(0.5)
+    assert first.best_dev_score == pytest.approx(0.0)
+    assert runner.incumbent_b1_games == _dev_records(4)
     state = runner.manager.load_state()
     assert state is not None and state["cycle"] == 2
     assert state["seed_cursor"] == 2
@@ -794,7 +750,9 @@ def test_resume_continues_from_last_good_checkpoint(tmp_path: Path) -> None:
     assert resumed.learner.step == 3  # type: ignore[union-attr]
     assert len(resumed.buffer) == 3
     assert resumed.best_dev_win_rate == pytest.approx(0.5)
-    assert resumed.stopping.best_dev_win_rate == pytest.approx(0.5)
+    assert resumed.best_dev_score == pytest.approx(0.0)
+    # The incumbent's per-game b1-v2 results survive the resume for pairing.
+    assert resumed.incumbent_b1_games == _dev_records(4)
     assert resumed._determinism_checks_done == 2
     assert resumed.engine.seed_cursor == 3  # type: ignore[attr-defined]
     assert resumed.engine.opponents.pool  # type: ignore[attr-defined]
@@ -1022,11 +980,20 @@ def test_cycle_calibration_uses_frozen_pre_update_weights(tmp_path: Path) -> Non
     assert calib["brier"] < 0.99  # the post-update all-win model would score ~1.0
 
 
-def test_tied_vs_b1_checkpoint_that_beats_previous_best_becomes_best(tmp_path: Path) -> None:
-    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+def test_floor_checkpoint_that_beats_the_incumbent_head_to_head_becomes_best(
+    tmp_path: Path,
+) -> None:
+    # Every checkpoint loses every b1-v2 game by the same margin (dD = 0, the v1
+    # floor), but clearly beats the incumbent head-to-head: route R2 (#40).
+    floor = tuple(
+        DevGame(seed, map_name, seat, ok=True, outcome=-1, vp_margin=-20, generations=14)
+        for seed, map_name, seat in build_dev_games(4)
+    )
+
+    def evaluator(candidate: Path, opponent: Path | None, **_: Any) -> DevResult:
         if opponent is None:
-            return DevResult(16, 16, 0, 0.0, (0.0, 0.0), -20.0, {})
-        return DevResult(16, 16, 0, 0.9, (0.75, 1.0), 10.0, {})
+            return DevResult(8, 8, 0, 0.0, (0.0, 0.0), -20.0, {}, records=floor)
+        return DevResult(8, 8, 0, 0.9, (0.75, 1.0), 10.0, {}, records=_dev_records(4))
 
     ticks = iter(float(i) for i in range(10_000))
     config = _run_config(tmp_path, "tie-break-run", checkpoint_interval_s=0.5)
@@ -1043,7 +1010,10 @@ def test_tied_vs_b1_checkpoint_that_beats_previous_best_becomes_best(tmp_path: P
     records = runner.logger.checkpoints
     assert len(records) == 3
     assert all(r.new_best for r in records)
-    assert runner.stopping.checkpoints_without_improvement == 0
+    # No anchor or earlier best: the first checkpoint passes on the gates alone.
+    assert [r.new_best_route for r in records] == ["no_incumbent", "head_to_head", "head_to_head"]
+    assert [r.dev_score_delta for r in records] == [None, 0.0, 0.0]
+    assert records[-1].dev_score_vs_b1 == pytest.approx(-1.0 - 0.15 * 20 / 50)
     best = runner.manager.best_dir / "checkpoint.pt"
     assert torch.load(best, map_location="cpu", weights_only=False)["metadata"]["cycle"] == records[-1].cycle
 
@@ -1070,11 +1040,11 @@ def test_soft_stop_does_not_recheckpoint_an_unchanged_model(tmp_path: Path) -> N
 
 def test_first_checkpoint_uses_recorded_warmstart_as_previous_best(tmp_path: Path) -> None:
     warmstart = str(tmp_path / "warmstart")
-    calls: list[tuple[Path, Path | None]] = []
+    calls: list[tuple[Path, Path | None, int]] = []
 
-    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
-        calls.append((candidate, opponent))
-        return _fake_dev(candidate, opponent)
+    def evaluator(candidate: Path, opponent: Path | None, *, num_games: int) -> DevResult:
+        calls.append((candidate, opponent, num_games))
+        return _fake_dev(candidate, opponent, num_games=num_games)
 
     config = _run_config(tmp_path, "warmstart-run", warmstart_checkpoint=warmstart)
     runner = SelfPlayRunner(
@@ -1086,9 +1056,19 @@ def test_first_checkpoint_uses_recorded_warmstart_as_previous_best(tmp_path: Pat
         vocab=_VOCAB,
     )
     runner.run(max_cycles=1)
-    assert len(calls) == 2
-    assert calls[0][1] is None
-    assert calls[1][1] == Path(warmstart)
+    candidate = runner.last_checkpoint
+    # The anchor's own b1-v2 games are measured once on the same seeds; the anchor
+    # is the incumbent, so `a` comes from that pairing rather than a third one.
+    assert calls == [
+        (Path(warmstart), None, 4),
+        (candidate, None, 4),
+        (candidate, Path(warmstart), 4),
+    ]
+    record = runner.logger.checkpoints[-1]
+    assert runner.anchor_dev_score == pytest.approx(0.0)
+    assert record.dev_win_rate_vs_anchor == pytest.approx(0.5)
+    assert record.dev_anchor_games == 8
+    assert record.new_best is False  # dD = 0 and h = 0.5: neither route
     written = json.loads((config.run_dir / "config.json").read_text(encoding="utf-8"))
     assert written["warmstart_checkpoint"] == warmstart
 
@@ -1110,9 +1090,9 @@ def test_random_init_run_uses_saved_init_as_first_previous_best(
     warmstart = _trained_tiny_checkpoint(tmp_path)
     calls: list[tuple[Path, Path | None]] = []
 
-    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+    def evaluator(candidate: Path, opponent: Path | None, **kwargs: Any) -> DevResult:
         calls.append((candidate, opponent))
-        return _fake_dev(candidate, opponent)
+        return _improving_dev(candidate, opponent, **kwargs)
 
     model = _tiny_model(seed=42)
     initial_state = copy.deepcopy(model.state_dict())
@@ -1140,11 +1120,18 @@ def test_random_init_run_uses_saved_init_as_first_previous_best(
     # The init reference survives pruning of the numbered checkpoints.
     assert len(runner.manager.list_checkpoints()) == 1
     assert runner.init_checkpoint == init
-    # First checkpoint: vs B1, then vs the saved random init (never the warm start).
-    assert calls[0][1] is None
-    assert calls[1][1] == init
-    assert calls[1][1] != warmstart
-    assert calls[3][1] == runner.manager.best_dir
+    # The saved random init is the anchor (never the warm start): its b1-v2
+    # baseline first, then the candidate vs b1-v2 and vs the init as incumbent.
+    assert calls[0] == (init, None)
+    assert calls[1][1] is None
+    assert calls[2][1] == init
+    assert all(opponent != warmstart for _candidate, opponent in calls)
+    # After a first new best the incumbent is best/ and the anchor is played apart.
+    assert [opponent for _candidate, opponent in calls[3:6]] == [
+        None,
+        runner.manager.best_dir,
+        init,
+    ]
 
     payload = torch.load(init / "checkpoint.pt", map_location="cpu", weights_only=False)
     assert payload["metadata"]["init"] == "random"
@@ -1197,11 +1184,11 @@ def test_resume_of_random_init_run_keeps_the_init_reference(tmp_path: Path) -> N
     state = runner.manager.load_state()
     assert state is not None and state["init_checkpoint"] == "init"
     # Force the fallback path: no best/ means the recorded init is previous best.
-    shutil.rmtree(runner.manager.best_dir)
+    shutil.rmtree(runner.manager.best_dir, ignore_errors=True)
 
     calls: list[tuple[Path, Path | None]] = []
 
-    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+    def evaluator(candidate: Path, opponent: Path | None, **_: Any) -> DevResult:
         calls.append((candidate, opponent))
         return _fake_dev(candidate, opponent)
 
@@ -1641,7 +1628,7 @@ def test_first_checkpoint_without_previous_best_logs_no_previous_best_rate(
 ) -> None:
     calls: list[Path | None] = []
 
-    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+    def evaluator(candidate: Path, opponent: Path | None, **_: Any) -> DevResult:
         calls.append(opponent)
         return _fake_dev(candidate, opponent)
 
@@ -1699,7 +1686,7 @@ class _ClockedEngine(_FakeEngine):
 
 
 def _clocked_dev(now: list[float], eval_s: float):
-    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+    def evaluator(candidate: Path, opponent: Path | None, **_: Any) -> DevResult:
         now[0] += eval_s
         return _fake_dev(candidate, opponent)
 
@@ -1833,7 +1820,7 @@ def test_cycle_records_split_wall_clock_into_training_and_dev_eval(tmp_path: Pat
 def test_raising_dev_eval_still_counts_as_dev_eval_time(tmp_path: Path) -> None:
     now = [0.0]
 
-    def evaluator(candidate: Path, opponent: Path | None) -> DevResult:
+    def evaluator(candidate: Path, opponent: Path | None, **_: Any) -> DevResult:
         now[0] += 1_000.0
         raise RuntimeError("dev bridge crashed")
 
@@ -1933,3 +1920,79 @@ def test_learner_memory_guard_fires_above_ceiling(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(resources, "current_rss_bytes", lambda: int(1.5 * 1024**3))
     with pytest.raises(RunResourceError, match="learner RAM"):
         resources.check_learner_memory(limits)
+
+
+# --- 10. v2 dev cadence, cost cap and game shape (#51) -------------------
+def test_checkpoints_every_30_min_dev_eval_every_60_and_cost_cap_doubles_it(
+    tmp_path: Path,
+) -> None:
+    # 10-minute self-play cycles; every dev pairing takes 1,000 s of wall clock.
+    now = [0.0]
+    config = _run_config(
+        tmp_path,
+        "cadence",
+        wall_clock_budget_s=6 * 3600.0,
+        checkpoint_interval_s=1800.0,
+        dev_eval_interval_s=3600.0,
+        dev_eval_cost_fraction=0.40,
+        keep_last_checkpoints=50,
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_ClockedEngine(now, 600.0),
+        learner=_FakeLearner(),
+        evaluator=_clocked_dev(now, 1_000.0),
+        model=_tiny_model(seed=21),
+        vocab=_VOCAB,
+        clock=lambda: now[0],
+    )
+    summary = runner.run()
+    assert summary.stop.kind is StopKind.BUDGET
+    # Checkpoints feed the opponent pool every 30 min of training clock.
+    assert len(runner.manager.list_checkpoints()) == 12
+    evals = runner.logger.checkpoints
+    # First eval at 60 min plays b1-v2 only (1,000 s <= 24 min) and keeps 60 min.
+    # From the second on it also plays the incumbent: 2,000 s > 40% of 60 min,
+    # so the cadence doubles to 120 min, where it fits.
+    assert [e.training_s for e in evals] == pytest.approx([3600.0, 7200.0, 14400.0, 21600.0])
+    assert [e.dev_eval_wall_s for e in evals] == pytest.approx([1000.0, 2000.0, 2000.0, 2000.0])
+    assert [e.dev_eval_interval_s for e in evals] == pytest.approx([3600.0, 7200.0, 7200.0, 7200.0])
+    assert summary.dev_eval_s <= 0.40 * summary.training_s
+    state = runner.manager.load_state()
+    assert state is not None and state["dev_eval_interval_s"] == pytest.approx(7200.0)
+
+
+class _LongGameEngine(_ClockedEngine):
+    def play_batch(self, num_games: int, *, stop_when=None) -> SelfPlayBatch:
+        batch = super().play_batch(num_games, stop_when=stop_when)
+        batch.games = [dataclasses.replace(g, generations=30) for g in batch.games]
+        return batch
+
+
+def test_game_shape_stop_fires_after_two_training_hours_of_long_games(tmp_path: Path) -> None:
+    def must_not_evaluate(_c: Path, _o: Path | None, **_: Any) -> DevResult:
+        raise AssertionError("a game-shape stop is hard: no more dev games")
+
+    now = [0.0]
+    config = _run_config(
+        tmp_path,
+        "long-games",
+        games_per_cycle=3,
+        checkpoint_interval_s=1e9,
+        dev_eval_interval_s=1e9,
+    )
+    runner = SelfPlayRunner(
+        config,
+        engine=_LongGameEngine(now, 1800.0),
+        learner=_FakeLearner(),
+        evaluator=must_not_evaluate,
+        model=_tiny_model(seed=22),
+        vocab=_VOCAB,
+        clock=lambda: now[0],
+    )
+    summary = runner.run(max_cycles=10)
+    assert summary.stop.kind is StopKind.GAME_SHAPE
+    assert summary.cycles == 4  # 4 x 30 min of median-30-generation self-play
+    assert runner.logger.cycles[-1].median_generations == pytest.approx(30.0)
+    # Calibration stops the comparator only; for main it is a diagnostic.
+    assert runner.stopping.calibration_stops is False

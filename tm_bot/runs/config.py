@@ -46,9 +46,12 @@ class RunConfig:
     """Configuration for one self-play run.
 
     Defaults match the #10 budget decision: 16 workers, 24 h of training time
-    (`wall_clock_budget_s`: wall clock minus in-run dev evaluation, #26), a
-    200k-decision replay buffer, 30-minute checkpoints evaluated on 100 `dev-*`
-    games against B1 and 100 against the previous best.
+    (`wall_clock_budget_s`: wall clock minus in-run dev evaluation, #26) and a
+    200k-decision replay buffer. Checkpoints are saved every 30 minutes of
+    training clock; every 60 minutes (doubled while one evaluation exceeds 40% of
+    the interval) the newest is dev-evaluated on 104 `dev-*` games against
+    `b1-v2`, 104 against the incumbent best, and 56 against the warm-start anchor
+    (#40 section 2).
 
     Self-play follows the v2 rules (#39, #48; `selfplay_rules == "v2"`): 16
     simulations x K = 4 worlds per searched decision (8 x 4 with
@@ -87,7 +90,7 @@ class RunConfig:
     # `dev-*`; `eval-*` is never touched by a run.
     train_seed_start: int = 0
     dev_seed_start: int = 0
-    dev_games_per_opponent: int = 100
+    dev_games_per_opponent: int = 104
 
     # Self-play and learning.
     games_per_cycle: int = 32
@@ -127,12 +130,21 @@ class RunConfig:
     random_init: bool = False
     device: str | None = None
 
-    # Stopping rules.
-    collapse_win_rate_drop: float = 0.15
-    collapse_checkpoints: int = 3
+    # Dev-evaluation cadence and cost cap (#40 section 2).
+    dev_eval_interval_s: float = 60.0 * 60.0
+    dev_eval_cost_fraction: float = 0.40
+    dev_anchor_games: int = 56
+
+    # Stopping rules (#40 section 1).
     entropy_collapse_fraction: float = 0.10
     entropy_collapse_window_s: float = 2.0 * 3600.0
-    plateau_checkpoints: int = 12
+    plateau_s: float = 6.0 * 3600.0
+    regression_anchor_win_rate: float = 0.35
+    margin_collapse_drop: float = 0.05
+    calibration_ece: float = 0.15
+    stop_consecutive_evaluations: int = 3
+    game_shape_median_generations: float = 22.0
+    game_shape_window_s: float = 2.0 * 3600.0
     step_cap: int | None = None
 
     # Monitoring.
@@ -189,6 +201,12 @@ class RunConfig:
             raise ValueError("seed starts must be >= 0")
         if self.dev_games_per_opponent < 1:
             raise ValueError("dev_games_per_opponent must be >= 1")
+        if self.dev_anchor_games < 1:
+            raise ValueError("dev_anchor_games must be >= 1")
+        if self.dev_eval_interval_s <= 0.0:
+            raise ValueError("dev_eval_interval_s must be > 0")
+        if self.dev_eval_cost_fraction <= 0.0:
+            raise ValueError("dev_eval_cost_fraction must be > 0")
         if self.games_per_cycle < 1:
             raise ValueError("games_per_cycle must be >= 1")
         if self.updates_per_cycle < 0:

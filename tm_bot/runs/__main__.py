@@ -37,12 +37,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--buffer-capacity", type=int, default=200_000)
     parser.add_argument("--learning-rate", type=float, default=5e-4)
     parser.add_argument("--checkpoint-minutes", type=float, default=30.0)
-    parser.add_argument("--dev-games", type=int, default=100)
+    parser.add_argument("--dev-games", type=int, default=104)
     parser.add_argument("--skip-dev-eval", action="store_true")
     parser.add_argument("--dev-seed-start", type=int, default=0)
     parser.add_argument("--train-seed-start", type=int, default=0)
     parser.add_argument("--keep-last-checkpoints", type=int, default=10)
-    parser.add_argument("--plateau-checkpoints", type=int, default=12)
+    parser.add_argument("--plateau-hours", type=float, default=6.0, help="Stop after this much training clock without a new best.")
+    parser.add_argument("--dev-eval-minutes", type=float, default=60.0, help="Base dev-evaluation cadence on the training clock.")
     parser.add_argument("--step-cap", type=int, default=None)
     parser.add_argument("--determinism-every-games", type=int, default=1_000)
     parser.add_argument("--warmstart", type=str, default=None)
@@ -86,7 +87,8 @@ def main(argv: list[str] | None = None) -> int:
         dev_seed_start=args.dev_seed_start,
         train_seed_start=args.train_seed_start,
         keep_last_checkpoints=args.keep_last_checkpoints,
-        plateau_checkpoints=args.plateau_checkpoints,
+        plateau_s=args.plateau_hours * 3600.0,
+        dev_eval_interval_s=args.dev_eval_minutes * 60.0,
         step_cap=args.step_cap,
         determinism_check_every_games=args.determinism_every_games,
         warmstart_checkpoint=args.warmstart,

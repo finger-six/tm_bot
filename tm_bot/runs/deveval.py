@@ -231,8 +231,8 @@ def dev_eval_interval(eval_s: float, *, base_interval_s: float, cost_fraction: f
     The base interval doubles (60 -> 120 -> 240 min) until one evaluation fits in
     `cost_fraction` of it, and never drops below the base.
     """
-    if base_interval_s <= 0.0 or not (0.0 < cost_fraction <= 1.0):
-        raise ValueError("base_interval_s must be > 0 and cost_fraction in (0, 1]")
+    if base_interval_s <= 0.0 or cost_fraction <= 0.0:
+        raise ValueError("base_interval_s and cost_fraction must be > 0")
     interval = float(base_interval_s)
     while eval_s > cost_fraction * interval:
         interval *= 2.0

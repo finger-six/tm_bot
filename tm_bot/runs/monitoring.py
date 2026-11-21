@@ -85,6 +85,8 @@ class CycleMetrics:
     # excludes the `dev_eval_s` spent on in-run dev evaluation (#26).
     training_s: float | None = None
     dev_eval_s: float | None = None
+    # Self-play game-shape stop rule input (#40 section 1).
+    median_generations: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -116,6 +118,22 @@ class CheckpointMetrics:
     best_dev_win_rate_vs_b1: float | None
     training_s: float | None = None
     dev_eval_s: float | None = None
+    # Floor-aware selection (#40 section 1): dev score D vs b1-v2, the incumbent
+    # best's D, the paired dD = D - D_best, the win rate vs the warm-start anchor,
+    # the candidate's value-head ECE vs b1-v2, failures over all pairings, and
+    # the route that made this checkpoint the new best (None if it did not).
+    dev_score_vs_b1: float | None = None
+    best_dev_score_vs_b1: float | None = None
+    dev_score_delta: float | None = None
+    dev_score_delta_ci_95: tuple[float, float] | None = None
+    dev_win_rate_vs_anchor: float | None = None
+    dev_anchor_games: int = 0
+    dev_ece_vs_b1: float | None = None
+    dev_failures: int = 0
+    new_best_route: str | None = None
+    # Wall clock of this evaluation and the cadence it leaves (#40 section 2).
+    dev_eval_wall_s: float | None = None
+    dev_eval_interval_s: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -125,7 +143,11 @@ class CheckpointMetrics:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> CheckpointMetrics:
         data = {k: v for k, v in payload.items() if k != "type"}
-        for key in ("dev_win_rate_vs_b1_ci_95", "dev_win_rate_vs_previous_best_ci_95"):
+        for key in (
+            "dev_win_rate_vs_b1_ci_95",
+            "dev_win_rate_vs_previous_best_ci_95",
+            "dev_score_delta_ci_95",
+        ):
             if data.get(key) is not None:
                 data[key] = tuple(data[key])
         return cls(**data)
