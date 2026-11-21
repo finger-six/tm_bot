@@ -30,12 +30,15 @@ decision; every field is overridable from the CLI.
 | Opponents | 50% latest / 25% last-10 pool / 10% warm-start anchor / 15% B1 | `OpponentSampler` |
 | Replay buffer | last 200,000 decisions | `ReplayBuffer` |
 | Learner | AdamW, lr 5e-4, wd 2e-4, grad clip 1.0, batch 256 | same optimizer settings as warm start |
-| Checkpoints | every 30 min | monotonic `ckpt-XXXXXXXXX/` save counter, plus `best/` |
+| Checkpoints | every 30 min | monotonic `ckpt-XXXXXXXXX/` save counter, plus `best/`; feeds the opponent pool |
 | Retained checkpoints | best + last 10 | older ones pruned |
 | Disk cap | 50 GB | oldest non-best checkpoints deleted first; a cap hit stops the run as `resource_limit` |
-| Dev evaluation | 100 `dev-*` games vs B1 and 100 vs previous best | seat-swapped pairs; selected on `dev-*` only |
-| Plateau | 12 checkpoints without a new best | |
-| Collapse (win rate) | >15 points below best for 3 checkpoints | |
+| Dev evaluation | newest checkpoint every 60 min: 104 `dev-*` games vs `b1-v2`, 104 vs the incumbent best, 56 vs the warm-start anchor | seat-swapped pairs; selected on `dev-*` only; cadence doubles while one evaluation exceeds 40% of it (`--dev-eval-minutes`) |
+| Plateau | 6 h of training clock without a new best | `--plateau-hours` |
+| Regression vs anchor | win rate vs the warm-start anchor < 35% for 3 evaluations | |
+| Margin collapse | dev score `D` > 0.05 below the best's for 3 evaluations | |
+| Game shape | self-play median > 22 generations for 2 h of training clock | hard stop |
+| Calibration | dev ECE vs `b1-v2` > 0.15 for 3 evaluations | stops the comparator; logged for main |
 | Collapse (entropy) | <10% of the initial network's entropy within 2 h | |
 | Determinism spot check | every 1,000 self-play games | replay seed + action history |
 
@@ -147,29 +150,64 @@ reported in the stop decision rather than swallowed).
 
 ## Dev evaluation and best selection
 
-`dev-*` games use `build_paired_specs` from
-[`tm_bot/eval/pairing.py`](../tm_bot/eval/pairing.py): every `(seed, map)` is
-played twice with the candidate in opposite seats, so the paired bootstrap CI is
-valid. The schedule is rounded up to whole seat-swapped pairs (104 games for a
-requested 100). The candidate plays both B1 and the previous `best/` checkpoint;
-before the first `best/` exists, the run's initial checkpoint is the previous
-best, so the first checkpoint still gets a real second pairing. That is the
-resolved warm-start checkpoint (recorded in `config.json`) for a normal run, and
-the saved random-init weights in `<run>/init/` for a `--random-init` run (see
-[Random initialisation](#random-initialisation-27)). Win rate, 95% paired
-bootstrap CI, and mean VP margin are reported by the existing evaluation report
-code. Best is selected on `dev-*` results only (`is_new_best` in
-[`stopping.py`](../tm_bot/runs/stopping.py), shared with the plateau and
-collapse rules): a higher win rate vs B1 wins; on an exact tie (e.g. 0% vs B1
-early in training) the checkpoint becomes the new best only if it beats the
-previous best with the 95% CI lower bound above 50%.
+Floor-aware selection from #40 sections 1-2 (#51). `dev-*` games use
+`build_paired_specs` from [`tm_bot/eval/pairing.py`](../tm_bot/eval/pairing.py):
+every `(seed, map)` is played twice with the candidate in opposite seats, so the
+paired bootstrap CI is valid, and every evaluation reuses the same fixed seeds
+(`dev_seed_start`). Each dev evaluation of the newest checkpoint plays three
+pairings:
+
+| Pairing | Games | Signal |
+| --- | ---: | --- |
+| vs `b1-v2` | 104 (13 seeds x 4 maps x 2 seats) | dev score `D`, win rate, mean VP margin, value-head ECE |
+| vs the incumbent best | 104 | head-to-head win rate `h` with its paired bootstrap CI |
+| vs the warm-start anchor | 56 (the first 7 of those seeds) | win rate `a` |
+
+`D = mean(o + 0.15 * m)` over the `b1-v2` games, with `o` = +1/0/-1 for a
+win/tie/loss and `m = clip(VP margin, -60, 60) / 50` (the #39 utility). At the
+floor (all losses) `D` measures VP margin; once wins appear it moves smoothly
+toward win rate. Per-game results (`DevGame`) are kept, and the incumbent's
+`b1-v2` games are stored in `state.json`, so the candidate's games pair with
+the incumbent's by `(seed, map, seat)` for a seed-clustered bootstrap CI on
+`dD = D_C - D_best` (`paired_delta_d` in
+[`deveval.py`](../tm_bot/runs/deveval.py)).
+
+The warm-start anchor is the resolved warm-start checkpoint (recorded in
+`config.json`), or the saved random-init weights in `<run>/init/` for a
+`--random-init` run (see [Random initialisation](#random-initialisation-27)).
+Until a first new best exists the anchor is the incumbent: its own `b1-v2`
+games are measured once on the same 104 seeds (`anchor_dev_score` in
+`run_summary.json`), and `a` is read from the incumbent pairing's anchor seeds
+rather than played again.
+
+`new_best_route` in [`stopping.py`](../tm_bot/runs/stopping.py) makes the
+candidate the new best only if both gates hold, G1 zero failures across all
+pairings and G2 `a >= 0.45`, and then either route does:
+
+- **R1 `delta_d`**: dD 95% CI lower bound > 0, and `h >= 0.50`.
+- **R2 `head_to_head`**: `h` 95% CI lower bound > 0.50, and dD CI lower bound
+  >= -0.03 (about -10 VP mean margin at the floor).
+
+The accepting route is logged as `new_best_route`. This replaces the v1 rule,
+which ranked by win rate vs B1 alone and picked noise at the 0% floor.
 `eval-*` seeds are never read or written by a run.
+
+### Cadence and cost cap
+
+Checkpoints are saved every 30 min of training clock for the opponent pool.
+The newest one is dev-evaluated when 60 min of training clock have passed
+since the last evaluation, and before a soft stop or the run's end. After each
+evaluation the cadence becomes the smallest of 60, 120, 240, ... min in which
+that evaluation's wall time fits in 40% (`dev_eval_cost_fraction`), so it never
+drops below 60 min; the one-time anchor baseline is not counted. Dev games use
+the agent's real play settings.
 
 ## Stopping rules
 
 `StoppingMonitor` ([`stopping.py`](../tm_bot/runs/stopping.py)) is fed metric
 events and returns a typed `StopDecision`; each rule has a synthetic-stream
-test in [`tests/test_runs.py`](../tests/test_runs.py):
+test in [`tests/test_runs.py`](../tests/test_runs.py) or
+[`tests/test_selection.py`](../tests/test_selection.py):
 
 | Rule | Trigger | Action |
 | --- | --- | --- |
@@ -177,9 +215,12 @@ test in [`tests/test_runs.py`](../tests/test_runs.py):
 | `engine_error` | bridge/worker error | hard stop, write regression case |
 | `step_cap` | game exceeded `max_decisions_per_game` | hard stop, write regression case |
 | `nonfinite_loss` | NaN/Inf learner loss | roll back to last good checkpoint, stop |
-| `collapse_win_rate` | dev win rate vs B1 >15 points below best for 3 checkpoints | stop |
 | `collapse_entropy` | policy entropy <10% of the initial value within 2 h | stop |
-| `plateau` | no new best for 12 checkpoints | stop |
+| `plateau` | no new best for 6 h of training clock (from the run start until a first one) | stop, keep the last best |
+| `regression_anchor` | `a < 0.35` for 3 consecutive dev evaluations | stop, keep the last best |
+| `margin_collapse` | `D` more than 0.05 below the best's `D` for 3 consecutive dev evaluations | stop |
+| `game_shape` | self-play median > 22 generations for 2 h of training clock (no game is truncated) | hard stop: investigate a rule bug or stall |
+| `calibration` | dev ECE vs `b1-v2` > 0.15 for 3 consecutive dev evaluations | comparator: stop and investigate; main: logged only |
 | `max_steps` | optional learner step cap | stop |
 | `resource_limit` | RAM/VRAM ceiling or disk cap hit | stop, keep state for resume |
 | `budget` | training-time budget reached (see [Training clock](#training-clock)) | stop; also polled inside the self-play batch loop, which returns partial games as `DeadlineReached` and excludes them from training |
@@ -216,7 +257,10 @@ directly comparable; batched IS-MCTS latency is search or policy-head time
 amortized across the batch and excludes encoding), throughput, determinism
 check result, and untruncated game-shape flag
 counts (generations outside 6-25) with up to 20 example games.
-Checkpoint records contain dev win rates and CIs vs B1 and the previous best.
+Checkpoint records contain dev win rates and CIs vs `b1-v2` and the incumbent,
+`D`, the best's `D`, dD and its CI, `a`, the dev ECE, failures, the new-best
+route, and the evaluation's wall time and resulting cadence. Cycle records also
+carry the median generations used by the game-shape rule.
 Determinism spot checks replay a finished game from its seed and recorded action
 history and compare generations, scores, winner, and tie (`replay_game`,
 `compare_replay`); the check counter is persisted across resume.
@@ -277,7 +321,9 @@ dev seeds — is shared with the warm-started run.
 
 `state.json` stores the cycle, learner step, self-play game count, best dev win
 rate, elapsed wall clock, training time and dev-eval time, seed cursor, opponent pool, determinism-check counter,
-entropy probe baseline, stopping-rule counters, and the init provenance
+entropy probe baseline, stopping-rule counters (plateau clock, streaks, game-shape
+clock), the incumbent's per-game `b1-v2` results, best and anchor `D`, the dev
+cadence, and the init provenance
 (`init` plus `init_checkpoint` for a random-init run). `state.pt` stores the
 model/optimizer and the replay buffer (plus the fixed entropy probe). `--resume`
 restores the model from the last good checkpoint (falling back to the newest
