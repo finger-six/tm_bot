@@ -170,12 +170,13 @@ def test_golden_table_passes_every_v2_gate(registry: CardRegistry) -> None:
     res = _reconstruct(_golden(), registry)
     assert res.table_reason is None
     # #43 gates all pass. The #44 counts are the golden's hand-computed action-phase outcomes (see
-    # tests/test_golden_v2.py): stripped rows, nested prompts never emitted, 1-candidate drops, and the
+    # tests/test_golden_v2.py): stripped rows, nested prompts never emitted, 1-candidate drops, the board
+    # kept valid to the end (#61; Alice's space row at move 47 is kept, so it adds no count), and the
     # three synthetic plays whose chosen candidate fails the static checks (quarantined).
     assert dict(res.counts_by_player[A]) == {
         "income_identity:pass": 2,
         "gate5:cancel": 1, "gate5:other_row": 1, "gate5:bundled_pass_split": 1,
-        "excluded:payment": 10, "excluded:prelude_play": 2, "excluded:space": 1,
+        "excluded:payment": 10, "excluded:prelude_play": 2, "board:valid_at_end": 1,
         "branch:menu_miss:claim_milestone": 1, "branch:single_candidate": 1,
         "project_card:menu_miss:requirement": 2, "project_card:single_candidate": 1,
         "card_action:single_candidate": 2, "standard_project:single_candidate": 1,

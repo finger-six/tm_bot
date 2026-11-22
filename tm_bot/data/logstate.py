@@ -51,8 +51,28 @@ candidate outside its menu drops the row as `menu_miss:<reason>`; a menu with fe
 candidates drops it as `single_candidate`. `branch`, `project_card` and `card_action` need the
 exact tracked hand (forward quarantine `hand_lost`); `standard_project` only needs M€ (its menu
 does not read the hand), so it is kept after a hand loss. Nested prompts that never emit rows are
-counted per row as `excluded:<type>` (`space` placements, `payment` on paid roots, `player`
-targets, effect `other_card` targets, gen-1 `prelude_play`).
+counted per row as `excluded:<type>` (`payment` on paid roots, `player` targets, effect
+`other_card` targets, gen-1 `prelude_play`).
+
+Board replay and space rows (#61). On the supported maps (`tm_bot.data.board.BOARD_MAPS`) the
+table's board is rebuilt in move order from every `places <tile> on|into <space>` segment (the
+segment's actor owns the tile), or from the structured `tile_placed` / `tile_location` fields when a
+row has no placement text. An unattributed, unparseable or unlocatable placement, or one on an
+occupied space, forward-quarantines the board (`board_quarantine:<reason>`, counted for both
+seats). After every row the board is checked against the row's snapshot: the ocean count must match
+exactly (`check:oceans`); each seat's city and greenery counts from the VP details lag placements by
+up to 10+ rows, so they only must never exceed the board's (`check:cities`, `check:greeneries`).
+From the quarantine on, rows carry no board and emit no `space` rows (placements counted
+`space:board_quarantined`). Each placement in gen 2+ emits one `space` decision on the board as of
+the rows before it, with a menu from `tm_bot.data.spacemenu` for its source's rule (the root's card,
+card action or standard project, a plant conversion including a bare `pays N Plant` row, the 0 C
+temperature ocean, or a Hellas ocean-bonus space); `placement_index` numbers the placements of one
+source. Drops: `unknown_source`, `land_claim_unknown` (Land Claim's marker space is never logged, so
+the opponent's later placements are dropped), `no_prompt` (Noctis City on Tharsis, off-Mars
+cities), `menu_miss:<rule>`, `single_candidate`. While the board is valid, gen 2+ action-phase
+snapshots carry it as `board_tiles` / `board_owners` (`Board.compact`: engine tile code and owner
+0 actor / 1 opponent / -1 per sorted space id). Each seat ends with one `board:valid_at_end`,
+`board:quarantined` or `board:unsupported_map` count.
 """
 
 from __future__ import annotations
