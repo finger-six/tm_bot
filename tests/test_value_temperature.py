@@ -1,5 +1,5 @@
 """Main value temperature (#60): fitted on val gen >= 2 logits, persisted beside (or inside) the
-checkpoint, applied to the reported P(win) only, and scored by gate check 14."""
+checkpoint, applied to the reported P(win) only, and scored by the gate's value checks."""
 
 from __future__ import annotations
 

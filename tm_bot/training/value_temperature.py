@@ -4,7 +4,7 @@
 
 T is fitted on gen >= 2 value logits (`fit_midgame_temperature`, as the comparator's warm start
 does) and written to `<checkpoint stem>.value_temperature.json` beside the checkpoint, with the
-raw and post-temperature val value reports the gate's check 14 reads. Warm starts trained since
+raw and post-temperature val value reports the gate's value checks read. Warm starts trained since
 #60 already carry T in their metadata and `metrics.json`; this is for checkpoints trained before.
 The test split is never read.
 """

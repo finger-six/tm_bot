@@ -536,7 +536,7 @@ def format_gate_report(result: Mapping[str, Any]) -> str:
     for label, key in (("Checkpoint", "checkpoint"), ("Validation metrics", "metrics_path"),
                        ("v1 opponent", "v1_checkpoint"), ("Candidate setting", "candidate_setting"),
                        ("v1 opponent setting", "v1_setting"), ("Raw-policy diagnostic", "raw_setting"),
-                       ("Value temperature (reported P(win), check 14)", "value_temperature"),
+                       ("Value temperature (reported P(win), value checks)", "value_temperature"),
                        ("Max decisions per game", "max_decisions"),
                        ("Workers / batch size", "workers"), ("Code", "git_commit")):
         if cfg.get(key) is not None:
