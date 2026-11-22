@@ -1,9 +1,9 @@
 """Run the pre-self-play gate (#47, #38 §5) on one v2 warm-start checkpoint and write the report.
 
-    python -m tm_bot.training.run_warmstart_gate --agent main --run-dir runs/warmstart-v3 \
-        --out docs/gate-warmstart-v3.md
-    python -m tm_bot.training.run_warmstart_gate --agent comparator --run-dir runs/comparator-warmstart-v2 \
-        --out docs/gate-comparator-warmstart-v2.md
+    python -m tm_bot.training.run_warmstart_gate --agent main --run-dir runs/warmstart-v4 \
+        --data-dir data/warmstart_space --out docs/gate-warmstart-v4.md
+    python -m tm_bot.training.run_warmstart_gate --agent comparator --run-dir runs/comparator-warmstart-v3 \
+        --data-dir data/warmstart_space --out docs/gate-comparator-warmstart-v3.md
 
 This module gathers the gate's inputs: the #46 run's val metrics (`<run-dir>/metrics.json`),
 train-split frequency baselines scored on the val split (setup tasks from the parquet tables,

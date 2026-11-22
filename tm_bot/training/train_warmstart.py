@@ -1,6 +1,6 @@
 """Main-agent (`TMNetwork`) v2 warm start: the shared multi-task trainer of `multitask.py` (#46).
 
-    python -m tm_bot.training.train_warmstart --data-dir data/warmstart --out-dir runs/warmstart-v3
+    python -m tm_bot.training.train_warmstart --data-dir data/warmstart_space --out-dir runs/warmstart-v4
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from tm_bot.training.multitask import (
 # The main agent trains with the shared config; this name is kept for existing callers.
 TrainConfig = WarmstartConfig
 
-DEFAULT_OUT_DIR = Path("runs/warmstart-v3")
+DEFAULT_OUT_DIR = Path("runs/warmstart-v4")
 
 
 def _build_model(vocab: CardVocab) -> TMNetwork:
@@ -45,7 +45,7 @@ def _load(path: Path, device: torch.device) -> TMNetwork:
 
 MAIN_AGENT = AgentSpec(
     name="main",
-    version="warmstart-v3",
+    version="warmstart-v4",  # v3 plus the space task and rebuilt boards (#62)
     default_out_dir=DEFAULT_OUT_DIR,
     build_model=_build_model,
     save_checkpoint=_save,
@@ -66,7 +66,7 @@ def run_warmstart_training(
     epochs_per_run: int | None = None,
     workers: int | None = None,
 ) -> dict[str, Any]:
-    """Train the main agent's `warmstart-v3` checkpoint on the v2 tables."""
+    """Train the main agent's `warmstart-v4` checkpoint on the v2 tables."""
     return run_multitask_warmstart(
         MAIN_AGENT,
         data_dir=data_dir,

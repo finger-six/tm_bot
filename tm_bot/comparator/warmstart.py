@@ -2,7 +2,7 @@
 `tm_bot.training.multitask` (#46), then temperature scaling fit on generation 2+ validation value
 logits only.
 
-    python -m tm_bot.comparator.warmstart --data-dir data/warmstart --out-dir runs/comparator-warmstart-v2
+    python -m tm_bot.comparator.warmstart --data-dir data/warmstart_space --out-dir runs/comparator-warmstart-v3
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from tm_bot.training.multitask import (
 # Same config object as the main agent: identical tasks, loss weights and step budget (#38 §4).
 ComparatorTrainConfig = WarmstartConfig
 
-DEFAULT_OUT_DIR = Path("runs/comparator-warmstart-v2")
+DEFAULT_OUT_DIR = Path("runs/comparator-warmstart-v3")
 
 
 def _build_model(vocab: CardVocab) -> ComparatorNetwork:
@@ -51,7 +51,7 @@ def _load(path: Path, device: torch.device) -> ComparatorNetwork:
 
 COMPARATOR_AGENT = AgentSpec(
     name="comparator",
-    version="comparator-warmstart-v2",
+    version="comparator-warmstart-v3",  # v2 plus the space task and rebuilt boards (#62)
     default_out_dir=DEFAULT_OUT_DIR,
     build_model=_build_model,
     save_checkpoint=_save,
@@ -71,7 +71,7 @@ def run_comparator_warmstart(
     epochs_per_run: int | None = None,
     workers: int | None = None,
 ) -> dict[str, Any]:
-    """Train the `comparator-warmstart-v2` checkpoint and fit its gen 2+ temperature on val."""
+    """Train the `comparator-warmstart-v3` checkpoint and fit its gen 2+ temperature on val."""
     return run_multitask_warmstart(
         COMPARATOR_AGENT,
         data_dir=data_dir,

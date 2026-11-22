@@ -367,8 +367,8 @@ def test_both_agents_share_tasks_weights_and_step_budget() -> None:
     assert main_cfg.value_counts() == (102, 205, 205)
     assert (main_cfg.epochs, main_cfg.steps_per_epoch, main_cfg.total_steps) == (6, 2500, 15000)
     assert main_cfg.use_amp and main_cfg.warmup_steps > 0 and main_cfg.min_lr < main_cfg.lr
-    assert train_warmstart.MAIN_AGENT.version == "warmstart-v3"
-    assert comparator_warmstart.COMPARATOR_AGENT.version == "comparator-warmstart-v2"
+    assert train_warmstart.MAIN_AGENT.version == "warmstart-v4"
+    assert comparator_warmstart.COMPARATOR_AGENT.version == "comparator-warmstart-v3"
 
 
 def test_both_agents_train_save_tagged_checkpoints_and_reports(golden_dir: Path, tmp_path: Path) -> None:
@@ -386,7 +386,7 @@ def test_both_agents_train_save_tagged_checkpoints_and_reports(golden_dir: Path,
 
     _, _, main_meta = load_checkpoint(tmp_path / "main" / "best", map_location="cpu")
     _, _, comp_meta = load_comparator_checkpoint(tmp_path / "comp" / "best", map_location="cpu")
-    for meta, version, out in ((main_meta, "warmstart-v3", "main"), (comp_meta, "comparator-warmstart-v2", "comp")):
+    for meta, version, out in ((main_meta, "warmstart-v4", "main"), (comp_meta, "comparator-warmstart-v3", "comp")):
         assert meta["version"] == version
         assert meta["warmstart_data_version"] == 2 and meta["encoder_version"] == 2
         assert meta["model_config"]["encoder_version"] == 2
