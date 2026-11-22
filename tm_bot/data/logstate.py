@@ -795,7 +795,8 @@ def reconstruct_log_state(
                 after_root(st, *root)
                 set_place_source(st, root[1] if root[0] in _SOURCE_ROOTS
                                  else spacemenu.CONVERT_PLANTS if root[0] == "convert_plants" else None)
-            elif segs and (conv := _CONVERT_RE.match(split_actor(segs[0])[1])) and conv.group(2) == "Plant"                     and split_actor(segs[0])[0] is st:
+            elif (segs and (conv := _CONVERT_RE.match(split_actor(segs[0])[1])) and conv.group(2) == "Plant"
+                  and split_actor(segs[0])[0] is st):
                 # A bare `pays N Plant` row that Gate 5 does not take as a root (its greenery is logged as
                 # `places Forest` / `places tile Forest`, or it is a final greenery) still sources the
                 # seat's next greenery placement.

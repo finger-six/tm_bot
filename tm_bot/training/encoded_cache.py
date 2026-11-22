@@ -311,11 +311,12 @@ def _vocab_fingerprint(vocab: CardVocab) -> str:
 def _code_fingerprint() -> str:
     """Hash of the modules that define the cached encoding, so a builder or encoder fix invalidates the
     cache even without a version bump."""
+    from tm_bot.data import board
     from tm_bot.models import encode
     from tm_bot.training import warmstart_builder
 
     h = hashlib.sha1()
-    for mod_file in (encode.__file__, warmstart_builder.__file__, __file__):
+    for mod_file in (board.__file__, encode.__file__, warmstart_builder.__file__, __file__):
         h.update(Path(mod_file).read_bytes().replace(b"\r\n", b"\n"))
     return h.hexdigest()
 
