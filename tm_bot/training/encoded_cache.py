@@ -309,15 +309,21 @@ def _vocab_fingerprint(vocab: CardVocab) -> str:
 
 
 def _code_fingerprint() -> str:
-    """Hash of the modules that define the cached encoding, so a builder or encoder fix invalidates the
-    cache even without a version bump."""
-    from tm_bot.data import board
+    """Hash of the modules and data that define the cached encoding, so a builder or encoder fix
+    invalidates the cache even without a version bump."""
+    from tm_bot.data import actionmenu, board
+    from tm_bot.data.logstate import SNAPSHOT_TAGS
+    from tm_bot.env import types
     from tm_bot.models import encode
     from tm_bot.training import warmstart_builder
 
     h = hashlib.sha1()
-    for mod_file in (board.__file__, encode.__file__, warmstart_builder.__file__, __file__):
+    files = (actionmenu.__file__, board.__file__, types.__file__, encode.__file__, warmstart_builder.__file__,
+             warmstart_builder._TEMPLATES_PATH, __file__)
+    for mod_file in files:
         h.update(Path(mod_file).read_bytes().replace(b"\r\n", b"\n"))
+    # Only this constant of logstate.py shapes the encoding (the `*_tags` columns are read positionally).
+    h.update(repr(SNAPSHOT_TAGS).encode("utf-8"))
     return h.hexdigest()
 
 
