@@ -234,6 +234,30 @@ Per map, policy top-1 is within a few points across Tharsis, Elysium, Hellas and
 
 The cache rebuild before training took ~9 min (16 workers). A first attempt hung when its worker pool could no longer spawn processes after the launching session ended; rerun detached, it completed normally.
 
+### Results with the space task (#62, 2026-11-21)
+
+Both agents retrained from scratch on `data/warmstart_space` with the `space` task (same 15,000-step budget and settings; `runs/warmstart-v4`, `runs/comparator-warmstart-v3`; full tables in each run's `best/report.md`). The composite now averages five action tasks, so it is not comparable with the runs above. Space baselines are the #47 gate's frequency baselines (check 9).
+
+| | Main (`warmstart-v4`) | Comparator (`comparator-warmstart-v3`) |
+| --- | ---: | ---: |
+| Selected epoch (step) | 2 (5,000) | **4 (10,000)** |
+| Train wall clock | 157.1 min | 42.4 min |
+| Composite (best) | 0.6046 | 0.5999 |
+| Space top-1 (frequency baseline 0.2851) | 0.4764 | 0.4613 |
+| Space top-1 gen 2–5 / 6–9 / 10+ | 0.5365 / 0.5032 / 0.3986 | 0.5239 / 0.4897 / 0.3797 |
+| Root branch / project card play top-1 | 0.6589 / 0.5800 | 0.6556 / 0.5510 |
+| Standard project / card action top-1 | 0.7058 / 0.7399 | 0.6982 / 0.7316 |
+| Draft pick / research buy step-0 top-1 | 0.7254 / 0.9485 | 0.7202 / 0.9471 |
+| Gen 2+ value acc / Brier / ECE (raw) | 0.7547 / 0.1625 / 0.0503 | 0.7597 / 0.1611 / 0.0524 |
+| Gen 2+ value Brier / ECE (calibrated) | 0.1601 / 0.0376 (T = 1.3556) | 0.1578 / 0.0179 (T = 1.4890) |
+| Gen 2+ VP-margin MAE (normalised) | 0.2412 | 0.2344 |
+
+- Space accuracy is lowest on the small Elysium and Vastitas Borealis (Nova) val sets (0.36–0.38 for both agents, against 0.45–0.49 on Tharsis and Hellas) and in gen 10+.
+- No other task got worse. Main is within 0.4 points of `warmstart-v3` on every task. The comparator is up to 2 points above `comparator-warmstart-v2` (root branch, project play and standard project), mostly because a later epoch was selected.
+- Main repeats the value overfit above: gen 2+ val Brier 0.1530, 0.1625, 0.1985, 0.2262, 0.2373, 0.2405 over epochs 1–6, so epoch 2 is selected again (space top-1 keeps rising to 0.5257 at epoch 6).
+- The comparator's value Brier rises only mildly (0.1562, 0.1556, 0.1581, 0.1611, 0.1665, 0.1706), so its space and action-task gains carry the composite to epoch 4.
+- Main's post-temperature ECE (0.0376) clears the gate's 0.040 bar by a thin margin; a single temperature does less for `warmstart-v4` than #58 measured on `warmstart-v3` (0.012).
+
 ## 6. Pre-self-play gate (#47)
 
 Both v2 warm starts must pass every #38 §5 check before self-play. The checks and the report are pure functions in [`tm_bot/training/warmstart_gate.py`](../tm_bot/training/warmstart_gate.py); [`run_warmstart_gate.py`](../tm_bot/training/run_warmstart_gate.py) gathers their inputs and writes `<out>.md` plus `<out>.json`.
@@ -246,3 +270,17 @@ python -m tm_bot.training.run_warmstart_gate --agent comparator --run-dir runs/c
 - **Validation** reads `<run-dir>/metrics.json` (`val`). Both agents' value checks are judged post-temperature (`value_calibrated`; #58 amended check 14 for the main agent), a pre-#60 main warm start through its `checkpoint.value_temperature.json`. Frequency baselines rank each row's candidates by train-split selection counts and are scored on val: corporation and prelude from `setup_choices`, the gen 2+ tasks from the encoded cache (the same rows the model was scored on; ties go to the earlier candidate; research buys score step 0 like the model; a space is its map and grid position, since space candidates have no card id). A policy task passes only if the model beats its baseline overall; per-map numbers are reported, not gated. Since #62 (decision 4 of #59) `space` is one of these tasks, so each agent has 31 gating checks instead of 30: the space baseline is check 9 and every later check moves down one (#58's check 14, the value ECE, is now check 15). Value accuracy must rise strictly over `gen 2-5` → `6-9` → `10+`.
 - **Live games** use `dev-*` seeds from `dev-0000` and the eval harness's seat-swapped schedule: 104 games vs `b0-v1`, 40 self-mirror games, 104 vs the archived v1 warm start (`runs/warmstart/best` or `runs/comparator-warmstart-full/best`, same settings as the candidate, except that the v1 main warm start keeps its visit-count root rule), and 104 vs `b1-v2`. The main agent plays light search, #39's 8/4 fallback budget (`c_puct` 1.5, temperature 0, action temperature 1, wave 4) with the completed-Q root policy π′ (#60); its raw-policy diagnostic is the same agent at 0 simulations, 104 more games vs `b1-v2`. The comparator plays its sampled evaluation policy. Failures are counted over every pairing played, the diagnostic one included (`IndexError` = illegal response, `StepCapError` = step cap, anything else = adapter error). Logged, not gated: win rate vs `b1-v2`, search minus raw policy (own VP and margin vs `b1-v2`), and live value Brier / ECE / accuracy of the reported (post-temperature) P(win) per opponent (`b1-v2`, self-mirror, v1 warm start).
 - Each finished pairing's games are saved under `--work-dir` (default `<run-dir>/gate/`); `--resume` reuses them. `--skip-validation`, `--skip-live`, `--seeds` and `--maps` are for smoke runs: skipped or shortened parts fail their checks, so such a report never reads PASS.
+
+### Results
+
+| Run | Date | Verdict | Own VP / margin vs `b1-v2` | Win rate vs `b1-v2` | Report |
+| --- | --- | --- | ---: | ---: | --- |
+| `warmstart-v3` (main) | 2026-11-21 | FAIL 27/30 (value ECE; own VP and margin vs `b1-v2`) | 57.30 / −55.05 | 1.0% [0.0, 2.9] | [`gate-warmstart-v3.md`](gate-warmstart-v3.md) |
+| `comparator-warmstart-v2` | 2026-11-21 | PASS 30/30 | 76.92 / −19.34 | 21.2% [11.5, 30.8] | [`gate-comparator-warmstart-v2.md`](gate-comparator-warmstart-v2.md) |
+| `warmstart-v4` (main, #62) | 2026-11-22 | **PASS 31/31** | 82.77 / −10.65 | 29.8% [14.4, 47.1] | [`gate-warmstart-v4.md`](gate-warmstart-v4.md) |
+| `comparator-warmstart-v3` (#62) | 2026-11-22 | **PASS 31/31** | 80.03 / −13.81 | 26.9% [17.3, 38.5] | [`gate-comparator-warmstart-v3.md`](gate-comparator-warmstart-v3.md) |
+
+- The re-run combines #60 (completed-Q root policy, calibrated value output) and #62 (space supervision). The main agent's light search now beats its raw policy against `b1-v2` (+2.46 own VP, +3.23 margin; raw 80.31 / −13.88), where `warmstart-v3`'s search lost 23 VP to its raw policy (#57).
+- Both agents win all 104 games vs `b0-v1` (margin +84.0 main, +82.1 comparator) and all 104 vs their v1 warm starts; self-mirror median length is 13 / 12 generations; there are 0 failures across 456 (main) and 352 (comparator) games.
+- Closest calls: main's post-temperature val ECE is 0.0376 against the 0.040 bar. The live value is still miscalibrated against `b1-v2` (post-temperature ECE 0.34 main, 0.22 comparator), which is not gated; #58 leaves it to the `b1-v2` self-play slice.
+- With both agents passing, self-play may start with the 1 h gate (#52).
