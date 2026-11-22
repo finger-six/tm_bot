@@ -156,14 +156,16 @@ CE(policy, π′) + 1.0·BCE(win_logit, o) + 0.3·SmoothL1(vp_margin_pred, m)
   are left out. β = `kl_anchor_beta` = 0.05, constant.
 - **Human-data auxiliary loss** `L_human`: the full #38 multi-task warm-start
   loss (every policy head, win and margin heads, `WarmstartConfig` weights and
-  per-task minibatches, ~3.3k rows) on one train-split human minibatch per
+  per-task minibatches, ~3.6k rows) on one train-split human minibatch per
   update, back-propagated group by group like the warm start. λ_h is 0.5 for
   training hours 0-2, linear to 0.1 at hour 8, then 0.1
   (`RunConfig.human_aux_schedule`). Hours are the run's training clock
   (`SelfPlayRunner.training_s`: wall clock minus in-run dev evaluation,
   continued across `--resume`), read once per cycle before its updates.
 - **Resident human sample** ([`human_aux.py`](../tm_bot/training/human_aux.py)):
-  at run start the learner loads `data/warmstart` and its encoded cache, draws
+  at run start the learner loads `data/warmstart` (`human_aux_data_dir`; since #62
+  it must hold `action_spaces.parquet`, e.g. `data/warmstart_space`, because the
+  loss includes the `space` head) and its encoded cache, draws
   at most `human_aux_max_rows` = 1,000,000 train rows once (split across the
   sampler's pools in proportion to their per-step draws; a smaller pool is taken
   whole), copies the chosen cache rows into RAM and releases the memory maps. At

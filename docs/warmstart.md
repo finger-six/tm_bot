@@ -142,12 +142,12 @@ Numbers are from the `warmstart-v2` run (draft rows carry draft history, opponen
 
 ## 5. v2 Warm Start (#46)
 
-Both agents' v2 warm starts (`warmstart-v3` for `TMNetwork`, `comparator-warmstart-v2` for `ComparatorNetwork`) run one shared trainer, [`tm_bot/training/multitask.py`](../tm_bot/training/multitask.py), with one `WarmstartConfig` (decisions in #38 §4). The v1 sections above stay as the record of the v1 runs.
+Both agents' v2 warm starts (`warmstart-v3` for `TMNetwork`, `comparator-warmstart-v2` for `ComparatorNetwork`) run one shared trainer, [`tm_bot/training/multitask.py`](../tm_bot/training/multitask.py), with one `WarmstartConfig` (decisions in #38 §4). The v1 sections above stay as the record of the v1 runs. Since #62 the trainer also has the `space` task and needs an extraction with `action_spaces.parquet` (#61); its checkpoints are `warmstart-v4` and `comparator-warmstart-v3`.
 
 ```
-python -m tm_bot.training.encoded_cache --data-dir data/warmstart          # optional: the trainers build it on demand
-python -m tm_bot.training.train_warmstart --data-dir data/warmstart --out-dir runs/warmstart-v3
-python -m tm_bot.comparator.warmstart --data-dir data/warmstart --out-dir runs/comparator-warmstart-v2
+python -m tm_bot.training.encoded_cache --data-dir data/warmstart_space          # optional: the trainers build it on demand
+python -m tm_bot.training.train_warmstart --data-dir data/warmstart_space --out-dir runs/warmstart-v4
+python -m tm_bot.comparator.warmstart --data-dir data/warmstart_space --out-dir runs/comparator-warmstart-v3
 ```
 
 ### Tasks, sampling and loss
@@ -163,11 +163,13 @@ python -m tm_bot.comparator.warmstart --data-dir data/warmstart --out-dir runs/c
 | Project card play | `action_project_cards` | 512 | CE | 1.00 |
 | Standard project | `action_standard_projects` | 256 | CE | 0.40 |
 | Card action | `action_card_actions` | 256 | CE | 0.40 |
+| Tile placement (`space`, #62) | `action_spaces` | 256 | CE over the legal spaces | 0.40 |
 | Value: win | 512 = 102 `setup_outcomes` + 205 `midgame_values` research + 205 action | 512 | BCE on `win_logit` | 0.80 |
 | Value: VP margin | same rows | | SmoothL1 (β 0.2) on `clip(margin, ±60) / 50` | 0.30 |
 
 - The two gen 2+ value kinds are told apart by the `midgame_values.phase` column (`research` at a generation boundary, `action` for the strided action points). Every v2 value row carries `vp_margin`; a row without one (e.g. the v1 `setup_outcomes` backup) gets no margin loss.
 - Research buys use the adapter's sequential `multi_card` frame like the initial project buy: each sample picks a uniform number of the bought cards, the target is uniform over the unpicked bought cards, or `done` once all are picked.
+- `space` (#62) takes the band #38 gave the other action sub-choices of about 0.5–1.5M train rows (standard project, card action): 256 rows at weight 0.40. It has 1,135,626 train rows, against several million for root branch and project play (512 at 1.00).
 - Each task walks its own shuffled train permutation, so the 6M+ action rows can't crowd out setup, research buys or value. Each forward group is back-propagated as soon as it is computed (same gradient as the summed loss, one group's activations alive at a time).
 - Budget, identical for both agents: 6 epochs × 2,500 = 15,000 AdamW steps, `lr 5e-4 → 3e-5` cosine after 500 warmup steps, weight decay `2e-4`, grad clip 1.0, bf16 autocast. `tests/test_warmstart_v2.py` asserts both agents' CLI configs are equal and pins every number above.
 
@@ -181,7 +183,7 @@ Exactness: the cache stores the encoder's own outputs, with the empty board take
 
 ### Space supervision data (#61)
 
-The extractor rebuilds each supported table's board from the log placements ([`board.py`](../tm_bot/data/board.py), replay and checks in [`logstate.py`](../tm_bot/data/logstate.py)) and emits one `action_spaces` row per gen 2+ tile placement, with a legal-space menu from a port of the engine placement rules ([`spacemenu.py`](../tm_bot/data/spacemenu.py); columns `rule`, `source`, `tile`, `placement_index`). Gen 2+ action-phase rows of every table also carry the rebuilt board as `board_tiles` / `board_owners` while it is valid. `tests/test_space_parity_v2.py` checks the menus and the built prompts against the live adapter on all four maps; `tests/test_board_v2.py` covers coordinates, menus, replay quarantine and the compact board round trip. The space task is cached (`space`) but not yet in the trainers' task table.
+The extractor rebuilds each supported table's board from the log placements ([`board.py`](../tm_bot/data/board.py), replay and checks in [`logstate.py`](../tm_bot/data/logstate.py)) and emits one `action_spaces` row per gen 2+ tile placement, with a legal-space menu from a port of the engine placement rules ([`spacemenu.py`](../tm_bot/data/spacemenu.py); columns `rule`, `source`, `tile`, `placement_index`). Gen 2+ action-phase rows of every table also carry the rebuilt board as `board_tiles` / `board_owners` while it is valid. `tests/test_space_parity_v2.py` checks the menus and the built prompts against the live adapter on all four maps; `tests/test_board_v2.py` covers coordinates, menus, replay quarantine and the compact board round trip. The space task is cached (`space`) and, since #62, trained (§5 task table).
 
 Full extraction (2026-11-21, `data/warmstart_space`, 4,450 s wall, peak working set 5.4 GiB): 1,261,604 space rows (train 1,135,626 / val 61,262 / test 64,716; Tharsis 919,659, Hellas 323,003, Elysium 11,226, Vastitas Borealis 7,716), menu miss 0.13% (1,730 of 1,288,176; largest rules `greenery` 1,061 and `mining_area` 424). A per-map rerun over every eligible Elysium and Vastitas Borealis file and the first 1,200 Hellas files found menu miss 0.21% / 0.34% / 0.14%. 16,435 of 111,682 seat-boards were quarantined (mostly `check:greeneries`, 15,457: a greenery the snapshot counts but the log never places; Vastitas Borealis quarantines 26% of seat-boards against ~15% elsewhere, all on this check), and 82,525 rows were dropped as `land_claim_unknown` (Land Claim's space is never logged).
 
@@ -189,7 +191,7 @@ Known approximations: city and greenery counts are checked one-sided (VP details
 
 ### Selection, metrics and calibration
 
-- Checkpoint selection after each 2,500-step epoch on the val split: `0.25 · mean(corp, prelude step-0, draft, research-buy step-0) + 0.50 · mean(branch, project play, standard project, card action) + 0.25 · max(0, 1 − gen 2+ value Brier / 0.25)`. Research-buy accuracy is step-0 accuracy (the top candidate is one of the bought cards); done-stop accuracy is reported alongside.
+- Checkpoint selection after each 2,500-step epoch on the val split: `0.25 · mean(corp, prelude step-0, draft, research-buy step-0) + 0.50 · mean(branch, project play, standard project, card action, space) + 0.25 · max(0, 1 − gen 2+ value Brier / 0.25)` (`space` since #62; the v3/v2 runs below used the four-task mean). Research-buy accuracy is step-0 accuracy (the top candidate is one of the bought cards); done-stop accuracy is reported alongside.
 - Reports give per-task top-1 overall, per map and per generation bucket (`gen 1`, `2–5`, `6–9`, `10+`), and value accuracy / Brier / ECE per bucket, per phase and per map, for both agents.
 - Both agents' value temperatures are fit on gen 2+ val value logits only (`calibration.fit_midgame_temperature`; the main agent's since #60), stored in the checkpoint metadata (`temperature`) and `metrics.json` (`value_calibrated`), and the reports add the calibrated value table. The temperature only scales the reported P(win) (`PolicyValueAgent.win_probability`, the gate); the main agent's search leaves keep the raw value head. A main checkpoint trained before #60 gets its fit from `python -m tm_bot.training.value_temperature --checkpoint <run>/best`, written beside it as `checkpoint.value_temperature.json` (with the checkpoint's SHA-256, so it never applies to other weights).
 - The test split is not evaluated by these runs, and the pre-self-play gate (#47) uses the val split too (#38 §5).
@@ -237,10 +239,10 @@ The cache rebuild before training took ~9 min (16 workers). A first attempt hung
 Both v2 warm starts must pass every #38 §5 check before self-play. The checks and the report are pure functions in [`tm_bot/training/warmstart_gate.py`](../tm_bot/training/warmstart_gate.py); [`run_warmstart_gate.py`](../tm_bot/training/run_warmstart_gate.py) gathers their inputs and writes `<out>.md` plus `<out>.json`.
 
 ```
-python -m tm_bot.training.run_warmstart_gate --agent main --run-dir runs/warmstart-v3 --out docs/gate-warmstart-v3.md
-python -m tm_bot.training.run_warmstart_gate --agent comparator --run-dir runs/comparator-warmstart-v2 --out docs/gate-comparator-warmstart-v2.md
+python -m tm_bot.training.run_warmstart_gate --agent main --run-dir runs/warmstart-v4 --data-dir data/warmstart_space --out docs/gate-warmstart-v4.md
+python -m tm_bot.training.run_warmstart_gate --agent comparator --run-dir runs/comparator-warmstart-v3 --data-dir data/warmstart_space --out docs/gate-comparator-warmstart-v3.md
 ```
 
-- **Validation** reads `<run-dir>/metrics.json` (`val`). Both agents' value checks are judged post-temperature (`value_calibrated`; #58 amended check 14 for the main agent), a pre-#60 main warm start through its `checkpoint.value_temperature.json`. Frequency baselines rank each row's candidates by train-split selection counts and are scored on val: corporation and prelude from `setup_choices`, the gen 2+ tasks from the encoded cache (the same rows the model was scored on; ties go to the earlier candidate; research buys score step 0 like the model). A policy task passes only if the model beats its baseline overall; per-map numbers are reported, not gated. Value accuracy must rise strictly over `gen 2-5` → `6-9` → `10+`.
+- **Validation** reads `<run-dir>/metrics.json` (`val`). Both agents' value checks are judged post-temperature (`value_calibrated`; #58 amended check 14 for the main agent), a pre-#60 main warm start through its `checkpoint.value_temperature.json`. Frequency baselines rank each row's candidates by train-split selection counts and are scored on val: corporation and prelude from `setup_choices`, the gen 2+ tasks from the encoded cache (the same rows the model was scored on; ties go to the earlier candidate; research buys score step 0 like the model; a space is its map and grid position, since space candidates have no card id). A policy task passes only if the model beats its baseline overall; per-map numbers are reported, not gated. Since #62 (decision 4 of #59) `space` is one of these tasks, so each agent has 31 gating checks instead of 30: the space baseline is check 9 and every later check moves down one (#58's check 14, the value ECE, is now check 15). Value accuracy must rise strictly over `gen 2-5` → `6-9` → `10+`.
 - **Live games** use `dev-*` seeds from `dev-0000` and the eval harness's seat-swapped schedule: 104 games vs `b0-v1`, 40 self-mirror games, 104 vs the archived v1 warm start (`runs/warmstart/best` or `runs/comparator-warmstart-full/best`, same settings as the candidate, except that the v1 main warm start keeps its visit-count root rule), and 104 vs `b1-v2`. The main agent plays light search, #39's 8/4 fallback budget (`c_puct` 1.5, temperature 0, action temperature 1, wave 4) with the completed-Q root policy π′ (#60); its raw-policy diagnostic is the same agent at 0 simulations, 104 more games vs `b1-v2`. The comparator plays its sampled evaluation policy. Failures are counted over every pairing played, the diagnostic one included (`IndexError` = illegal response, `StepCapError` = step cap, anything else = adapter error). Logged, not gated: win rate vs `b1-v2`, search minus raw policy (own VP and margin vs `b1-v2`), and live value Brier / ECE / accuracy of the reported (post-temperature) P(win) per opponent (`b1-v2`, self-mirror, v1 warm start).
 - Each finished pairing's games are saved under `--work-dir` (default `<run-dir>/gate/`); `--resume` reuses them. `--skip-validation`, `--skip-live`, `--seeds` and `--maps` are for smoke runs: skipped or shortened parts fail their checks, so such a report never reads PASS.
