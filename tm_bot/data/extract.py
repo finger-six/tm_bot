@@ -105,6 +105,10 @@ def _snapshot_fields() -> list[tuple[str, pa.DataType]]:
         ("me_research_kept", pa.list_(_STR_LIST)),
         ("me_research_discarded", pa.list_(_STR_LIST)),
         ("me_discarded_seen", _STR_LIST),
+        # Rebuilt board (#61) on gen 2+ action-phase rows while it is valid, else empty: per map-template
+        # space (sorted ids) the engine tile code (-1 empty) and the owner (-1 none, 0 actor, 1 opponent).
+        ("board_tiles", pa.list_(pa.int8())),
+        ("board_owners", pa.list_(pa.int8())),
     ]
     return fields
 
@@ -199,6 +203,8 @@ _ACTION_TABLES: dict[str, tuple[str, pa.Schema]] = {
     "project_card": ("action_project_cards", _action_schema()),
     "card_action": ("action_card_actions", _action_schema()),
     "standard_project": ("action_standard_projects", _action_schema()),
+    "space": ("action_spaces", _action_schema(
+        ("rule", pa.string()), ("source", pa.string()), ("tile", pa.string()), ("placement_index", pa.int32()))),
 }
 assert set(_ACTION_TABLES) == set(ACTION_TASKS)
 
@@ -697,9 +703,11 @@ def run_extraction(
             ev = chosen_persp.evaluation
             ls = chosen_persp.logstate
             decisions: dict[tuple[str, int], LogDecision] = {}
+            own_decisions: list[LogDecision] = []
             if ls is not None and ls.table_reason is None:
                 v2_counts.update(ls.counts_by_player.get(pid) or {})
-                decisions = {(d.kind, d.move_number): d for d in ls.decisions if d.player_id == pid}
+                own_decisions = [d for d in ls.decisions if d.player_id == pid]
+                decisions = {(d.kind, d.move_number): d for d in own_decisions if d.kind != "space"}
             else:
                 v2_counts[f"table:{ls.table_reason if ls is not None else 'not_reconstructed'}"] += 1
             if chosen_persp.path not in counted_draft_persps:
@@ -749,8 +757,8 @@ def run_extraction(
                 by_map[group_map_bucket]["examples"]["research_buys"] += 1
 
             # Action-phase policy rows (setup-passed tables, conceded ones included; resignation rows
-            # never become decisions).
-            for d in decisions.values():
+            # never become decisions). One row can carry several `space` placements.
+            for d in own_decisions:
                 if d.kind not in _ACTION_TABLES or d.drop_reason is not None:
                     continue
                 name = _ACTION_TABLES[d.kind][0]

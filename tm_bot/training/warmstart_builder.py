@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tm_bot.agents.card_data import CardSpec, load_card_data
-from tm_bot.data import actionmenu
+from tm_bot.data import actionmenu, spacemenu
+from tm_bot.data.board import apply_compact_board
 from tm_bot.data.logstate import SNAPSHOT_TAGS
 from tm_bot.env.types import (
     SUPPORTED_MAPS,
@@ -574,9 +575,10 @@ def build_state_observation(
     """Reconstruct a gen 2+ `ActorObservation` from one v2 snapshot-group row.
 
     Populates globals, both seats' TR/stocks/productions/tags/cities/hand counts and public tableaus,
-    milestone `claimedBy` and award `fundedBy`, the actor's tracked hand, and its setup and
-    research-buy history. Unrecoverable fields (deck sizes, milestone/award scores, per-card
-    resources, board spaces, used actions) stay at their map-template / neutral defaults (#38 2D).
+    milestone `claimedBy` and award `fundedBy`, the actor's tracked hand, its setup and research-buy
+    history, and the rebuilt board when the row carries one (`board_tiles` / `board_owners`, #61;
+    otherwise the empty map-template board). Unrecoverable fields (deck sizes, milestone/award
+    scores, per-card resources, used actions) stay at their map-template / neutral defaults (#38 2D).
     """
     actor = _validate_seat(row["seat"])
     specs = cards_by_name if cards_by_name is not None else load_card_data()
@@ -593,6 +595,8 @@ def build_state_observation(
     }
     _apply_snapshot_player(pub["players"][actor], row, "me")
     _apply_snapshot_player(pub["players"][1 - actor], row, "opp")
+    if row.get("board_tiles"):
+        apply_compact_board(pub["spaces"], row["board_tiles"], row["board_owners"], actor)
     claimed = {str(n): int(s) for n, s in zip(row["milestone_names"], row["milestone_seats"]) if int(s) in (0, 1)}
     funded = {str(n): int(s) for n, s in zip(row["award_names"], row["award_seats"]) if int(s) in (0, 1)}
     for ms in pub["milestones"]:
@@ -806,6 +810,60 @@ def build_standard_project_choice(
     obs = _action_observation(row, cards_by_name, templates)
     cands = tuple(Candidate(id=c, label=c) for c in sorted(str(c) for c in row["menu"]))
     return obs, Choice(seat=obs["actor"], kind="project_card", prompt="Standard projects", candidates=cands)
+
+
+# `SelectSpace` titles of the placement sources whose title is not their tile kind's default (the
+# engine's `PlaceCityTile` / `PlaceGreeneryTile` / `PlaceOceanTile` / `PlaceTile` and card titles).
+_SPACE_PROMPTS: dict[str, str] = {
+    spacemenu.TEMPERATURE_OCEAN_BONUS: "Select space for ocean from temperature increase",
+    spacemenu.HELLAS_OCEAN_BONUS: "Select space for ocean from placement bonus",
+    "Research Outpost": "Select place next to no other tile for city",
+    "Urbanized Area": "Select space next to at least 2 other city tiles",
+    "Noctis City": "Select space for Noctis City",
+    "Lava Tube Settlement": "Select either Tharsis Tholus, Ascraeus Mons, Pavonis Mons or Arsia Mons",
+    "Lava Flows": "Select either Tharsis Tholus, Ascraeus Mons, Pavonis Mons or Arsia Mons",
+    "Capital": "Select space for special city tile",
+    "Mangrove": "Select space reserved for ocean to place greenery tile",
+    "Protected Valley": "Select space reserved for ocean to place greenery tile",
+    "Artificial Lake": "Select a land space to place an ocean tile",
+    "Ecological Zone": "Select space next to greenery for special tile",
+    "Industrial Center": "Select space adjacent to a city tile",
+    "Mining Area": "Select a space with a steel or titanium bonus adjacent to one of your tiles",
+    "Mining Rights": "Select a space with a steel or titanium bonus",
+}
+_SPACE_KIND_PROMPTS: dict[str, str] = {
+    "city": "Select space for city tile", "greenery": "Select space for greenery tile",
+    "ocean": "Select space for ocean tile",
+}
+
+
+def space_prompt(row: Mapping[str, Any], specs: Mapping[str, CardSpec]) -> str:
+    """The adapter's `SelectSpace` title for a `space` row's placement source."""
+    source = str(row["source"])
+    if source in specs and specs[source].oceans == 2 and specs[source].card_type != "standard_project":
+        return f"Select space for {'second' if int(row['placement_index']) else 'first'} ocean"
+    if source == spacemenu.CONVERT_PLANTS:
+        return f"Convert {actionmenu.plants_for_greenery(row)} plants into greenery"
+    if source in _SPACE_PROMPTS:
+        return _SPACE_PROMPTS[source]
+    kind = spacemenu.placement_sources({}).get(source, ("ocean", ""))[0]
+    return _SPACE_KIND_PROMPTS.get(kind, f"Select space for {source} tile")
+
+
+def build_space_choice(
+    row: Mapping[str, Any],
+    *,
+    cards_by_name: Mapping[str, CardSpec] | None = None,
+    templates: Mapping[str, dict[str, Any]] | None = None,
+) -> tuple[ActorObservation, Choice]:
+    """Tile placement prompt (adapter kind `space`) over the row's legal spaces on the rebuilt board.
+
+    The engine lists the spaces in board order, which is sorted space-id order.
+    """
+    specs = cards_by_name if cards_by_name is not None else load_card_data()
+    obs = _action_observation(row, specs, templates)
+    cands = tuple(Candidate(id=s, label=s) for s in sorted(str(s) for s in row["menu"]))
+    return obs, Choice(seat=obs["actor"], kind="space", prompt=space_prompt(row, specs), candidates=cands)
 
 
 def build_midgame_value_observation(

@@ -63,7 +63,21 @@ from dataclasses import dataclass, field
 from typing import Any, Collection, Mapping
 
 from tm_bot.agents.card_data import CardSpec, load_card_data
-from tm_bot.data import actionmenu
+from tm_bot.data import actionmenu, spacemenu
+from tm_bot.data.board import (
+    CITY_TILES,
+    GREENERY,
+    NO_TILE,
+    OCEAN,
+    OCEAN_BONUS,
+    BOARD_MAPS,
+    Board,
+    Placement,
+    geometry,
+    locate,
+    parse_placement,
+    structured_placement,
+)
 from tm_bot.data.cards import CardRegistry
 from tm_bot.data.gates import DraftExtractionResult, SetupGateResult, VerifiedDraftPick
 from tm_bot.data.inventory import _opt_str, normalize_map
@@ -105,9 +119,12 @@ _STANDARD_PROJECT_RE = re.compile(r"^plays standard project (.+)$")
 _FUNDS_AWARD_RE = re.compile(r"^funds (.+) award$")
 _CONVERT_RE = re.compile(r"^pays (\d+) (Heat|Plant)$")
 _PLACES_RE = re.compile(r"^places .+ (?:on|into) ")
+_ANY_PLACES_RE = re.compile(r"(?:^| )places .+ (?:on|into) ")
 _TARGET_VERBS = ("reduces ", "loses ", "removes ")
 _RESIGN_MARKERS = ("concedes the game", "resigns")
-ACTION_TASKS: tuple[str, ...] = ("branch", "project_card", "card_action", "standard_project")
+ACTION_TASKS: tuple[str, ...] = ("branch", "project_card", "card_action", "standard_project", "space")
+# Root -> the placement source its nested tile placements come from (`spacemenu.placement_sources`).
+_SOURCE_ROOTS = frozenset({"play_card", "card_action", "standard_project"})
 
 
 def income_identity_mc(
@@ -142,6 +159,7 @@ class LogStateResult:
     gen_start_mc: dict[tuple[str, int], int] = field(default_factory=dict)
     income_checks: dict[tuple[str, int], str] = field(default_factory=dict)
     hand_lost_at: dict[str, int] = field(default_factory=dict)
+    board_lost: tuple[int, str] | None = None  # (move, reason) of the board's forward quarantine
 
     def count(self, pid: str, key: str) -> None:
         """Count one gate outcome, in total and for the seat it belongs to."""
@@ -169,6 +187,14 @@ class _Seat:
     turn_actions: int = 0
     passed: bool = False
     last_played: str | None = None
+    # Tile placements (#61): the current root's placement source, its pre-move action context and the
+    # space of the root's last placement (a Hellas ocean-bonus space grants a further ocean).
+    place_source: str | None = None
+    place_ctx: dict[str, Any] | None = None
+    last_place: str | None = None
+    place_count: int = 0  # placements the current root's source has made so far
+    temperature_ocean: bool = False  # raised the temperature to 0 C: the engine grants an ocean
+    land_claimed: bool = False  # played Land Claim: its (unlogged) marker closes one space to the opponent
 
 
 @dataclass
@@ -295,6 +321,9 @@ def reconstruct_log_state(
     for p in drafts.picks:
         picks_by_gen.setdefault((p.player_id, p.generation), []).append(p)
 
+    board = Board(geometry(BOARD_MAPS[map_name])) if map_name in BOARD_MAPS else None
+    sources = spacemenu.placement_sources(specs)
+
     prev_gs: dict[str, Any] | None = None
     gen = 1
     research_open = False
@@ -361,7 +390,21 @@ def reconstruct_log_state(
         snap["me_research_kept"] = [list(r["kept"]) for r in actor.research]
         snap["me_research_discarded"] = [list(r["discarded"]) for r in actor.research]
         snap["me_discarded_seen"] = sorted(actor.discarded_seen)
+        # The rebuilt board rides on gen 2+ action-phase rows while it is valid (#61).
+        tiles, owners = (board.compact(actor.seat) if phase == "action" and gen >= 2 and board_valid()
+                         else ([], []))
+        snap["board_tiles"], snap["board_owners"] = tiles, owners
         return snap
+
+    def board_valid() -> bool:
+        return board is not None and result.board_lost is None
+
+    def lose_board(move: int, reason: str) -> None:
+        """Forward quarantine: the template board from `move` on, no `space` rows (counted per seat)."""
+        if board_valid():
+            result.board_lost = (move, reason)
+            for st in seats.values():
+                result.count(st.pid, f"board_quarantine:{reason}")
 
     def emit(kind: str, st: _Seat, move: int, gs: dict[str, Any], phase: str, payload: dict[str, Any],
              drop: str | None = None, snap: dict[str, Any] | None = None) -> None:
@@ -438,6 +481,7 @@ def reconstruct_log_state(
         # `usedActions`); identical at the root and at its nested prompt.
         ctx = {"turn_action": st.turn_actions, "opp_passed": opp.passed,
                "me_used_actions": sorted(st.used_actions), "opp_used_actions": sorted(opp.used_actions)}
+        st.place_ctx = ctx
 
         def finish(kind: str, payload: dict[str, Any], drop: str | None) -> None:
             if drop is not None:
@@ -505,8 +549,6 @@ def reconstruct_log_state(
     def count_excluded(st: _Seat, act: str | None, segs: list[str], root: tuple[str, Any] | None) -> None:
         """Count the nested prompts a row shows evidence of; they never emit warm-start rows (#38 2D)."""
         parts = [split_actor(seg) for seg in segs]
-        if any(_PLACES_RE.match(rest) for who, rest in parts if who is not None):
-            result.count(st.pid, "excluded:space")
         if root is not None and root[0] in ("play_card", "standard_project", "claim_milestone", "fund_award",
                                             "card_action") and any(
                 who is st and rest.startswith("pays ") for who, rest in parts):
@@ -592,6 +634,85 @@ def reconstruct_log_state(
             st.research.append({"generation": gen, "offered": sorted(packet), "kept": sorted(kept),
                                 "discarded": sorted(set(packet) - set(kept))})
 
+    def set_place_source(st: _Seat, source: str | None) -> None:
+        """A new root ends every seat's previous root; its nested placements come from `source`."""
+        for other in seats.values():
+            other.place_source, other.last_place, other.place_count = None, None, 0
+        st.place_source = source
+        if source is None:
+            st.place_ctx = None
+
+    def place_tile(who: _Seat | None, placement: Placement | None, tile_location: Any, move: int,
+                   gs_prev: dict[str, Any] | None) -> None:
+        """Apply one placement, emitting its `space` row first (state = the board before it).
+
+        An unparseable, unattributable or unlocatable placement, or one on an occupied space,
+        forward-quarantines the board (`board_quarantine:<reason>`).
+        """
+        assert board is not None
+        if who is None:
+            return lose_board(move, "unattributed_placement")
+        if placement is None or placement.kind is None:
+            return lose_board(move, "unparseable_placement")
+        sid = locate(board.geo, placement, tile_location)
+        if sid is None:
+            return lose_board(move, "unlocatable_placement")
+        if board.tile(sid) != NO_TILE:
+            return lose_board(move, "occupied_space")
+        src = who.place_source
+        entry = sources.get(src) if src is not None else None
+        if (entry is None or entry[0] != placement.kind) and placement.kind == "ocean" and who.last_place is not None \
+                and OCEAN_BONUS in (int(b) for b in board.geo.spaces[who.last_place]["bonus"]):
+            src, entry = spacemenu.HELLAS_OCEAN_BONUS, sources[spacemenu.HELLAS_OCEAN_BONUS]
+        elif (entry is None or entry[0] != placement.kind) and placement.kind == "ocean" and who.temperature_ocean:
+            src, entry = spacemenu.TEMPERATURE_OCEAN_BONUS, sources[spacemenu.TEMPERATURE_OCEAN_BONUS]
+            who.temperature_ocean = False
+        if entry is not None and entry[0] != placement.kind:
+            entry = None
+        if gen >= 2 and gs_prev is not None:
+            snap = snapshot(who, gs_prev, "action")
+            menu: list[str] = []
+            rule = entry[1] if entry is not None else None
+            if entry is None:
+                drop: str | None = "unknown_source"
+            elif any(s.land_claimed for s in seats.values() if s is not who):
+                drop = "land_claim_unknown"
+            elif rule == spacemenu.NO_PROMPT or (rule == "noctis" and board.geo.noctis is not None):
+                drop = "no_prompt"
+            else:
+                menu = spacemenu.space_menu(rule, board, who.seat, actionmenu.funds_mc(snap))
+                drop = f"menu_miss:{rule}" if sid not in menu else "single_candidate" if len(menu) < 2 else None
+            if drop is not None:
+                result.count(who.pid, f"space:{drop}")
+            opp = next(s for s in seats.values() if s is not who)
+            ctx = who.place_ctx or {"turn_action": who.turn_actions, "opp_passed": opp.passed,
+                                    "me_used_actions": sorted(who.used_actions),
+                                    "opp_used_actions": sorted(opp.used_actions)}
+            emit("space", who, move, gs_prev, "action",
+                 {"menu": menu, "chosen": sid, "rule": rule, "source": src, "tile": placement.tile,
+                  "placement_index": who.place_count if src == who.place_source else 0, **ctx},
+                 drop, snap=snap)
+        board.place(sid, spacemenu.tile_code(placement.kind, src), who.seat)
+        who.last_place = sid
+        who.place_count += 1 if src == who.place_source else 0
+
+    def check_board(move: int, gs: dict[str, Any]) -> None:
+        """Gate the board against the row's snapshot. The ocean count posts on the placement row and
+        must match exactly. A seat's city and greenery VP details can lag the placement by many rows,
+        so they must never exceed the board's counts (a missed or misattributed placement shows up as
+        the snapshot running ahead once the details catch up)."""
+        assert board is not None
+        if board.count({OCEAN}) != _int(gs.get("oceans")):
+            return lose_board(move, "check:oceans")
+        vp = gs.get("player_vp") or {}
+        for st in seats.values():
+            pvp = vp.get(st.pid) or {}
+            if len((pvp.get("details") or {}).get("cities") or {}) > board.count(CITY_TILES, st.seat):
+                return lose_board(move, "check:cities")
+            if _int((pvp.get("total_details") or {}).get("greeneries")) > board.count({GREENERY}, st.seat):
+                return lose_board(move, "check:greeneries")
+        return None
+
     for idx, m in enumerate(moves):
         if not isinstance(m, dict):
             continue
@@ -642,6 +763,8 @@ def reconstruct_log_state(
                 result.count(pid, f"gate5:{root[1]}")
                 if root[1] == "skip_rest":
                     st.turn_actions = 0
+                if root[1] != "other_row":  # effect-resolution rows sit between a play and its placement
+                    set_place_source(st, None)
                 root = None
             elif root is not None:
                 if research_open and not is_deal:
@@ -650,7 +773,32 @@ def reconstruct_log_state(
                     result.count(pid, "gate5:bundled_pass_split")
                 action_decisions(st, move, prev_gs, *root)
                 after_root(st, *root)
+                set_place_source(st, root[1] if root[0] in _SOURCE_ROOTS
+                                 else spacemenu.CONVERT_PLANTS if root[0] == "convert_plants" else None)
+            elif segs and (conv := _CONVERT_RE.match(split_actor(segs[0])[1])) and conv.group(2) == "Plant"                     and split_actor(segs[0])[0] is st:
+                # A bare `pays N Plant` row that Gate 5 does not take as a root (its greenery is logged as
+                # `places Forest` / `places tile Forest`, or it is a final greenery) still sources the
+                # seat's next greenery placement.
+                set_place_source(st, spacemenu.CONVERT_PLANTS)
             count_excluded(st, act, segs, root)
+
+        # Tile placements, in segment order on the board as of the rows before (#61).
+        if prev_gs is not None and pid in seats and _int(prev_gs.get("temperature")) < 0 <= _int(gs.get("temperature")):
+            seats[pid].temperature_ocean = True
+        if board_valid():
+            placements = [(who, rest) for who, rest in map(split_actor, segs)
+                          if _PLACES_RE.match(rest) or (who is None and _ANY_PLACES_RE.search(rest))]
+            for who, rest in placements:
+                place_tile(who, parse_placement(rest) if who is not None else None,
+                           m.get("tile_location") if len(placements) == 1 else None, move, prev_gs)
+            if not placements and m.get("tile_placed") and isinstance(m.get("tile_location"), str):
+                # A few rows log the placement only in the structured fields (the row's seat places it).
+                place_tile(seats.get(pid or ""), structured_placement(m["tile_placed"], m["tile_location"]),
+                           m["tile_location"], move, prev_gs)
+        elif board is not None and gen >= 2:
+            for who, rest in map(split_actor, segs):
+                if who is not None and _PLACES_RE.match(rest):
+                    result.count(who.pid, "space:board_quarantined")
 
         # ---- apply this row ---------------------------------------------------------------------
         trackers = gs.get("player_trackers") or {}
@@ -764,6 +912,7 @@ def reconstruct_log_state(
                     continue
                 who.tableau.append(card)
                 who.last_played = card
+                who.land_claimed = who.land_claimed or card == "Land Claim"
                 if card in who.hand:
                     who.hand.discard(card)
                 elif card in who.preludes_in_hand:
@@ -805,10 +954,17 @@ def reconstruct_log_state(
         if is_deal:
             for st in seats.values():
                 emit("deal_boundary", st, move, gs, "research", {})
+            for st in seats.values():
+                st.place_source, st.place_ctx, st.last_place, st.place_count = None, None, None, 0
+        if board_valid():
+            check_board(move, gs)
         prev_gs = gs
 
     for p, chk in checks.items():
         result.income_checks[(p, chk.generation)] = chk.status or "unverified"
+    for st in seats.values():
+        result.count(st.pid, "board:valid_at_end" if board_valid() else "board:unsupported_map" if board is None
+                     else "board:quarantined")
     _apply_income_quarantine(result)
     return result
 

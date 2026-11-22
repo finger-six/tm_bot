@@ -233,6 +233,8 @@ def test_golden_extraction_tables(tmp_path: Path) -> None:
 
 _ROOT = ["fund_award", "standard_projects", "pass", "sell_patents"]
 # (kind, move) -> (menu, chosen, drop_reason) for Alice (seat 0), from her own perspective.
+_THARSIS_OCEANS = ["04", "06", "07", "13", "28", "32", "33", "34", "43", "44", "45", "63"]
+_THARSIS_LAND = [f"{i:02d}" for i in range(3, 64) if f"{i:02d}" not in (*_THARSIS_OCEANS, "31")]
 EXPECTED_A: dict[tuple[str, int], tuple[list[str], str, str | None]] = {
     # Move 25: M€ 59, temperature -28, 0 oceans. Trees (needs -4 C) and Wave Power (needs 3 oceans) are
     # excluded; no Tharsis milestone is reached; no blue card yet; first action of the turn.
@@ -274,6 +276,8 @@ EXPECTED_A: dict[tuple[str, int], tuple[list[str], str, str | None]] = {
     ("standard_project", 63): (["Power Plant:SP"], "Power Plant:SP", "single_candidate"),
     # Move 65: empty hand, M€ 2, no unused blue card, Bram passed -> only Pass (1 candidate, dropped).
     ("branch", 65): (["pass"], "pass", "single_candidate"),
+    # Move 47: Comet's ocean on Tharsis Hex (4,1) = engine (5, 0) = space 04; every ocean space is empty.
+    ("space", 47): (_THARSIS_OCEANS, "04", None),
 }
 # Bram (seat 1), from his own perspective: exact hand in generation 2, hand-lost from move 45.
 EXPECTED_B: dict[tuple[str, int], tuple[list[str], str, str | None]] = {
@@ -293,6 +297,10 @@ EXPECTED_B: dict[tuple[str, int], tuple[list[str], str, str | None]] = {
     ("standard_project", 53): (["Power Plant:SP", "Asteroid:SP", "Aquifer", "Greenery", "City"], "Power Plant:SP",
                                None),
     ("branch", 58): ([], "pass", "hand_lost"),
+    # Move 27: the Greenery project's tile on Tharsis Hex (5,6) = engine (4, 5) = space 41. Bram owns no
+    # tile yet, so every land space but the Noctis reservation (31) is legal. The hand loss does not
+    # matter (the menu reads only the board and M€).
+    ("space", 27): (_THARSIS_LAND, "41", None),
 }
 
 
@@ -326,13 +334,19 @@ def test_golden_action_rows_use_pre_move_state(registry: CardRegistry) -> None:
     assert not [d for d in res.decisions if d.move_number == 29]
 
 
-def test_space_and_payment_prompts_never_emit_rows(registry: CardRegistry) -> None:
+def test_space_rows_carry_the_board_and_payment_prompts_never_emit_rows(registry: CardRegistry) -> None:
     res = _reconstruct(_load(A), registry)
     assert {d.kind for d in res.decisions} == {"draft_pick", "research_buy", "deal_boundary", "action", *ACTION_TASKS}
-    # Move 47 is Comet's nested ocean placement (a `space` prompt): no decision of any kind.
-    assert not [d for d in res.decisions if d.move_number == 47]
+    # Move 47 is Comet's nested ocean placement: one `space` row from Comet, on the board as of move 46
+    # (Bram's greenery at 41, seen as the opponent's), after Comet's 21 M€ posted.
+    (space,) = [d for d in res.decisions if d.move_number == 47]
+    assert space.kind == "space" and space.payload["source"] == "Comet" and space.payload["rule"] == "ocean"
+    assert space.snapshot["me_mc"] == 38
+    tiles, owners = space.snapshot["board_tiles"], space.snapshot["board_owners"]
+    assert [i for i, t in enumerate(tiles) if t != -1] == [40] and tiles[40] == 0 and owners[40] == 1  # id 41
+    assert res.board_lost is None and res.counts_by_player[A]["board:valid_at_end"] == 1
     counts = res.counts_by_player[A]
-    assert counts["excluded:space"] == 1 and counts["excluded:payment"] == 10 and counts["excluded:prelude_play"] == 2
+    assert counts["excluded:payment"] == 10 and counts["excluded:prelude_play"] == 2 and "excluded:space" not in counts
     # Paid roots emit only the branch and the card / project choice, never a payment row.
     paid = {d.kind for d in res.decisions if d.move_number == 25}
     assert paid == {"branch", "project_card"}

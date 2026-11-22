@@ -108,12 +108,18 @@ def _assert_row_equal(fast: dict[str, torch.Tensor], b: int, ref: dict[str, torc
         assert int(fast["picked_mask"][b].sum()) == int(ref["picked_mask"][0].sum()) == 0
 
 
-@pytest.mark.parametrize("task", ["draft", "branch", "project_play", "standard_project", "card_action", "midgame_value"])
+@pytest.mark.parametrize(
+    "task", ["draft", "branch", "project_play", "standard_project", "card_action", "space", "midgame_value"]
+)
 def test_cache_rows_equal_reference_builder_encoding(golden_dir: Path, golden_data: WarmstartData,
                                                      vocab: CardVocab, task: str) -> None:
     table = golden_data.caches[task]
     rows = _rows(golden_dir, task)
     assert table.num_rows == len(rows) > 0
+    # Gen 2+ action-phase rows carry the rebuilt board (#61); the fast path expands the compact codes
+    # into the same `space_feats` as `encode_observation` on the builder's board below.
+    has_board = [bool(r["board_tiles"]) for r in rows]
+    assert all(has_board) if task in ("branch", "space") else not any(has_board) if task == "draft" else True
     idx = np.arange(table.num_rows)[::-1].copy()  # reversed: exercises padding to the widest row
     if task == "midgame_value":
         fast, won, margin = table.value_batch(idx)

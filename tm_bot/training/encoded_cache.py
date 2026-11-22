@@ -10,6 +10,10 @@ by `tests/test_warmstart_v2.py`.
 Layout of one task directory: `meta.json` plus one raw `<field>.bin` per field. Row fields hold
 one entry per cached row, `tok_*` fields one entry per card token and `cand_*` fields one entry per
 candidate; `tok_count` / `cand_count` give each row's ragged length.
+
+Boards (#61). The map's empty-board `space_feats` are stored once per map; a row with a rebuilt board
+(`has_board`) stores it compactly (`board_tile` / `board_owner`, the extractor's codes per space in
+sorted-id order) and `expand_board` writes it over the tile and owner one-hots at batch time.
 """
 
 from __future__ import annotations
@@ -45,7 +49,7 @@ from tm_bot.models.encode import (
 from tm_bot.models.vocab import DONE_ID, PROMPT_TYPES, CardVocab
 from tm_bot.training import warmstart_builder as wb
 
-CACHE_FORMAT = 1
+CACHE_FORMAT = 2
 DEFAULT_CACHE_DIR = Path("data") / "warmstart_cache"
 
 _SPLIT_TO_IDX: dict[str, int] = {"train": 0, "val": 1, "test": 2}
@@ -59,6 +63,30 @@ _PHASE_TO_IDX = {"research": PHASE_RESEARCH, "action": PHASE_ACTION}
 # other column is zero, so the compact storage is exact.
 _CARD_COLS: tuple[int, ...] = (0, 1, 2, 3)
 _BRANCH_COLS: tuple[int, ...] = tuple(range(22, 32))
+_SPACE_COLS: tuple[int, ...] = tuple(range(4, 19))  # space x/y, space type, placement bonus
+BOARD_SPACES = 63  # spaces of every supported map template (off-Mars colony spaces included)
+# `encode_observation` space-feature columns: tile one-hot (none, greenery, ocean, city, capital,
+# other) and owner one-hot (none, actor, opponent).
+_TILE_COL, _OWNER_COL = 6, 12
+
+
+def expand_board(space_feats: np.ndarray, tiles: np.ndarray, owners: np.ndarray, has_board: np.ndarray) -> np.ndarray:
+    """`space_feats[B, N, D]` with each board row's compact codes (`tiles` / `owners[B, BOARD_SPACES]`:
+    engine tile code or -1, owner 0 actor / 1 opponent / -1) written over its tile and owner one-hots."""
+    out = np.array(space_feats, dtype=np.float32, copy=True)
+    rows = np.nonzero(np.asarray(has_board, dtype=bool))[0]
+    if rows.size == 0:
+        return out
+    t = np.asarray(tiles[rows], dtype=np.int64)
+    o = np.asarray(owners[rows], dtype=np.int64)
+    sub = out[rows, : t.shape[1]]
+    sub[..., _TILE_COL:_OWNER_COL + 3] = 0.0
+    tile_col = np.where(t < 0, _TILE_COL, np.where(t <= 3, _TILE_COL + 1 + t, _TILE_COL + 5))
+    owner_col = np.where(o < 0, _OWNER_COL, _OWNER_COL + 1 + o)
+    np.put_along_axis(sub, tile_col[..., None], 1.0, axis=2)
+    np.put_along_axis(sub, owner_col[..., None], 1.0, axis=2)
+    out[rows, : t.shape[1]] = sub
+    return out
 
 
 @dataclass(frozen=True)
@@ -69,6 +97,7 @@ class CacheTask:
     table: str
     kind: str  # "policy" | "research" | "value"
     feat_cols: tuple[int, ...] = ()
+    optional: bool = False  # skipped by default when an older extraction lacks its table
 
 
 CACHE_TASKS: dict[str, CacheTask] = {
@@ -80,6 +109,7 @@ CACHE_TASKS: dict[str, CacheTask] = {
         CacheTask("project_play", "action_project_cards", "policy", _CARD_COLS),
         CacheTask("standard_project", "action_standard_projects", "policy", _CARD_COLS),
         CacheTask("card_action", "action_card_actions", "policy", _CARD_COLS),
+        CacheTask("space", "action_spaces", "policy", _SPACE_COLS, optional=True),
         CacheTask("midgame_value", "midgame_values", "value"),
     )
 }
@@ -90,6 +120,7 @@ _POLICY_BUILDERS: dict[str, Callable[..., Any]] = {
     "project_play": wb.build_project_card_choice,
     "standard_project": wb.build_standard_project_choice,
     "card_action": wb.build_card_action_choice,
+    "space": wb.build_space_choice,
 }
 
 
@@ -103,6 +134,9 @@ def _row_fields(task: CacheTask) -> dict[str, tuple[str, tuple[int, ...]]]:
         "generation": ("u1", ()),
         "obs_scalars": ("<f4", (OBS_SCALAR_DIM,)),
         "tok_count": ("<i4", ()),
+        "has_board": ("u1", ()),
+        "board_tile": ("i1", (BOARD_SPACES,)),
+        "board_owner": ("i1", (BOARD_SPACES,)),
     }
     if task.kind in ("policy", "research"):
         fields.update(
@@ -193,11 +227,21 @@ def _encode_chunk(task_name: str, start: int, rows: list[dict[str, Any]]) -> dic
         obs, choice, target = build_row(task_name, row)
         enc = encode_observation(obs, vocab)
         map_id = SUPPORTED_MAPS.index(wb.normalize_map_name(row["map"]))
+        if enc.space_feats.shape[0] != BOARD_SPACES:
+            raise ValueError(f"{task_name} row {start + i}: {enc.space_feats.shape[0]} spaces, expected {BOARD_SPACES}")
+        no_codes = np.full((1, BOARD_SPACES), -1, dtype=np.int8)
+        empty = expand_board(enc.space_feats[None], no_codes, no_codes, np.ones(1, dtype=bool))[0]
+        board = row.get("board_tiles") or []
+        tiles = np.asarray(board if board else no_codes[0], dtype=np.int8)
+        owners = np.asarray(row["board_owners"] if board else no_codes[0], dtype=np.int8)
+        if not np.array_equal(expand_board(empty[None], tiles[None], owners[None], np.array([bool(board)]))[0],
+                              enc.space_feats):
+            raise ValueError(f"{task_name} row {start + i}: board spaces differ from the compact board codes")
         if map_id in spaces:
-            if not np.array_equal(spaces[map_id], enc.space_feats):
+            if not np.array_equal(spaces[map_id], empty):
                 raise ValueError(f"{task_name} row {start + i}: board spaces differ from the map template")
         else:
-            spaces[map_id] = enc.space_feats
+            spaces[map_id] = empty
         if np.any(enc.card_dyn[:, 1:3] != 0.0):
             raise ValueError(f"{task_name} row {start + i}: card resources/disabled flags are not cached")
         out["src_row"].append(start + i)
@@ -207,6 +251,9 @@ def _encode_chunk(task_name: str, start: int, rows: list[dict[str, Any]]) -> dic
         out["generation"].append(min(255, int(row["generation"])))
         out["obs_scalars"].append(enc.obs_scalars)
         out["tok_count"].append(enc.card_ids.shape[0])
+        out["has_board"].append(1 if board else 0)
+        out["board_tile"].append(tiles)
+        out["board_owner"].append(owners)
         out["tok_card"].append(enc.card_ids)
         out["tok_slot"].append(enc.card_slots)
         out["tok_dyn0"].append(enc.card_dyn[:, 0])
@@ -416,6 +463,9 @@ def ensure_encoded_cache(
     for name in tasks or tuple(CACHE_TASKS):
         task = CACHE_TASKS[name]
         source = data_path / f"{task.table}.parquet"
+        if not source.exists() and task.optional and not tasks:
+            log(f"[cache] {name}: no {source.name} in {data_path}, skipped")
+            continue
         if not source.exists():
             raise FileNotFoundError(f"v2 warm-start table missing: {source}")
         task_dir = cache_path / name
@@ -433,7 +483,7 @@ class EncodedTable:
     """Read-only view of one task cache: small row fields in RAM, token/candidate arrays memory-mapped."""
 
     _IN_RAM = ("map_id", "seat", "split", "generation", "tok_count", "cand_count", "target",
-               "kept_mask", "won", "vp_margin", "phase", "prompt_type", "src_row")
+               "kept_mask", "won", "vp_margin", "phase", "prompt_type", "src_row", "has_board")
 
     def __init__(self, task_dir: Path | str) -> None:
         self.dir = Path(task_dir)
@@ -487,7 +537,9 @@ class EncodedTable:
             "card_slots": torch.from_numpy(card_slots),
             "card_dyn": torch.from_numpy(card_dyn),
             "card_mask": torch.from_numpy(valid),
-            "space_feats": torch.from_numpy(self.space_feats[mids]),
+            "space_feats": torch.from_numpy(
+                expand_board(self.space_feats[mids], a["board_tile"][rows], a["board_owner"][rows], a["has_board"][rows])
+            ),
             "space_mask": torch.from_numpy(self.space_mask[mids]),
         }
 
