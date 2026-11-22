@@ -36,7 +36,9 @@ from tm_bot.training.warmstart_builder import (
     normalize_map_name,
 )
 
-DEFAULT_WARMSTART_DIR = Path(r"C:\2026\tm_bot\data\warmstart")
+# Since #62 the default is the #61 extraction: the same tables plus `action_spaces` and board codes,
+# which the space task and the human-data loss need.
+DEFAULT_WARMSTART_DIR = Path(r"C:\2026\tm_bot\data\warmstart_space")
 
 _TAG_TO_IDX: dict[str, int] = {t: i for i, t in enumerate(TAG_NAMES)}
 _SPLIT_TO_IDX: dict[str, int] = {"train": 0, "val": 1, "test": 2}
@@ -66,7 +68,7 @@ def resolve_warmstart_dir(data_dir: Path | str | None = None) -> Path:
     """Resolve the read-only warm-start parquet directory."""
     if data_dir is not None:
         return Path(data_dir)
-    repo_local = Path(__file__).resolve().parents[2] / "data" / "warmstart"
+    repo_local = Path(__file__).resolve().parents[2] / "data" / DEFAULT_WARMSTART_DIR.name
     if repo_local.exists():
         return repo_local
     return DEFAULT_WARMSTART_DIR

@@ -125,7 +125,7 @@ class RunConfig:
     # `human_aux_weight_start` through hour `human_aux_decay_from_h`, linear to
     # `human_aux_weight_end` at `human_aux_decay_to_h`. L_human samples a resident set of
     # at most `human_aux_max_rows` train rows from `human_aux_data_dir` (default
-    # `data/warmstart`) and its encoded cache (`human_aux_cache_dir`, default
+    # `data/warmstart_space`, which has the `action_spaces` table the space task needs) and its encoded cache (`human_aux_cache_dir`, default
     # `<data_dir>_cache`). A `random_init` run (pure self-play) drops both anchor terms.
     w_margin: float = 0.3
     kl_anchor_beta: float = KL_ANCHOR_BETA
