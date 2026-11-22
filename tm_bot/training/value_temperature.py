@@ -64,7 +64,7 @@ def fit_checkpoint_value_temperature(
 
     dev = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model, _, _ = load_checkpoint(checkpoint, map_location=dev, encoder_version=None)
-    data = load_warmstart_data(data_dir, cache_dir, workers=workers)
+    data = load_warmstart_data(data_dir, cache_dir, tasks=("midgame_value",), workers=workers)
     values = collect_value_outputs(model, data, "val", device=dev, batch_size=batch_size)
     return value_temperature_payload(values, checkpoint_sha=checkpoint_sha256(checkpoint))
 

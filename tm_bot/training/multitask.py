@@ -7,7 +7,8 @@ validation report. Only the network, its checkpoint format and the comparator's 
 fit differ, through `AgentSpec`.
 
 Gen 2+ rows come from the encoded cache (`encoded_cache.py`); generation-1 setup rows from the
-compact setup tables and `FastBatchBuilder`.
+compact setup tables and `FastBatchBuilder`. Since #62 the gen 2+ tasks include `space` (tile
+placement over the legal spaces of the rebuilt board, #61), so training needs `action_spaces.parquet`.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from pathlib import Path
 import queue
 import threading
 import time
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -40,6 +41,7 @@ from tm_bot.training.dataset import (
     resolve_warmstart_dir,
 )
 from tm_bot.training.encoded_cache import (
+    CACHE_TASKS,
     PHASE_ACTION,
     PHASE_RESEARCH,
     EncodedTable,
@@ -63,8 +65,11 @@ STATE_HEADS: tuple[tuple[str, str, str], ...] = (
     ("project_play", "hard", "w_project_play"),
     ("standard_project", "hard", "w_standard_project"),
     ("card_action", "hard", "w_card_action"),
+    ("space", "hard", "w_space"),
 )
-FIXED_MENU_TASKS: tuple[str, ...] = ("draft", "branch", "project_play", "standard_project", "card_action")
+FIXED_MENU_TASKS: tuple[str, ...] = (
+    "draft", "branch", "project_play", "standard_project", "card_action", "space",
+)
 
 
 @dataclass(frozen=True)
@@ -79,6 +84,9 @@ class WarmstartConfig:
     project_play_batch_size: int = 512
     standard_project_batch_size: int = 256
     card_action_batch_size: int = 256
+    # #62: tile placement (~1.1M train rows) takes the band #38 gave the other ~0.5-1.5M-row
+    # action sub-choices (standard project, card action): 256 rows, weight 0.40.
+    space_batch_size: int = 256
     value_batch_size: int = 512
     # Value minibatch mix: gen-1 setup outcomes / gen 2+ pre-research / gen 2+ action points.
     value_mix_setup: float = 0.20
@@ -94,6 +102,7 @@ class WarmstartConfig:
     w_project_play: float = 1.00
     w_standard_project: float = 0.40
     w_card_action: float = 0.40
+    w_space: float = 0.40
     w_value_win: float = 0.80
     w_value_margin: float = 0.30
     # Step budget and optimizer: 6 x 2,500 = 15,000 steps, cosine LR with warmup, bf16 AMP.
@@ -142,11 +151,12 @@ def gen_bucket_ids(generations: np.ndarray) -> np.ndarray:
 
 
 def composite_score(m: Mapping[str, float | None]) -> float:
-    """#38 §4 checkpoint-selection score from the validation metrics it names."""
+    """#38 §4 checkpoint-selection score from the validation metrics it names (`space` since #62)."""
     setup = np.mean([m["corp_top1"], m["prelude0_top1"], m["draft_top1"], m["research_buy_acc"]])
-    action = np.mean(
-        [m["branch_top1"], m["project_play_top1"], m["standard_project_top1"], m["card_action_top1"]]
-    )
+    action = np.mean([
+        m["branch_top1"], m["project_play_top1"], m["standard_project_top1"], m["card_action_top1"],
+        m["space_top1"],
+    ])
     brier = m["midgame_val_brier"]
     value = 0.0 if brier is None else max(0.0, 1.0 - float(brier) / 0.25)
     return float(0.25 * setup + 0.50 * action + 0.25 * value)
@@ -356,15 +366,18 @@ def load_warmstart_data(
     data_dir: Path | str | None = None,
     cache_dir: Path | str | None = None,
     *,
+    tasks: Sequence[str] | None = None,
     workers: int | None = None,
     log: Callable[[str], None] = print,
 ) -> WarmstartData:
+    """Setup tables plus the encoded caches of `tasks` (default: every cached task, `space` included;
+    a missing parquet table raises instead of being skipped)."""
     data_path = resolve_warmstart_dir(data_dir)
     cards = load_card_data()
     vocab = CardVocab.from_card_data(cards)
     caches = ensure_encoded_cache(
         data_path, Path(cache_dir) if cache_dir is not None else default_cache_dir(data_path),
-        vocab=vocab, workers=workers, log=log,
+        tasks=tuple(tasks) if tasks is not None else tuple(CACHE_TASKS), vocab=vocab, workers=workers, log=log,
     )
     corpus = load_warmstart_corpus(data_path, vocab=vocab, load_drafts=False)
     return WarmstartData(vocab=vocab, corpus=corpus, builder=FastBatchBuilder(vocab, cards), caches=caches)
@@ -674,6 +687,7 @@ def evaluate_warmstart(
         "project_play_top1": metrics["project_play"]["overall"]["acc"],
         "standard_project_top1": metrics["standard_project"]["overall"]["acc"],
         "card_action_top1": metrics["card_action"]["overall"]["acc"],
+        "space_top1": metrics["space"]["overall"]["acc"],
         "midgame_val_brier": metrics["value"]["midgame"]["brier"],
     }
     metrics["composite"] = {"score": composite_score(inputs), "inputs": inputs}
@@ -694,6 +708,7 @@ _POLICY_ROWS: tuple[tuple[str, str], ...] = (
     ("Project card play", "project_play"),
     ("Standard project", "standard_project"),
     ("Card action", "card_action"),
+    ("Tile placement (space)", "space"),
 )
 
 

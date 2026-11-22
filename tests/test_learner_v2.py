@@ -54,7 +54,7 @@ from tm_bot.training.multitask import WarmstartConfig, WarmstartData
 TINY_WARMSTART = replace(
     WarmstartConfig(), use_amp=False, setup_batch_size=4, draft_batch_size=4, research_buy_batch_size=4,
     branch_batch_size=4, project_play_batch_size=4, standard_project_batch_size=4, card_action_batch_size=2,
-    value_batch_size=6,
+    space_batch_size=2, value_batch_size=6,
 )
 
 
@@ -262,7 +262,8 @@ def test_human_aux_loss_backpropagates_the_weighted_multitask_loss(golden_data: 
 
 def test_pool_draws_cover_every_sampler_pool() -> None:
     draws = pool_draws(WarmstartConfig())
-    assert sum(draws.values()) == 3_328
+    assert sum(draws.values()) == 3_584  # 3,328 + 256 space rows (#62)
+    assert draws["space"] == 256
     assert draws["value_setup"] + draws["value_research"] + draws["value_action"] == 512
 
 

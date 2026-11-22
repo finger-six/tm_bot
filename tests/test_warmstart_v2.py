@@ -1,5 +1,5 @@
 """v2 warm-start training (#46): encoded-cache equivalence, shared multi-task loss, composite
-selection, gen 2+ calibration, and both agents' identical configuration.
+selection, gen 2+ calibration, and both agents' identical configuration; the `space` task (#62).
 
 Rows come from extracting the synthetic golden table pair (`tests/fixtures/golden_v2/`), which
 emits every v2 table.
@@ -28,16 +28,19 @@ from tm_bot.data.inventory import run_inventory
 from tm_bot.models.agent import PolicyValueAgent
 from tm_bot.models.encode import collate_encoded_batch, encode_choice, encode_observation
 from tm_bot.models.network import TMModelConfig, TMNetwork, load_checkpoint
-from tm_bot.models.vocab import CardVocab
+from tm_bot.models.vocab import PROMPT_TYPE_TO_ID, CardVocab
 from tm_bot.training import train_warmstart
 from tm_bot.training.dataset import FastBatchBuilder, load_warmstart_corpus
 from tm_bot.training.encoded_cache import CACHE_TASKS, build_row, ensure_encoded_cache
 from tm_bot.training.multitask import (
+    STATE_HEADS,
     MultiTaskSampler,
     WarmstartConfig,
     WarmstartData,
     composite_score,
     compute_multitask_step_losses,
+    evaluate_state_task,
+    load_warmstart_data,
     train_one_step,
 )
 from tm_bot.training.warmstart_builder import build_research_buy_choice
@@ -48,6 +51,7 @@ TABLE = "900000001"
 ALL_TABLES = (
     "setup_choices", "setup_outcomes", "draft_picks", "research_buys", "midgame_values",
     "action_branches", "action_project_cards", "action_card_actions", "action_standard_projects",
+    "action_spaces",
 )
 
 
@@ -175,10 +179,11 @@ def test_sampler_draws_every_task_and_mixes_value_sources(golden_data: Warmstart
     sampler = MultiTaskSampler(golden_data, cfg, np.random.default_rng(0))
     step = sampler.next_step()
     for name in ("corp", "prelude", "project", "draft", "research_buy", "branch", "project_play",
-                 "standard_project", "card_action", "outcome"):
+                 "standard_project", "card_action", "space", "outcome"):
         assert step[f"{name}_batch"] is not None and step[f"{name}_targets"] is not None, name
     assert step["corp_targets"].shape[0] == 256 and step["branch_targets"].shape[0] == 512
     assert step["standard_project_targets"].shape[0] == 256 and step["card_action_targets"].shape[0] == 256
+    assert step["space_targets"].shape[0] == 256
     assert cfg.value_counts() == (2, 4, 4)
     assert step["outcome_targets"].shape[0] == 10
     assert bool(torch.isfinite(step["outcome_margins"]).all())
@@ -200,7 +205,7 @@ def test_tiny_multitask_steps_reduce_every_task_loss_including_margin(golden_dat
     cfg = replace(
         WarmstartConfig(), use_amp=False, setup_batch_size=4, draft_batch_size=8, research_buy_batch_size=4,
         branch_batch_size=8, project_play_batch_size=4, standard_project_batch_size=4, card_action_batch_size=2,
-        value_batch_size=10,
+        space_batch_size=4, value_batch_size=10,
     )
     batches = MultiTaskSampler(golden_data, cfg, np.random.default_rng(1)).next_step()
     for model in _tiny_models(vocab):
@@ -212,7 +217,7 @@ def test_tiny_multitask_steps_reduce_every_task_loss_including_margin(golden_dat
                 return compute_multitask_step_losses(model, weights=cfg, **batches)[1]
 
         before = losses()
-        assert {"loss_value", "loss_value_margin", "loss_branch", "loss_research_buy"} <= set(before)
+        assert {"loss_value", "loss_value_margin", "loss_branch", "loss_research_buy", "loss_space"} <= set(before)
         for _ in range(20):
             train_one_step(model, optimizer, device=torch.device("cpu"), use_amp=False, weights=cfg, **batches)
         after = losses()
@@ -240,6 +245,78 @@ def test_margin_loss_skips_rows_without_a_final_margin(golden_data: WarmstartDat
     assert one["loss_value_margin"] == pytest.approx(float(expected), rel=1e-5)
 
 
+# --- the space task (#62) -------------------------------------------------------------------
+
+
+def test_space_batches_are_legal_space_menus_on_the_rebuilt_board(golden_dir: Path,
+                                                                  golden_data: WarmstartData) -> None:
+    table = golden_data.caches["space"]
+    rows = _rows(golden_dir, "space")
+    assert len(table.split_indices["train"]) > 0 and len(table.split_indices["val"]) > 0
+    idx = np.arange(table.num_rows)
+    batch, target = table.policy_batch(idx)
+    mask = batch["cand_mask"]
+    menus = [len(rows[int(table["src_row"][i])]["menu"]) for i in idx]
+    assert mask.sum(dim=1).tolist() == menus and min(menus) >= 2
+    assert bool(((target >= 0) & (target < torch.tensor(menus))).all())
+    assert (batch["prompt_type_ids"] == PROMPT_TYPE_TO_ID["space"]).all()
+    # Space candidates carry no card id, only position (4, 5), one space-type bit (6..9) and bonuses.
+    feats = batch["cand_feats"][mask]
+    assert (batch["cand_card_ids"][mask] == 0).all()
+    assert (feats[:, :4] == 0).all() and (feats[:, 19:] == 0).all()
+    assert (feats[:, 6:10].sum(dim=1) == 1).all()
+    for b in range(len(idx)):  # every menu entry is a different space
+        xy = batch["cand_feats"][b][mask[b]][:, 4:6]
+        assert len({tuple(v) for v in xy.tolist()}) == menus[b]
+    # Every space row carries its table's rebuilt board, not the empty map template.
+    assert bool(table["has_board"].all())
+    template = torch.from_numpy(table.space_feats[table["map_id"][idx]])
+    assert not torch.equal(batch["space_feats"], template)
+
+
+def test_space_loss_is_hard_cross_entropy_scaled_by_w_space(golden_data: WarmstartData, vocab: CardVocab) -> None:
+    table = golden_data.caches["space"]
+    batch, target = table.policy_batch(table.split_indices["train"])
+    cfg = replace(WarmstartConfig(), w_space=0.25)
+    for model in _tiny_models(vocab):
+        model.eval()
+        with torch.no_grad():
+            total, stats = compute_multitask_step_losses(model, weights=cfg, space_batch=batch, space_targets=target)
+            logits = model(batch, compute_policy=True, compute_value=False)["policy_logits"].float()
+        expected = float(torch.nn.functional.cross_entropy(logits, target))
+        assert set(stats) == {"loss_space", "loss_total"}
+        assert stats["loss_space"] == pytest.approx(expected, rel=1e-5)
+        assert float(total) == pytest.approx(0.25 * expected, rel=1e-5)
+
+
+def test_space_val_top1_scores_argmax_hits_on_the_val_rows(golden_data: WarmstartData, vocab: CardVocab) -> None:
+    table = golden_data.caches["space"]
+    rows = table.split_indices["val"]
+    model = _tiny_models(vocab)[0].eval()
+    out = evaluate_state_task(model, table, rows, device=torch.device("cpu"), batch_size=3, use_amp=False)
+    batch, target = table.policy_batch(rows)
+    with torch.no_grad():
+        pred = model(batch, compute_policy=True, compute_value=False)["policy_logits"].argmax(dim=-1)
+    hits = int((pred == target).sum())
+    assert out["overall"] == {"correct": hits, "total": len(rows), "acc": hits / len(rows)}
+    assert sum(m["total"] for m in out["per_map"].values()) == len(rows)
+    assert out["per_gen"]["gen 1"]["total"] == 0  # only gen 2+ placements emit rows
+    assert sum(g["total"] for g in out["per_gen"].values()) == len(rows)
+
+
+def test_training_data_requires_the_space_table(golden_dir: Path, tmp_path: Path) -> None:
+    data = tmp_path / "warmstart"
+    data.mkdir()
+    for path in golden_dir.glob("*.parquet"):
+        if path.name != "action_spaces.parquet":
+            (data / path.name).write_bytes(path.read_bytes())
+    with pytest.raises(FileNotFoundError, match="action_spaces"):
+        load_warmstart_data(data, tmp_path / "cache", workers=0, log=lambda _: None)
+    # A value-only consumer (`value_temperature`) still loads a pre-#61 extraction.
+    out = load_warmstart_data(data, tmp_path / "cache", tasks=("midgame_value",), workers=0, log=lambda _: None)
+    assert set(out.caches) == {"midgame_value"}
+
+
 def test_temperature_fit_uses_generation_two_plus_rows_only() -> None:
     rng = np.random.default_rng(0)
     n_mid, n_setup = 400, 300
@@ -262,12 +339,14 @@ def test_composite_score_matches_hand_computation() -> None:
     m = {
         "corp_top1": 0.7, "prelude0_top1": 0.8, "draft_top1": 0.6, "research_buy_acc": 0.5,
         "branch_top1": 0.4, "project_play_top1": 0.3, "standard_project_top1": 0.5, "card_action_top1": 0.6,
-        "midgame_val_brier": 0.2,
+        "space_top1": 0.7, "midgame_val_brier": 0.2,
     }
-    # 0.25 * 0.65 + 0.50 * 0.45 + 0.25 * (1 - 0.2 / 0.25) = 0.1625 + 0.225 + 0.05
-    assert composite_score(m) == pytest.approx(0.4375)
+    # 0.25 * 0.65 + 0.50 * mean(0.4, 0.3, 0.5, 0.6, 0.7) + 0.25 * (1 - 0.2 / 0.25) = 0.1625 + 0.25 + 0.05
+    assert composite_score(m) == pytest.approx(0.4625)
     # A Brier worse than 0.25 contributes nothing (not a negative term).
-    assert composite_score({**m, "midgame_val_brier": 0.3}) == pytest.approx(0.3875)
+    assert composite_score({**m, "midgame_val_brier": 0.3}) == pytest.approx(0.4125)
+    # `space` counts as one of the five action-phase tasks, like the other four.
+    assert composite_score({**m, "space_top1": 0.2}) == pytest.approx(0.4625 - 0.5 * 0.5 / 5)
 
 
 def test_both_agents_share_tasks_weights_and_step_budget() -> None:
@@ -276,13 +355,15 @@ def test_both_agents_share_tasks_weights_and_step_budget() -> None:
     assert main_cfg == comp_cfg
     assert main_cfg.task_weights() == comp_cfg.task_weights() == {
         "corp": 0.40, "prelude": 0.40, "init_project": 0.30, "draft": 0.80, "research_buy": 0.70,
-        "branch": 1.00, "project_play": 1.00, "standard_project": 0.40, "card_action": 0.40,
+        "branch": 1.00, "project_play": 1.00, "standard_project": 0.40, "card_action": 0.40, "space": 0.40,
         "value_win": 0.80, "value_margin": 0.30,
     }
     assert main_cfg.task_batch_sizes() == comp_cfg.task_batch_sizes() == {
         "setup": 256, "draft": 512, "research_buy": 512, "branch": 512, "project_play": 512,
-        "standard_project": 256, "card_action": 256, "value": 512,
+        "standard_project": 256, "card_action": 256, "space": 256, "value": 512,
     }
+    # Every gen 2+ policy head has a weight and a minibatch in the shared config.
+    assert {name for name, _, _ in STATE_HEADS} <= set(main_cfg.task_batch_sizes())
     assert main_cfg.value_counts() == (102, 205, 205)
     assert (main_cfg.epochs, main_cfg.steps_per_epoch, main_cfg.total_steps) == (6, 2500, 15000)
     assert main_cfg.use_amp and main_cfg.warmup_steps > 0 and main_cfg.min_lr < main_cfg.lr
@@ -294,7 +375,8 @@ def test_both_agents_train_save_tagged_checkpoints_and_reports(golden_dir: Path,
     cfg = replace(
         WarmstartConfig(), use_amp=False, epochs=1, steps_per_epoch=2, warmup_steps=1, log_every=0,
         setup_batch_size=4, draft_batch_size=4, research_buy_batch_size=4, branch_batch_size=4,
-        project_play_batch_size=4, standard_project_batch_size=4, card_action_batch_size=2, value_batch_size=10,
+        project_play_batch_size=4, standard_project_batch_size=4, card_action_batch_size=2, space_batch_size=4,
+        value_batch_size=10,
     )
     cache = golden_dir.with_name("cache")
     main = train_warmstart.run_warmstart_training(
@@ -314,6 +396,9 @@ def test_both_agents_train_save_tagged_checkpoints_and_reports(golden_dir: Path,
         metrics = json.loads((tmp_path / out / "metrics.json").read_text(encoding="utf-8"))
         assert metrics["status"] == "completed" and "test_model" not in metrics
         assert set(metrics["val"]["value"]["per_gen"]) == {"gen 1", "gen 2-5", "gen 6-9", "gen 10+"}
+        assert metrics["val"]["space"]["overall"]["total"] > 0
+        assert metrics["val"]["composite"]["inputs"]["space_top1"] == metrics["val"]["space"]["overall"]["acc"]
+        assert "| Tile placement (space) |" in meta["report"]
     assert main["val"]["composite"]["score"] == pytest.approx(main_meta["val_composite"])
 
     # The comparator's temperature is fit on the val split's gen 2+ value rows only.
