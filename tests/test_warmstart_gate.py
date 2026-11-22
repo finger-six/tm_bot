@@ -31,7 +31,7 @@ def _acc(acc: float, total: int = 1000) -> dict[str, Any]:
 def _val(**overrides: float) -> dict[str, Any]:
     """#46 `metrics.json["val"]` shape; every task comfortably passes by default."""
     acc = {"corp": 0.74, "prelude": 0.82, "draft": 0.71, "research_buy": 0.6, "branch": 0.5,
-           "project_card": 0.4, "standard_project": 0.6, "card_action": 0.5, **overrides}
+           "project_card": 0.4, "standard_project": 0.6, "card_action": 0.5, "space": 0.35, **overrides}
     return {
         "corp": _acc(acc["corp"]),
         "prelude_top1": _acc(acc["prelude"]),
@@ -41,6 +41,7 @@ def _val(**overrides: float) -> dict[str, Any]:
         "project_play": _acc(acc["project_card"]),
         "standard_project": _acc(acc["standard_project"]),
         "card_action": _acc(acc["card_action"]),
+        "space": _acc(acc["space"]),
     }
 
 
@@ -434,7 +435,7 @@ class _FakeTable:
             self.arrays["target"] = np.array(target, dtype=np.int16)
         if kept is not None:
             self.arrays["kept_mask"] = np.array(kept, dtype=np.uint8)
-        width = 10 if name == "branch" else 4
+        width = {"branch": 10, "space": 15}.get(name, 4)
         flat = [f for row in (feats or [[[0.0] * width for _ in r] for r in cands]) for f in row]
         self.arrays["cand_feats"] = np.array(flat, dtype=np.float32).reshape(-1, width)
 
@@ -485,6 +486,26 @@ def test_frequency_baseline_tells_branch_candidates_apart_by_their_bits() -> Non
     assert runner.frequency_baseline(table)["overall"]["correct"] == 1
 
 
+def test_frequency_baseline_tells_spaces_apart_by_map_and_position() -> None:
+    def at(x: int, y: int) -> list[float]:
+        v = [0.0] * 15
+        v[0], v[1] = x / 10.0, y / 10.0
+        return v
+
+    # All space candidates share card id 0. Train: (4, 2) chosen twice on Tharsis, (5, 2) once on Hellas.
+    # Val: Tharsis {(5,2),(4,2)} -> (4,2) (hit); Hellas {(4,2),(5,2)} -> (5,2) (hit, Tharsis counts don't
+    # carry over); Tharsis {(5,2),(4,2)} target (5,2) (miss).
+    table = _FakeTable(
+        "space", "policy", cands=[[0, 0]] * 6, split=[0, 0, 0, 1, 1, 1], maps=[0, 0, 2, 0, 2, 0],
+        target=[0, 1, 1, 1, 1, 0],
+        feats=[[at(4, 2), at(5, 2)], [at(5, 2), at(4, 2)], [at(4, 2), at(5, 2)],
+               [at(5, 2), at(4, 2)], [at(4, 2), at(5, 2)], [at(5, 2), at(4, 2)]],
+    )
+    out = runner.frequency_baseline(table)
+    assert out["overall"] == {"correct": 2, "total": 3, "acc": 2 / 3}
+    assert out["per_map"]["hellas"] == {"correct": 1, "total": 1, "acc": 1.0}
+
+
 # --- verdict and report ----------------------------------------------------------------------
 
 
@@ -500,7 +521,9 @@ def _result(agent: str, summaries: dict[str, Any], **val_overrides: float) -> di
 def test_verdict_passes_only_when_every_gating_check_passes(agent: str) -> None:
     ok = _result(agent, _summaries(agent))
     assert ok["gate"]["verdict"] == "PASS"
-    assert ok["gate"]["gating_passed"] == ok["gate"]["gating_total"]
+    # 30 checks per agent before #62; the `space` baseline check makes 31.
+    assert ok["gate"]["gating_passed"] == ok["gate"]["gating_total"] == 31
+    assert _result(agent, _summaries(agent), space=0.30)["gate"]["verdict"] == "FAIL"  # ties its baseline
     assert _result(agent, _summaries(agent, mirror={"p95": 23.0}))["gate"]["verdict"] == "FAIL"
     assert _result(agent, _summaries(agent), corp=0.70)["gate"]["verdict"] == "FAIL"
     missing = _summaries(agent)

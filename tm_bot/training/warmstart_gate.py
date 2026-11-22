@@ -33,6 +33,7 @@ POLICY_TASKS: tuple[tuple[str, str, str], ...] = (
     ("project_card", "project_play", "Project card play"),
     ("standard_project", "standard_project", "Standard project"),
     ("card_action", "card_action", "Card action"),
+    ("space", "space", "Tile placement (space)"),  # #62 (decision 4 of #59)
 )
 # v1 warm-start val top-1 (docs/warmstart.md, quoted in #38 §5.1) and the allowed regression.
 V1_VAL_TOP1: dict[str, float] = {"corp": 0.725, "prelude": 0.813, "draft": 0.702}

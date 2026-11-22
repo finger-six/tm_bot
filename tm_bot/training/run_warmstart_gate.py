@@ -79,6 +79,7 @@ BASELINE_TASKS: tuple[tuple[str, str], ...] = (
     ("project_card", "project_play"),
     ("standard_project", "standard_project"),
     ("card_action", "card_action"),
+    ("space", "space"),
 )
 
 
@@ -123,8 +124,16 @@ def _grouped_hits(hits: np.ndarray, map_ids: np.ndarray) -> dict[str, Any]:
     }
 
 
-def _candidate_keys(table: Any, lo: int, hi: int) -> np.ndarray:
-    """Identity of flat candidates `lo:hi`: the card id, plus the branch bits for root branches."""
+def _candidate_keys(table: Any, r0: int, r1: int) -> np.ndarray:
+    """Identity of the flat candidates of rows `r0:r1`: the card id, plus the branch bits for root
+    branches. Spaces have no card id; a space is its map and its (x, y) grid position (the two
+    off-Mars colony spaces, both at (-1, -1), share a key)."""
+    lo, hi = int(table.cand_off[r0]), int(table.cand_off[r1])
+    if table.task.name == "space":
+        counts = np.asarray(table.cand_off[r0 + 1 : r1 + 1] - table.cand_off[r0:r1])
+        map_of = np.repeat(np.asarray(table["map_id"][r0:r1], dtype=np.int64), counts)
+        xy = np.rint(np.asarray(table["cand_feats"][lo:hi, :2], dtype=np.float64) * 10.0).astype(np.int64) + 16
+        return (map_of * 64 + xy[:, 0]) * 64 + xy[:, 1]
     keys = np.asarray(table["cand_card"][lo:hi], dtype=np.int64) * 1024
     if table.task.name == "branch":
         bits = np.asarray(table["cand_feats"][lo:hi]) != 0.0
@@ -169,10 +178,9 @@ def frequency_baseline(table: Any, *, fit_split: str = "train", eval_split: str 
     n_rows = int(split.shape[0])
     for r0 in range(0, n_rows, chunk_rows):
         r1 = min(n_rows, r0 + chunk_rows)
-        lo, hi = int(table.cand_off[r0]), int(table.cand_off[r1])
         row_of = np.repeat(np.arange(r0, r1), np.asarray(table.cand_off[r0 + 1 : r1 + 1] - table.cand_off[r0:r1]))
         take = _positive_mask(table, r0, r1) & (split[row_of] == split_ids[fit_split])
-        uniq, cnt = np.unique(_candidate_keys(table, lo, hi)[take], return_counts=True)
+        uniq, cnt = np.unique(_candidate_keys(table, r0, r1)[take], return_counts=True)
         for k, c in zip(uniq.tolist(), cnt.tolist()):
             counts[k] = counts.get(k, 0) + c
     known = np.array(sorted(counts), dtype=np.int64)
@@ -193,7 +201,7 @@ def frequency_baseline(table: Any, *, fit_split: str = "train", eval_split: str 
         if rows.size == 0:
             continue
         lo = int(table.cand_off[r0])
-        scores = train_counts(_candidate_keys(table, lo, int(table.cand_off[r1])))
+        scores = train_counts(_candidate_keys(table, r0, r1))
         pos = _positive_mask(table, r0, r1)
         starts = (table.cand_off[rows] - lo).astype(np.int64)
         n = np.asarray(table["cand_count"][rows], dtype=np.int64)
